@@ -1,0 +1,48 @@
+{
+  "scenario": "A partial refund (scenario-analysis.md #12)",
+  "original_expense": {
+    "id": "expense_grocery_partial_refund_001",
+    "description": "Zepto grocery order",
+    "amount_inr": 900.0,
+    "relationship_type": "household_shared_flat",
+    "allocation": {
+      "method": "equal",
+      "lines": [
+        { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 300.0 },
+        {
+          "beneficiary_type": "person",
+          "beneficiary_id": "person_flatmate_a",
+          "amount_inr": 300.0
+        },
+        { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_c", "amount_inr": 300.0 }
+      ]
+    }
+  },
+  "refund_payment": {
+    "id": "payment_grocery_partial_refund_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 150.0,
+    "direction": "credit",
+    "occurred_at": "2026-07-09T08:00:00Z",
+    "raw_description": "ZEPTO REFUND — DAMAGED ITEM",
+    "channel": "upi",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Zepto"
+  },
+  "refund_expense": {
+    "id": "expense_grocery_partial_refund_credit_001",
+    "description": "Refund — damaged item from Zepto order",
+    "amount_inr": 150.0,
+    "relationship_type": "household_shared_flat",
+    "refund_of_expense_id": "expense_grocery_partial_refund_001"
+  },
+  "new_allocation_after_refund": {
+    "method": "equal",
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 250.0 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_a", "amount_inr": 250.0 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_c", "amount_inr": 250.0 }
+    ],
+    "note": "A new Allocation version (750 total, per docs/domain/invariants.md #6) supersedes the original 900 one; the refund was allocated proportionally across all three by explicit decision, not by default. See docs/domain/scenario-analysis.md #12."
+  }
+}

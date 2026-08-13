@@ -1,0 +1,34 @@
+{
+  "scenario": "The same charge appearing twice across two import sources (scenario-analysis.md #13)",
+  "payments": [
+    {
+      "id": "payment_blinkit_dup_bank",
+      "import_batch_id": "batch_bank_statement_2026_07",
+      "account_id": "account_hdfc_savings",
+      "amount_inr": 1240.0,
+      "direction": "debit",
+      "occurred_at": "2026-07-12T19:00:00Z",
+      "raw_description": "UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD",
+      "channel": "bank_transfer",
+      "reference": "UPI/2607121234/BLINKIT"
+    },
+    {
+      "id": "payment_blinkit_dup_upi",
+      "import_batch_id": "batch_upi_2026_07",
+      "account_id": "account_hdfc_upi",
+      "amount_inr": 1240.0,
+      "direction": "debit",
+      "occurred_at": "2026-07-12T19:00:03Z",
+      "raw_description": "BLINKIT INDIA PVT LTD",
+      "channel": "upi",
+      "reference": "UPI/2607121234/BLINKIT"
+    }
+  ],
+  "expected_outcome": {
+    "payment_blinkit_dup_upi": {
+      "state": "ignored",
+      "ignored_reason": "duplicate_of:payment_blinkit_dup_bank"
+    },
+    "detection_basis": "Same account-linked UPI reference number, same amount, timestamps within seconds — deterministic dedup per docs/domain/invariants.md #10."
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "scenario": "A transfer between the user's own accounts — not an expense (scenario-analysis.md #14)",
+  "payments": [
+    {
+      "id": "payment_transfer_out_001",
+      "account_id": "account_hdfc_savings",
+      "amount_inr": 15000.0,
+      "direction": "debit",
+      "occurred_at": "2026-07-02T09:00:00Z",
+      "raw_description": "NEFT TRANSFER TO SELF A/C X4821",
+      "channel": "bank_transfer",
+      "counterparty_type": "internal_account",
+      "counterparty_id": "account_hdfc_upi"
+    },
+    {
+      "id": "payment_transfer_in_001",
+      "account_id": "account_hdfc_upi",
+      "amount_inr": 15000.0,
+      "direction": "credit",
+      "occurred_at": "2026-07-02T09:00:05Z",
+      "raw_description": "NEFT TRANSFER FROM SELF A/C X9013",
+      "channel": "bank_transfer",
+      "counterparty_type": "internal_account",
+      "counterparty_id": "account_hdfc_savings"
+    }
+  ],
+  "note": "Neither payment is ever linked to an Expense (docs/domain/invariants.md #7) and both are excluded from ledger_total_outflow's spend interpretation, though they do appear in ledger_transfers_total for ReconciliationRun."
+}

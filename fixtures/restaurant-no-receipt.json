@@ -1,0 +1,34 @@
+{
+  "scenario": "Restaurant bill with no receipt, manual explanation only (scenario-analysis.md #4)",
+  "payment": {
+    "id": "payment_restaurant_002",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 1450.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-09T13:15:00Z",
+    "raw_description": "UPI-CAFEROOTS-cafe@sbi",
+    "channel": "upi",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Cafe Roots"
+  },
+  "evidence": {
+    "id": "evidence_restaurant_002",
+    "type": "manual_note",
+    "storage_ref": null,
+    "raw_text": "Lunch with Flatmate A, no receipt kept. Split evenly.",
+    "captured_at": "2026-07-09T14:00:00Z"
+  },
+  "expense": {
+    "id": "expense_restaurant_002",
+    "description": "Lunch with Flatmate A",
+    "amount_inr": 1450.0,
+    "relationship_type": "shared"
+  },
+  "allocation": {
+    "method": "equal",
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 725.0 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_a", "amount_inr": 725.0 }
+    ]
+  }
+}

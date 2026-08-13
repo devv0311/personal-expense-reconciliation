@@ -1,0 +1,27 @@
+{
+  "scenario": "A payment with an unresolved counterparty (scenario-analysis.md #18)",
+  "payment": {
+    "id": "payment_unknown_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 220.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-13T13:00:00Z",
+    "raw_description": "UPI-9876543210-9876543210@ybl",
+    "channel": "upi",
+    "counterparty_type": "unknown"
+  },
+  "ai_inference": {
+    "inference_type": "normalize_merchant",
+    "proposed_output": null,
+    "confidence": "unknown",
+    "note": "Model declined to guess — raw UPI handle has no resolvable pattern."
+  },
+  "expense": {
+    "id": "expense_unknown_001",
+    "description": "Unclassified — pending user input",
+    "amount_inr": 220.0,
+    "relationship_type": "personal",
+    "state": "review_required"
+  },
+  "note": "Expense creation and classification do not block on merchant resolution completing — see docs/domain/domain-model.md, Merchant section."
+}

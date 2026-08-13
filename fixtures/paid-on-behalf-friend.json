@@ -1,0 +1,34 @@
+{
+  "scenario": "Payment made entirely on behalf of a friend (scenario-analysis.md #7)",
+  "payment": {
+    "id": "payment_on_behalf_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 1500.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-13T10:00:00Z",
+    "raw_description": "UPI-BOOKMYSHOW-bms@icici",
+    "channel": "upi",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "BookMyShow"
+  },
+  "evidence": {
+    "id": "evidence_on_behalf_001",
+    "type": "manual_note",
+    "storage_ref": null,
+    "raw_text": "Bought Friend B's concert ticket because their card didn't work. They'll pay me back in full.",
+    "captured_at": "2026-07-13T10:05:00Z"
+  },
+  "expense": {
+    "id": "expense_on_behalf_001",
+    "description": "Concert ticket for Friend B",
+    "amount_inr": 1500.0,
+    "relationship_type": "paid_on_behalf"
+  },
+  "allocation": {
+    "method": "exact",
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_friend_b", "amount_inr": 1500.0 }
+    ],
+    "note": "100% to Friend B, 0% to Dev — distinct from a 'shared' expense where the payer also benefits. See docs/domain/scenario-analysis.md #7."
+  }
+}

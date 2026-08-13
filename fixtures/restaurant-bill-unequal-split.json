@@ -1,0 +1,82 @@
+{
+  "scenario": "Restaurant bill for three people, unequal consumption (scenario-analysis.md #2, #3)",
+  "payment": {
+    "id": "payment_restaurant_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 2840.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-03T21:30:00Z",
+    "raw_description": "UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD",
+    "channel": "upi",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Sample Restaurant"
+  },
+  "evidence": {
+    "id": "evidence_restaurant_001",
+    "type": "receipt_image",
+    "storage_ref": "s3://evidence/synthetic/restaurant-001.jpg",
+    "captured_at": "2026-07-03T21:35:00Z"
+  },
+  "receipt": {
+    "id": "receipt_restaurant_001",
+    "evidence_id": "evidence_restaurant_001",
+    "merchant_hint": "Sample Restaurant",
+    "subtotal_inr": 2600.0,
+    "tax_inr": 240.0,
+    "total_inr": 2840.0,
+    "extraction_confidence": "high"
+  },
+  "receipt_items": [
+    {
+      "description": "Butter Chicken",
+      "quantity": 1,
+      "unit_price_inr": 480,
+      "line_total_inr": 480,
+      "consumed_by_hint": "person_dev"
+    },
+    {
+      "description": "Paneer Tikka",
+      "quantity": 1,
+      "unit_price_inr": 380,
+      "line_total_inr": 380,
+      "consumed_by_hint": "person_friend_a"
+    },
+    {
+      "description": "Biryani (large, shared)",
+      "quantity": 1,
+      "unit_price_inr": 620,
+      "line_total_inr": 620,
+      "consumed_by_hint": "shared"
+    },
+    {
+      "description": "Mocktails",
+      "quantity": 3,
+      "unit_price_inr": 220,
+      "line_total_inr": 660,
+      "consumed_by_hint": "shared"
+    },
+    {
+      "description": "Dessert",
+      "quantity": 2,
+      "unit_price_inr": 230,
+      "line_total_inr": 460,
+      "consumed_by_hint": "person_friend_b"
+    }
+  ],
+  "expense": {
+    "id": "expense_restaurant_001",
+    "description": "Friday dinner with Friend A and Friend B",
+    "amount_inr": 2840.0,
+    "relationship_type": "shared",
+    "occasion_hint": "group_friday_dinner"
+  },
+  "allocation": {
+    "method": "exact",
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 850.0 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_friend_a", "amount_inr": 850.0 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_friend_b", "amount_inr": 1140.0 }
+    ],
+    "note": "Amounts reflect the itemized split above (personal items + even share of shared items), rounded to whole rupees."
+  }
+}

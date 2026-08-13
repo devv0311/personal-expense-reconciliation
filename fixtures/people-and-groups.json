@@ -1,0 +1,94 @@
+{
+  "people": [
+    {
+      "id": "person_dev",
+      "display_name": "Dev",
+      "linked_user_id": "user_dev",
+      "notes": "The system's own user."
+    },
+    { "id": "person_flatmate_a", "display_name": "Flatmate A", "notes": "Current flatmate." },
+    {
+      "id": "person_flatmate_b",
+      "display_name": "Flatmate B",
+      "notes": "Moved out 2026-06-30 — see group_memberships."
+    },
+    { "id": "person_flatmate_c", "display_name": "Flatmate C", "notes": "Moved in 2026-07-01." },
+    { "id": "person_friend_a", "display_name": "Friend A" },
+    { "id": "person_friend_b", "display_name": "Friend B" }
+  ],
+  "groups": [
+    { "id": "group_flat", "name": "Flat", "type": "flat" },
+    { "id": "group_goa_trip", "name": "Goa Trip", "type": "trip" },
+    { "id": "group_friday_dinner", "name": "Friday Dinner Group", "type": "dinner_group" }
+  ],
+  "group_memberships": [
+    {
+      "group_id": "group_flat",
+      "person_id": "person_dev",
+      "joined_at": "2025-01-01T00:00:00Z",
+      "left_at": null
+    },
+    {
+      "group_id": "group_flat",
+      "person_id": "person_flatmate_a",
+      "joined_at": "2025-01-01T00:00:00Z",
+      "left_at": null
+    },
+    {
+      "group_id": "group_flat",
+      "person_id": "person_flatmate_b",
+      "joined_at": "2025-01-01T00:00:00Z",
+      "left_at": "2026-06-30T00:00:00Z"
+    },
+    {
+      "group_id": "group_flat",
+      "person_id": "person_flatmate_c",
+      "joined_at": "2026-07-01T00:00:00Z",
+      "left_at": null
+    },
+    {
+      "group_id": "group_goa_trip",
+      "person_id": "person_dev",
+      "joined_at": "2026-05-01T00:00:00Z",
+      "left_at": null
+    },
+    {
+      "group_id": "group_goa_trip",
+      "person_id": "person_friend_a",
+      "joined_at": "2026-05-01T00:00:00Z",
+      "left_at": null
+    },
+    {
+      "group_id": "group_goa_trip",
+      "person_id": "person_friend_b",
+      "joined_at": "2026-05-01T00:00:00Z",
+      "left_at": null
+    }
+  ],
+  "accounts": [
+    {
+      "id": "account_hdfc_savings",
+      "owner_person_id": "person_dev",
+      "name": "HDFC Savings",
+      "type": "bank",
+      "institution": "HDFC Bank",
+      "last4": "4821"
+    },
+    {
+      "id": "account_hdfc_upi",
+      "owner_person_id": "person_dev",
+      "name": "HDFC UPI",
+      "type": "upi",
+      "institution": "HDFC Bank"
+    },
+    {
+      "id": "account_icici_credit_card",
+      "owner_person_id": "person_dev",
+      "name": "ICICI Credit Card",
+      "type": "card",
+      "institution": "ICICI Bank",
+      "last4": "9013"
+    },
+    { "id": "account_cash_wallet", "owner_person_id": "person_dev", "name": "Cash", "type": "cash" }
+  ]
+}

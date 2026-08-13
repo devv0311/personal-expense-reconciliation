@@ -1,0 +1,29 @@
+{
+  "scenario": "Zepto order, household/flat expense (scenario-analysis.md #5)",
+  "payment": {
+    "id": "payment_zepto_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 610.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-06T18:40:00Z",
+    "raw_description": "UPI-ZEPTOMARKETPLACE-zepto@axl",
+    "channel": "upi",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Zepto"
+  },
+  "expense": {
+    "id": "expense_zepto_001",
+    "description": "Zepto — cleaning supplies + kitchen basics for the flat",
+    "amount_inr": 610.0,
+    "relationship_type": "household_shared_flat"
+  },
+  "allocation": {
+    "method": "equal",
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 203.34 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_a", "amount_inr": 203.33 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_c", "amount_inr": 203.33 }
+    ],
+    "note": "610 / 3 = 203.33..., remainder assigned to the payer per the rounding rule in docs/domain/invariants.md #12."
+  }
+}

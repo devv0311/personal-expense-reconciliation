@@ -1,0 +1,33 @@
+{
+  "scenario": "Electronics purchase partly for the user and partly for a friend (scenario-analysis.md #6)",
+  "payment": {
+    "id": "payment_electronics_001",
+    "account_id": "account_icici_credit_card",
+    "amount_inr": 8000.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-11T16:45:00Z",
+    "raw_description": "AMAZON PAY INDIA PVT LTD",
+    "channel": "card",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Amazon"
+  },
+  "evidence": {
+    "id": "evidence_electronics_001",
+    "type": "email_receipt",
+    "storage_ref": "s3://evidence/synthetic/amazon-order-001.html",
+    "captured_at": "2026-07-11T16:50:00Z"
+  },
+  "expense": {
+    "id": "expense_electronics_001",
+    "description": "Bluetooth speaker — shared purchase with Friend A, they use it half the time",
+    "amount_inr": 8000.0,
+    "relationship_type": "shared"
+  },
+  "allocation": {
+    "method": "exact",
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 4000.0 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_friend_a", "amount_inr": 4000.0 }
+    ]
+  }
+}

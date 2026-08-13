@@ -1,0 +1,27 @@
+{
+  "scenario": "A gift — no settlement expected (scenario-analysis.md #8)",
+  "payment": {
+    "id": "payment_gift_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 2000.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-14T12:00:00Z",
+    "raw_description": "UPI-FLIPKART-flipkart@axl",
+    "channel": "upi",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Flipkart"
+  },
+  "expense": {
+    "id": "expense_gift_001",
+    "description": "Birthday gift for Friend A",
+    "amount_inr": 2000.0,
+    "relationship_type": "gift"
+  },
+  "allocation": {
+    "method": "exact",
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_friend_a", "amount_inr": 2000.0 }
+    ]
+  },
+  "note": "Despite Friend A being the sole beneficiary line, this must NOT contribute to Balance — relationship_type = gift is excluded from settlement computation. See docs/domain/scenario-analysis.md, Findings summary #1."
+}

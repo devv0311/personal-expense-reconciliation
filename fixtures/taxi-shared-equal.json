@@ -1,0 +1,29 @@
+{
+  "scenario": "Taxi shared among three people, equal split (scenario-analysis.md #9)",
+  "payment": {
+    "id": "payment_cab_home_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 380.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-03T23:05:00Z",
+    "raw_description": "UPI-UBERINDIA-uber@yesb",
+    "channel": "upi",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Uber"
+  },
+  "expense": {
+    "id": "expense_cab_home_001",
+    "description": "Cab home after Friday dinner",
+    "amount_inr": 380.0,
+    "relationship_type": "shared",
+    "occasion_hint": "group_friday_dinner"
+  },
+  "allocation": {
+    "method": "equal",
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 126.67 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_friend_a", "amount_inr": 126.67 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_friend_b", "amount_inr": 126.66 }
+    ]
+  }
+}

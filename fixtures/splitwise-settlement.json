@@ -1,0 +1,29 @@
+{
+  "scenario": "A settlement payment via Splitwise (scenario-analysis.md #15)",
+  "context": "Dev owes Friend A ₹1500 net (from expense_electronics_partly_friend and other shared expenses). Dev settles up.",
+  "payment": {
+    "id": "payment_settlement_friend_a_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 1000.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-07T15:00:00Z",
+    "raw_description": "UPI-FRIENDA-TRANSFER",
+    "channel": "upi",
+    "counterparty_type": "person",
+    "counterparty_id": "person_friend_a"
+  },
+  "expense": {
+    "id": "expense_settlement_friend_a_001",
+    "description": "Partial settlement with Friend A",
+    "amount_inr": 1000.0,
+    "relationship_type": "settlement"
+  },
+  "splitwise_expense": {
+    "id": "splitwise_expense_settlement_001",
+    "expense_id": "expense_settlement_friend_a_001",
+    "splitwise_expense_id": "swx_998877",
+    "synced_at": "2026-07-07T15:10:00Z",
+    "sync_status": "synced"
+  },
+  "note": "This 1000 reduces Dev's balance with Friend A; it does NOT appear in ReconciliationRun.ledger_explained_total as new spend — see docs/domain/invariants.md #9."
+}

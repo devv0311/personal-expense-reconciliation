@@ -1,0 +1,30 @@
+{
+  "scenario": "Local shop purchase for the flat, no digital receipt (scenario-analysis.md #5, #19)",
+  "payment": {
+    "id": "payment_local_shop_001",
+    "account_id": "account_cash_wallet",
+    "amount_inr": 340.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-08T11:00:00Z",
+    "raw_description": "Manual entry — local kirana store",
+    "channel": "cash",
+    "counterparty_type": "unknown"
+  },
+  "evidence": {
+    "id": "evidence_local_shop_001",
+    "type": "manual_note",
+    "storage_ref": null,
+    "raw_text": "Bought spices and dish soap for the flat from the corner shop, paid cash, no bill.",
+    "captured_at": "2026-07-08T11:05:00Z"
+  },
+  "expense": {
+    "id": "expense_local_shop_001",
+    "description": "Kirana store — flat groceries (cash, no receipt)",
+    "amount_inr": 340.0,
+    "relationship_type": "household_shared_flat"
+  },
+  "allocation": {
+    "method": "equal",
+    "lines": [{ "beneficiary_type": "group", "beneficiary_id": "group_flat", "amount_inr": 340.0 }]
+  }
+}

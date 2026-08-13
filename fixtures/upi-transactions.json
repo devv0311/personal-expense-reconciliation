@@ -1,0 +1,54 @@
+{
+  "import_batch": {
+    "id": "batch_upi_2026_07",
+    "source_channel": "upi",
+    "file_reference": "fixtures/upi-transactions.json",
+    "imported_at": "2026-07-15T09:00:00Z"
+  },
+  "payments": [
+    {
+      "id": "payment_swiggy_001",
+      "account_id": "account_hdfc_upi",
+      "amount_inr": 385.0,
+      "direction": "debit",
+      "occurred_at": "2026-07-04T20:12:00Z",
+      "raw_description": "UPI-SWIGGY.IN-SWIGGY-swiggy@icici",
+      "channel": "upi",
+      "counterparty_type": "merchant",
+      "counterparty_hint": "Swiggy"
+    },
+    {
+      "id": "payment_zepto_001",
+      "account_id": "account_hdfc_upi",
+      "amount_inr": 610.0,
+      "direction": "debit",
+      "occurred_at": "2026-07-06T18:40:00Z",
+      "raw_description": "UPI-ZEPTOMARKETPLACE-zepto@axl",
+      "channel": "upi",
+      "counterparty_type": "merchant",
+      "counterparty_hint": "Zepto"
+    },
+    {
+      "id": "payment_cab_home_001",
+      "account_id": "account_hdfc_upi",
+      "amount_inr": 380.0,
+      "direction": "debit",
+      "occurred_at": "2026-07-03T23:05:00Z",
+      "raw_description": "UPI-UBERINDIA-uber@yesb",
+      "channel": "upi",
+      "counterparty_type": "merchant",
+      "counterparty_hint": "Uber"
+    },
+    {
+      "id": "payment_settlement_friend_a_001",
+      "account_id": "account_hdfc_upi",
+      "amount_inr": 1000.0,
+      "direction": "debit",
+      "occurred_at": "2026-07-07T15:00:00Z",
+      "raw_description": "UPI-FRIENDA-TRANSFER",
+      "channel": "upi",
+      "counterparty_type": "person",
+      "counterparty_hint": "person_friend_a"
+    }
+  ]
+}

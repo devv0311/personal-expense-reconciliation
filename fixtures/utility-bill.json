@@ -1,0 +1,28 @@
+{
+  "scenario": "A recurring utility bill split across the flat (scenario-analysis.md #16)",
+  "payment": {
+    "id": "payment_electricity_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 2100.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-10T08:00:00Z",
+    "raw_description": "ELECTRICITY BOARD BBPS BILLPAY",
+    "channel": "upi",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "State Electricity Board"
+  },
+  "expense": {
+    "id": "expense_electricity_001",
+    "description": "Electricity bill — July",
+    "amount_inr": 2100.0,
+    "relationship_type": "household_shared_flat"
+  },
+  "allocation": {
+    "method": "equal",
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 700.0 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_a", "amount_inr": 700.0 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_c", "amount_inr": 700.0 }
+    ]
+  }
+}

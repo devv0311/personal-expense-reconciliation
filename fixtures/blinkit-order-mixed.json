@@ -1,0 +1,96 @@
+{
+  "scenario": "Blinkit order with personal and flat items in one basket (scenario-analysis.md #1, #21)",
+  "payment": {
+    "id": "payment_blinkit_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 1240.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-01T19:20:00Z",
+    "raw_description": "UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD",
+    "channel": "upi",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Blinkit"
+  },
+  "evidence": {
+    "id": "evidence_blinkit_001",
+    "type": "email_receipt",
+    "storage_ref": "s3://evidence/synthetic/blinkit-order-001.html",
+    "captured_at": "2026-07-01T19:25:00Z"
+  },
+  "receipt": {
+    "id": "receipt_blinkit_001",
+    "evidence_id": "evidence_blinkit_001",
+    "merchant_hint": "Blinkit",
+    "subtotal_inr": 1190.0,
+    "tax_inr": 0,
+    "delivery_fee_inr": 50.0,
+    "total_inr": 1240.0,
+    "extraction_confidence": "high"
+  },
+  "receipt_items": [
+    {
+      "description": "Amul Milk 1L (x2)",
+      "quantity": 2,
+      "unit_price_inr": 40,
+      "line_total_inr": 80,
+      "belongs_to_hint": "group_flat"
+    },
+    {
+      "description": "Chicken Breast 500g",
+      "quantity": 1,
+      "unit_price_inr": 310,
+      "line_total_inr": 310,
+      "belongs_to_hint": "person_dev"
+    },
+    {
+      "description": "Shampoo 340ml",
+      "quantity": 1,
+      "unit_price_inr": 260,
+      "line_total_inr": 260,
+      "belongs_to_hint": "person_dev"
+    },
+    {
+      "description": "Dish Soap",
+      "quantity": 1,
+      "unit_price_inr": 140,
+      "line_total_inr": 140,
+      "belongs_to_hint": "group_flat"
+    },
+    {
+      "description": "Snacks (assorted)",
+      "quantity": 1,
+      "unit_price_inr": 400,
+      "line_total_inr": 400,
+      "belongs_to_hint": "person_dev"
+    }
+  ],
+  "expenses": [
+    {
+      "id": "expense_blinkit_001_flat",
+      "description": "Blinkit — flat groceries (milk, dish soap)",
+      "amount_inr": 220.0,
+      "relationship_type": "household_shared_flat",
+      "payment_expense_link_amount_inr": 220.0,
+      "allocation": {
+        "method": "equal",
+        "lines": [
+          { "beneficiary_type": "group", "beneficiary_id": "group_flat", "amount_inr": 220.0 }
+        ]
+      }
+    },
+    {
+      "id": "expense_blinkit_001_personal",
+      "description": "Blinkit — personal items (chicken, shampoo, snacks) + delivery fee",
+      "amount_inr": 1020.0,
+      "relationship_type": "personal",
+      "payment_expense_link_amount_inr": 1020.0,
+      "allocation": {
+        "method": "equal",
+        "lines": [
+          { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 1020.0 }
+        ]
+      }
+    }
+  ],
+  "note": "220.00 + 1020.00 = 1240.00, matching payment.amount_inr exactly — see PaymentExpenseLink invariant in docs/domain/invariants.md #5."
+}

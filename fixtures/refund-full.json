@@ -1,0 +1,39 @@
+{
+  "scenario": "A full refund against a prior expense (scenario-analysis.md #11)",
+  "original_payment": {
+    "id": "payment_electronics_faulty_001",
+    "account_id": "account_icici_credit_card",
+    "amount_inr": 450.0,
+    "direction": "debit",
+    "occurred_at": "2026-06-28T14:00:00Z",
+    "raw_description": "SAMPLE ELECTRONICS STORE",
+    "channel": "card",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Sample Electronics Store"
+  },
+  "original_expense": {
+    "id": "expense_electronics_faulty_001",
+    "description": "USB cable (faulty, later returned)",
+    "amount_inr": 450.0,
+    "relationship_type": "personal"
+  },
+  "refund_payment": {
+    "id": "payment_electronics_refund_001",
+    "account_id": "account_icici_credit_card",
+    "amount_inr": 450.0,
+    "direction": "credit",
+    "occurred_at": "2026-07-05T10:00:00Z",
+    "raw_description": "ACH REFUND SAMPLE ELECTRONICS STORE",
+    "channel": "card",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Sample Electronics Store"
+  },
+  "refund_expense": {
+    "id": "expense_electronics_refund_001",
+    "description": "Refund — faulty USB cable",
+    "amount_inr": 450.0,
+    "relationship_type": "personal",
+    "refund_of_expense_id": "expense_electronics_faulty_001"
+  },
+  "note": "Net effect on Dev's personal spend for this purchase is 0 — the original 450 expense and the 450 refund are both kept as distinct, evidenced records rather than deleting/editing the original. See docs/domain/invariants.md #4, #8."
+}

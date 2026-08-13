@@ -1,0 +1,24 @@
+{
+  "scenario": "A manually entered cash payment (scenario-analysis.md #17)",
+  "payment": {
+    "id": "payment_cash_001",
+    "account_id": "account_cash_wallet",
+    "amount_inr": 150.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-11T08:30:00Z",
+    "raw_description": "Manual entry — auto-rickshaw fare",
+    "channel": "cash",
+    "counterparty_type": "unknown",
+    "import_batch_id": null
+  },
+  "expense": {
+    "id": "expense_cash_001",
+    "description": "Auto-rickshaw to work",
+    "amount_inr": 150.0,
+    "relationship_type": "personal"
+  },
+  "allocation": {
+    "method": "equal",
+    "lines": [{ "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 150.0 }]
+  }
+}

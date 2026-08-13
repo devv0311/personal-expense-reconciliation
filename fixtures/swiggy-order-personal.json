@@ -1,0 +1,29 @@
+{
+  "scenario": "Swiggy order, straightforward personal expense — high-confidence, minimal review",
+  "payment": {
+    "id": "payment_swiggy_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 385.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-04T20:12:00Z",
+    "raw_description": "UPI-SWIGGY.IN-SWIGGY-swiggy@icici",
+    "channel": "upi",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Swiggy"
+  },
+  "ai_inference": {
+    "inference_type": "classify_transaction",
+    "proposed_output": { "relationship_type": "personal", "category": "food_delivery" },
+    "confidence": "high"
+  },
+  "expense": {
+    "id": "expense_swiggy_001",
+    "description": "Swiggy order",
+    "amount_inr": 385.0,
+    "relationship_type": "personal"
+  },
+  "allocation": {
+    "method": "equal",
+    "lines": [{ "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 385.0 }]
+  }
+}

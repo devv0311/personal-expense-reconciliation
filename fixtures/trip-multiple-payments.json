@@ -1,0 +1,86 @@
+{
+  "scenario": "A trip occasion spanning several payments (scenario-analysis.md #10, #22)",
+  "occasion": {
+    "id": "occasion_goa_trip",
+    "name": "Goa Trip",
+    "occurred_start": "2026-05-15",
+    "occurred_end": "2026-05-18",
+    "default_participants": [
+      { "type": "person", "id": "person_dev" },
+      { "type": "person", "id": "person_friend_a" },
+      { "type": "person", "id": "person_friend_b" }
+    ]
+  },
+  "expenses": [
+    {
+      "id": "expense_goa_flight",
+      "description": "Dev's flight to Goa",
+      "amount_inr": 4200.0,
+      "relationship_type": "personal",
+      "occurred_at": "2026-05-14T00:00:00Z",
+      "allocation": {
+        "method": "equal",
+        "lines": [
+          { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 4200.0 }
+        ]
+      }
+    },
+    {
+      "id": "expense_goa_hotel",
+      "description": "Hotel — 3 nights, booked and paid by Dev",
+      "amount_inr": 9000.0,
+      "relationship_type": "shared",
+      "occurred_at": "2026-05-15T00:00:00Z",
+      "allocation": {
+        "method": "equal",
+        "lines": [
+          { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 3000.0 },
+          {
+            "beneficiary_type": "person",
+            "beneficiary_id": "person_friend_a",
+            "amount_inr": 3000.0
+          },
+          {
+            "beneficiary_type": "person",
+            "beneficiary_id": "person_friend_b",
+            "amount_inr": 3000.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "expense_goa_dinner_day1",
+      "description": "Dinner, day 1",
+      "amount_inr": 2100.0,
+      "relationship_type": "shared",
+      "occurred_at": "2026-05-15T21:00:00Z",
+      "allocation": {
+        "method": "equal",
+        "lines": [
+          { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 700.0 },
+          {
+            "beneficiary_type": "person",
+            "beneficiary_id": "person_friend_a",
+            "amount_inr": 700.0
+          },
+          { "beneficiary_type": "person", "beneficiary_id": "person_friend_b", "amount_inr": 700.0 }
+        ]
+      }
+    },
+    {
+      "id": "expense_goa_scooter_rental",
+      "description": "Scooter rental, days 2-3",
+      "amount_inr": 1800.0,
+      "relationship_type": "shared",
+      "occurred_at": "2026-05-16T09:00:00Z",
+      "allocation": {
+        "method": "equal",
+        "lines": [
+          { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 900.0 },
+          { "beneficiary_type": "person", "beneficiary_id": "person_friend_a", "amount_inr": 900.0 }
+        ]
+      }
+    }
+  ],
+  "note": "All four expenses share occasion_id = occasion_goa_trip. Not every occasion expense includes every default participant (see expense_goa_scooter_rental) — default_participants is a suggestion default, not an enforced set."
+}

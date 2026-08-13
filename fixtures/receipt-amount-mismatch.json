@@ -1,0 +1,29 @@
+{
+  "scenario": "Receipt total differs from the linked payment amount (scenario-analysis.md #20)",
+  "payment": {
+    "id": "payment_restaurant_mismatch_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 2850.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-16T20:00:00Z",
+    "raw_description": "UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD",
+    "channel": "upi",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Sample Restaurant"
+  },
+  "receipt": {
+    "id": "receipt_mismatch_001",
+    "evidence_id": "evidence_mismatch_001",
+    "subtotal_inr": 2500.0,
+    "tax_inr": 200.0,
+    "total_inr": 2700.0,
+    "extraction_confidence": "high"
+  },
+  "discrepancy": {
+    "receipt_total_inr": 2700.0,
+    "payment_amount_inr": 2850.0,
+    "difference_inr": 150.0,
+    "likely_explanation": "Tip added at the table, not reflected on the printed receipt.",
+    "resolution": "Expense.amount is set to payment.amount_inr (2850) — the payment is the source of truth for money actually moved (docs/domain/invariants.md #4). The Receipt record is kept as-is (2700) as evidence of the itemization; the difference is not silently reconciled."
+  }
+}
