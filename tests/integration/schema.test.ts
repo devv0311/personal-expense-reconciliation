@@ -12,7 +12,9 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
-  await database.close();
+  // Guarded: when beforeAll fails, `database` was never assigned, and an unguarded
+  // call here reports a TypeError that buries the real setup error.
+  await database?.close();
 });
 
 beforeEach(async () => {

@@ -31,6 +31,19 @@ Run the same suite against two PostgreSQL implementations, selected by environme
 `tests/support/database.ts` owns the selection; no test knows which engine it is running
 against. CI runs the suite **both** ways, so the fallback path cannot silently break.
 
+**Each test file gets its own database.** Vitest runs test files in parallel. PGlite makes that
+safe for free — `new PGlite()` is a separate in-process engine per file — but a single shared
+server does not, and the first CI run against one proved it: the files raced each other running
+`CREATE TABLE` (`duplicate key value violates unique constraint "pg_type_typname_nsp_index"`)
+and then truncated each other's rows mid-test. The harness now creates a uniquely-named
+database per file on the server and drops it on teardown, so the server behaves the way PGlite
+already did and the claim above — that no test knows which engine it is on — is actually true.
+
+This means `TEST_DATABASE_URL` must point at a role permitted to `CREATE DATABASE`, and the
+server's `postgres` maintenance database must be reachable. That is true of the standard
+`postgres:16` image CI uses and of a normal local install; it is worth knowing before pointing
+the variable at a managed instance with a restricted role.
+
 Both drivers are configured so `bigint` columns arrive as JavaScript `bigint`. `node-postgres`
 already returns `int8` as a string; PGlite returns a `number` by default and is given an
 explicit `int8` parser, without which a paise amount above 2^53 would come back subtly wrong
