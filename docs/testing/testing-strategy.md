@@ -48,10 +48,13 @@ produces byte-identical output (determinism):
 2. **Equal split, remainder of 1.** ₹1,000 ÷ 3 → 334/333/333 (paise: 100000 ÷ 3). Asserts the
    extra paisa lands on the line whose `beneficiary_id` sorts first lexicographically among the
    three, per the tie-break rule — not on the payer specifically, not on the first-created line.
-3. **Equal split, remainder equal to N−1.** ₹0.05 short of an even 7-way split (a total not
-   divisible by 7 at all, e.g. ₹100 ÷ 7 = 1428.57... paise) → verifies 6 of 7 lines get the extra
-   paisa and exactly one does not, and that the one without it is the correct tie-break loser
-   (last lexicographically), not an arbitrary one.
+3. **Equal split, remainder equal to N−1.** A total whose remainder against 7 lines is exactly
+   6 — e.g. ₹100.02 (10002 paise = 7 × 1428 + 6) → verifies 6 of 7 lines get the extra paisa and
+   exactly one does not, and that the one without it is the correct tie-break loser (last
+   lexicographically), not an arbitrary one.
+   _(Corrected during implementation: this case previously cited ₹100 ÷ 7, which leaves a
+   remainder of 4, not the N−1 = 6 the case name requires. Both totals are now covered — the
+   original figure as its own case, and a true N−1 case for the property being asserted.)_
 4. **Percentage split with rounding.** ₹1,000 split 33%/33%/34% by stated percentage → verifies
    `AllocationLine.amount` is computed once from the integer percentage numerators (not
    re-derived from `percentage` later) and sums to exactly 100000 paise, with `percentage`
@@ -150,6 +153,18 @@ Actual AI proposal quality is evaluated separately, out of CI, once `src/ai` is 
 
 ## Current status
 
-Only the scaffold-proving test (`tests/scaffold.test.ts`) exists today — no domain logic has
-been implemented yet (`docs/roadmap.md`). This document defines the bar the first real
-domain-logic PR must clear.
+The deterministic foundation phase has landed, and this document's bar is met for everything
+it covers:
+
+- **`src/domain` unit tests** — colocated with each module. The full 14-case rounding matrix is
+  covered, with each case tagged by its number so the mapping is greppable; cases 4–6 live in
+  `allocation.test.ts` / `allocation.rounding-boundary.test.ts`, 7–8 in
+  `group-expansion.test.ts`, 9–13 in `adjustment.test.ts`, and 1–3, 10, 14 in `rounding.test.ts`.
+- **Integration tests against a real PostgreSQL engine** — `tests/integration/`, covering the
+  migration, constraints, foreign keys, uniqueness, monetary types, approval transitions,
+  transactionality and the audit trail. See ADR-0017 for how the database is provided.
+- **End-to-end scenario tests** — `tests/scenarios/`, covering the 22 required ledger scenarios,
+  each asserting the resulting financial state rather than that rows could be inserted.
+
+Not yet covered, because the layers do not exist yet: `src/ai` contract tests,
+`src/integrations` adapter tests, and `src/api` route tests (`docs/roadmap.md` phases 8, 14).

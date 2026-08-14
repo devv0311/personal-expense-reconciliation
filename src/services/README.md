@@ -16,4 +16,21 @@ authoritative state).
 **Depends on:** `src/domain`, `src/db`. Calls into `src/ai` and `src/integrations` but never
 lets their output write authoritative state directly — see `docs/architecture/data-flow.md`.
 
-Not yet implemented — see `docs/roadmap.md`.
+**Partly implemented.** Landed in the deterministic-foundation phase:
+
+- `audit.ts` — `runAudited()`, which opens the transaction, hands the body the only executor in
+  scope, and **refuses to commit a mutation that recorded no `AuditEvent`**. This is the
+  structural half of invariant #21: forgetting the audit event fails the operation rather than
+  quietly producing unaudited financial state.
+- `expense-service.ts` — gated lifecycle transitions, including the corrected `READY_TO_SYNC`
+  gate that keeps a `gift` out; and `assertAmountChangeAllowed`, which exists so that a caller
+  attempting to change an approved amount gets pointed at `ExpenseAdjustment` rather than
+  finding a missing function and adding one.
+- `allocation-service.ts` — `approveAllocation`, including group-line expansion.
+- `settlement-service.ts` — `recordSettlement`. Imports nothing that could create an
+  `Allocation` (invariant #9a).
+- `adjustment-service.ts` — `recordExpenseAdjustment` and `distributeAdjustment`.
+- `balance-service.ts` — `getBalance` and `runReconciliation`, both read-then-compute.
+
+Not yet implemented: import, normalization, classification, review-queue, `decideInference`,
+and Splitwise sync orchestration — see `docs/roadmap.md` phases 6–11 and 14.

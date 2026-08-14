@@ -39,3 +39,6 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0013](0013-full-refund-preserves-allocation-shape.md)       | Full refund's current allocation keeps zero-amount lines, not an empty set | Accepted                                                     |
 | [0014](0014-obligation-evidence-status.md)                   | Non-user settlement observability — `ObligationEvidenceStatus`             | Accepted                                                     |
 | [0015](0015-inflow-reconciliation-out-of-scope-v1.md)        | Inflow/income reconciliation explicitly out of scope for V1                | Accepted                                                     |
+| [0016](0016-reconciliation-outflow-scoping.md)               | `ledger_explained_total`/`ledger_settlements_total` scoped to outflow      | **Proposed** — raised by the Phase 1 implementation          |
+| [0017](0017-integration-test-database.md)                    | Integration tests: real Postgres in CI, PGlite locally                     | Accepted                                                     |
+| [0018](0018-manual-note-signal-ambiguity.md)                 | `manual_note` cannot distinguish documentation from a settlement claim     | **Proposed** — reports a contradiction, does not resolve it  |

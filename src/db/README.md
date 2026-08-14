@@ -12,5 +12,19 @@ design this will implement.
 `import_batches`) is ever issued from here — see `docs/domain/invariants.md` #4 and
 `docs/architecture/database-design.md`'s immutability conventions.
 
-Not yet implemented — no migrations exist yet by design (`docs/roadmap.md`: schema is a
-reviewed design doc first, phase 6 is where migrations start).
+**Implemented.**
+
+- `schema.ts` — all 28 tables from `database-design.md`, with their check constraints, foreign
+  keys, partial unique indexes and `bigint` monetary columns. Enum check-constraint values come
+  from `src/domain/enums.ts`, so the schema and the domain cannot drift.
+- `client.ts` — `openDatabase()`, over `node-postgres` or PGlite (ADR-0017). Both are
+  configured so `bigint` columns arrive as JavaScript `bigint`, never `number`.
+- `repositories.ts` — data access. No financial arithmetic lives here.
+- `drizzle/0000_initial_financial_schema.sql` — the generated, checked-in migration.
+  Regenerate with `npm run db:generate`; `npm run db:check` verifies it still matches.
+
+**Immutability.** There is no update path here for `payments.amount/occurred_at/
+raw_description/account_id`, `evidence.storage_ref/raw_text/captured_at`, `expenses.amount`, or
+any `audit_events` row. `drizzle/security/immutable-table-grants.sql` applies the same
+restriction at the database-role level as defence in depth; it is deployment-specific and so is
+not part of the migration sequence.
