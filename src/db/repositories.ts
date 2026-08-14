@@ -18,6 +18,8 @@ import type {
   AiInferenceStatus,
   AuditAction,
   AuditableEntityType,
+  EvidenceNoteKind,
+  EvidenceType,
   ExpenseState,
   PaymentState,
 } from '../domain/enums.js';
@@ -34,6 +36,7 @@ import type {
 } from '../domain/ids.js';
 import type { Paise } from '../domain/money.js';
 import { netAmount } from '../domain/expense.js';
+import { SETTLEMENT_CLAIM_NOTE_KIND, claimsSettlement } from '../domain/evidence.js';
 import type { BalanceAllocationLine, BalanceExpense, BalanceInput } from '../domain/balance.js';
 import type { GroupMembership } from '../domain/entities.js';
 import type { ReconciliationTotals } from '../domain/reconciliation.js';
@@ -654,18 +657,40 @@ export async function listExpenseItems(
 }
 
 /**
- * Expenses named by a `manual_note` `Evidence` row.
+ * Expenses carrying a **settlement-claim** manual note.
  *
  * One of the two signals behind `domain.obligationEvidenceStatus` — a human's recorded
  * belief that a debt was cleared some other way. Read-only, and never a substitute for a
  * real `Settlement` (ADR-0014, `invariants.md` #9b).
+ *
+ * Filters on `note_kind`, not on `type` alone. Matching every manual note would sweep up the
+ * documenting note that ADR-0006 gives every externally-funded expense, and report those
+ * obligations as believed-settled the moment they were recorded (ADR-0018).
  */
-export async function listManualNoteExpenseIds(exec: Executor): Promise<ExpenseId[]> {
+export async function listSettlementClaimExpenseIds(exec: Executor): Promise<ExpenseId[]> {
   const rows = await exec
-    .select({ linkedExpenseId: evidence.linkedExpenseId })
+    .select({
+      type: evidence.type,
+      noteKind: evidence.noteKind,
+      linkedExpenseId: evidence.linkedExpenseId,
+    })
     .from(evidence)
-    .where(and(eq(evidence.type, 'manual_note'), sql`${evidence.linkedExpenseId} is not null`));
+    // The WHERE clause narrows so the partial index can serve the query; `claimsSettlement`
+    // below is what actually decides. Keeping the decision in `domain` means the SQL can
+    // only ever be an optimisation, never a second, drifting copy of the rule.
+    .where(
+      and(
+        eq(evidence.noteKind, SETTLEMENT_CLAIM_NOTE_KIND),
+        sql`${evidence.linkedExpenseId} is not null`,
+      ),
+    );
   return rows
+    .filter((row) =>
+      claimsSettlement({
+        type: row.type as EvidenceType,
+        noteKind: row.noteKind as EvidenceNoteKind | null,
+      }),
+    )
     .map((row) => row.linkedExpenseId)
     .filter((value): value is string => value !== null) as ExpenseId[];
 }

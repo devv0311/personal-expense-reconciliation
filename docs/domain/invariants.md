@@ -127,8 +127,11 @@ continue to function correctly with this boundary in place — none of them may 
 real-world settlement is observable, none may throw or silently zero out `NetBalance` when
 one isn't, and none may substitute a synthetic `Payment`/`Settlement` for a transaction this
 ledger never actually saw. Where a human wants to record their _belief_ that such a debt was
-cleared, that belief is captured as an ordinary `Evidence` row (`type = manual_note`,
-`linked_expense_id` set) or surfaces via a `ReconciliationRun` discrepancy against Splitwise
+cleared, that belief is captured as an `Evidence` row (`type = manual_note`,
+**`note_kind = 'settlement_claim'`** — the discriminator added per ADR-0018, without which this
+was indistinguishable from the documenting note ADR-0006 gives every externally-funded expense,
+and every such obligation reported itself believed-settled on creation),
+`linked_expense_id` set — or surfaces via a `ReconciliationRun` discrepancy against Splitwise
 — both read-only signals, computed into `domain.obligationEvidenceStatus(X, Y)` (`open,
     unconfirmed | believed_settled, unconfirmed_by_ledger | settled, confirmed`) for display —
 never a mutation of `NetBalance` itself, and never treated as equivalent to a real
@@ -324,6 +327,36 @@ ledger_investments_total − ledger_settlements_total − ledger_explained_total
     when non-zero (especially when non-zero). This formula is scoped to outflow; a symmetric
     inflow-side "was every credit explained" reconciliation is not yet modeled — see
     `domain-model.md`'s `ReconciliationRun` section.
+
+    **What "scoped to outflow" means for each term (made explicit per ADR-0016 — this was
+    previously stated once, in prose, and then not restated in the term definitions, which
+    made two of them read as broader than the formula can support):**
+
+    - `ledger_total_outflow` sums `debit` payments only, and **excludes payments in state
+      `ignored`** — a confirmed duplicate is not more money (invariant #10).
+    - `ledger_explained_total` means **explained _outflow_**, not "explained expenses". It sums
+      `domain.netAmount(expense)` over `APPROVED`+ expenses **that the user funded** — those
+      whose `paid_by_person_id` is the user's `Person`. An **externally-funded** expense
+      (ADR-0006 — a flatmate or friend fronted the money, so there is no `PaymentExpenseLink`
+      and no debit through any `Account` the user owns) contributes **0**. It is a fully
+      explained expense in every other sense — visible in `Balance`, in obligation queries and
+      in its own `Expense`/`Allocation` rows — it simply explains none of _this_ ledger's
+      outflow, because none occurred. Counting it would subtract money from a total it never
+      entered, driving `ledger_unexplained_total` negative by construction the moment such an
+      expense exists (`scenario-analysis.md` §26: a ₹3,000 electrician bill a flatmate paid
+      would report −₹3,000 of "unexplained" money).
+    - `ledger_settlements_total` counts settlements carried by a **`debit`** payment only. A
+      settlement the user _received_ (§29) rides a `credit` payment, never entered
+      `ledger_total_outflow`, and so is not subtracted from it. Both directions are equally
+      "not new spend" (invariant #9) — the direction decides only which one participates in
+      _this_ subtraction. A period total of received settlements is an inflow-side figure and
+      is out of scope for V1 (ADR-0015).
+
+    `ledger_unexplained_total` is stored **whatever it comes to, including negative**. A
+    negative figure means the ledger has over-explained its own outflow — a double-linked
+    payment, a mis-scoped period — and is an integrity signal worth surfacing, not an error to
+    clamp away. `reconciliation_runs` carries this identity as a row-level `CHECK`, so an
+    inconsistent snapshot cannot persist.
 
 ## Auditability
 

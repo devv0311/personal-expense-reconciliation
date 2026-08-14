@@ -289,6 +289,9 @@ receipt-type evidence.
 
 **Key fields.** `id`, `type`
 (`bank_line | upi_notification | receipt_image | screenshot | email_receipt | manual_note`),
+`note_kind` (`documentation | settlement_claim`, ADR-0018 — required on a `manual_note`,
+forbidden on every other type; it is what keeps "this documents the expense" and "this claims
+the debt was cleared" from being the same row),
 `storage_ref` (nullable — manual notes have no file), `raw_text` (OCR/extracted text if
 applicable), `captured_at`, `linked_payment_id` (nullable), `linked_expense_id` (nullable).
 
@@ -769,8 +772,9 @@ data already in this model, no fabricated `Payment`/`Settlement` involved:
   definition, or it wouldn't still be positive), and no other evidence exists either. The
   default, most common state.
 - **`believed_settled, unconfirmed_by_ledger`** — `NetBalance(X, Y) > 0`, but a manual `Evidence`
-  row (`type = manual_note`) referencing one of the contributing `Expense`s (via
-  `Evidence.linked_expense_id`) was recorded claiming the debt was cleared some other way, **or**
+  row (`type = manual_note`, **`note_kind = 'settlement_claim'`** — ADR-0018) referencing one of
+  the contributing `Expense`s (via `Evidence.linked_expense_id`) was recorded claiming the debt
+  was cleared some other way, **or**
   the most recent `ReconciliationRun.discrepancies` for this pair shows Splitwise reporting a
   lower or zero balance than this ledger does. Either signal is purely informational — neither
   one changes `NetBalance` itself, which keeps showing the ledger-derived figure until a human
@@ -846,8 +850,11 @@ as history (not just a live query) so past discrepancies and their resolutions a
 
 **Key fields.** `id`, `run_at`, `period_start`, `period_end`, `ledger_total_outflow`,
 `ledger_transfers_total`, `ledger_investments_total` (added per ADR-0011),
-`ledger_settlements_total` (added per ADR-0007), `ledger_explained_total` (now sums
-`domain.netAmount(expense)` per expense, not gross `Expense.amount` — see ADR-0008),
+`ledger_settlements_total` (added per ADR-0007; **`debit`-carried settlements only** — a
+received settlement is a credit and never entered outflow, ADR-0016), `ledger_explained_total` (sums
+`domain.netAmount(expense)` per expense, not gross `Expense.amount` — see ADR-0008; **self-funded
+expenses only**, since an externally-funded expense explains none of this ledger's outflow,
+ADR-0016),
 `ledger_unexplained_total`, `splitwise_balances_snapshot` (JSON), `discrepancies` (JSON list),
 `resolved_at` (nullable).
 

@@ -3,6 +3,7 @@
   "evidence": {
     "id": "evidence_electrician_001",
     "type": "manual_note",
+    "note_kind": "documentation",
     "storage_ref": null,
     "raw_text": "Flatmate A: 'paid the electrician, 3000, let's split it three ways as usual'",
     "captured_at": "2026-07-16T19:00:00Z"

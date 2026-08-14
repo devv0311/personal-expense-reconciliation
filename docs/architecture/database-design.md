@@ -139,6 +139,14 @@ different import channels, e.g. a bank CSV vs. a UPI export of the same UPI paym
 `linked_expense_id uuid` (nullable, FK added once `expenses` is defined below). This is the
 **only** place Payment/Expense linkage lives for `Evidence` and, transitively, for `Receipt` —
 see `receipts` below.
+`note_kind text` (nullable, check (`note_kind in ('documentation','settlement_claim')`) —
+**added, ADR-0018**): what a manual note asserts. A second check,
+`(type = 'manual_note') = (note_kind is not null)`, requires it on manual notes and forbids it
+everywhere else. Without it, documenting an externally-funded expense (ADR-0006) and claiming a
+debt was cleared (ADR-0014) are the same row, and the second reading fires on every instance of
+the first.
+Index: `(linked_expense_id)` partial where `note_kind = 'settlement_claim'` — the balance query
+reads only those.
 
 ### receipts — DERIVED
 

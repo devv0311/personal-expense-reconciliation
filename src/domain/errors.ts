@@ -47,6 +47,8 @@ export type DomainErrorCode =
   | 'INVALID_STATE_TRANSITION'
   /** A write was attempted against an immutable field (`invariants.md` #4, #6). */
   | 'IMMUTABLE_FIELD'
+  /** A manual note had no kind, or a non-note claimed one (ADR-0018). */
+  | 'EVIDENCE_NOTE_KIND_INVALID'
   /** A referenced entity was absent from the input set handed to a pure function. */
   | 'UNKNOWN_REFERENCE';
 

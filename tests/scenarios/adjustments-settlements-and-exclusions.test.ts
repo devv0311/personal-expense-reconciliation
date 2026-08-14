@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   assertPaymentCanFundExpense,
+  computeUnexplained,
   isDeterministicDuplicate,
   isPossibleDuplicate,
   isPaymentTerminalWithoutLinking,
@@ -766,8 +767,16 @@ describe('Scenario 18 — the same charge captured by two channels (§13, ADR-00
 
 /* ============================================== the ambiguous manual-note signal */
 
-describe('the "believed settled" signal is opt-in, not inferred', () => {
-  async function seedExternallyFundedWithNote(): Promise<ExpenseId> {
+describe('ADR-0018 — a documenting note can never make an obligation look settled', () => {
+  /**
+   * The regression this ADR exists for. ADR-0006 gives every externally-funded expense a
+   * manual note as its only evidence; ADR-0014 reads a settlement-claim note on a
+   * contributing expense as "believed settled". Before `note_kind` those were the same row,
+   * so recording the expense at all reported its obligation as believed-settled.
+   */
+  async function seedExternallyFunded(
+    noteKind: 'documentation' | 'settlement_claim',
+  ): Promise<ExpenseId> {
     const expense = await addExpense(database.db, {
       description: 'Electrician, fronted by Flatmate A',
       amount: paise(300000n),
@@ -776,7 +785,11 @@ describe('the "believed settled" signal is opt-in, not inferred', () => {
       paidByPersonId: cast.person['person_flatmate_a']!,
     });
     await addManualNote(database.db, {
-      text: 'Flatmate A: paid the electrician, ₹3,000, split three ways',
+      text:
+        noteKind === 'documentation'
+          ? 'Flatmate A: paid the electrician, ₹3,000, split three ways'
+          : 'Flatmate C says they repaid Flatmate A in cash',
+      noteKind,
       capturedAt: new Date('2026-07-05T10:00:00Z'),
       expenseId: expense,
     });
@@ -796,11 +809,8 @@ describe('the "believed settled" signal is opt-in, not inferred', () => {
     return expense;
   }
 
-  it('does not read an expense-documenting note as a claim the debt was cleared', async () => {
-    // ADR-0006 gives an externally-funded expense a manual_note as its *only* evidence;
-    // ADR-0014 reads a manual_note on a contributing expense as "believed settled". Nothing
-    // in the schema tells the two apart, so the service refuses to guess.
-    await seedExternallyFundedWithNote();
+  it('reports an open obligation as open when the note merely documents the expense', async () => {
+    await seedExternallyFunded('documentation');
     const result = await getBalance(
       database.db,
       cast.userPersonId,
@@ -812,19 +822,68 @@ describe('the "believed settled" signal is opt-in, not inferred', () => {
     expect(result.netBalance).toBe(100000n);
   });
 
-  it('reports believed-settled only when a human explicitly nominates the note', async () => {
-    const expense = await seedExternallyFundedWithNote();
+  it('reports believed-settled only when the note actually claims settlement', async () => {
+    await seedExternallyFunded('settlement_claim');
     const result = await getBalance(
       database.db,
       cast.userPersonId,
       cast.person['person_flatmate_c']!,
       cast.person['person_flatmate_a']!,
-      { believedSettledExpenseIds: [expense] },
     );
 
     expect(result.evidenceStatus).toBe('believed_settled_unconfirmed_by_ledger');
-    // ...and the ledger's own figure is unchanged by the belief (invariant #9b).
+  });
+
+  it('never lets the belief move the ledger\u2019s own figure (invariant #9b)', async () => {
+    await seedExternallyFunded('settlement_claim');
+    const result = await getBalance(
+      database.db,
+      cast.userPersonId,
+      cast.person['person_flatmate_c']!,
+      cast.person['person_flatmate_a']!,
+    );
+
+    // "Believed settled" is an annotation. NetBalance keeps showing what the ledger observed
+    // until a real Settlement backed by a real Payment says otherwise.
     expect(result.netBalance).toBe(100000n);
+  });
+
+  it('does not fabricate a Settlement or a Payment to represent the belief', async () => {
+    await seedExternallyFunded('settlement_claim');
+
+    const settlementRows = await database.db
+      .select({ id: schema.settlements.id })
+      .from(schema.settlements);
+    const paymentRows = await database.db.select({ id: schema.payments.id }).from(schema.payments);
+
+    expect(settlementRows).toEqual([]);
+    expect(paymentRows).toEqual([]);
+  });
+
+  it('ignores a settlement-claim note attached to an unrelated expense', async () => {
+    await seedExternallyFunded('documentation');
+    const unrelated = await addExpense(database.db, {
+      description: 'Something else entirely',
+      amount: paise(50000n),
+      occurredAt: new Date('2026-07-06T10:00:00Z'),
+      relationshipType: 'personal',
+      paidByPersonId: cast.userPersonId,
+    });
+    await addManualNote(database.db, {
+      text: 'Unrelated claim',
+      noteKind: 'settlement_claim',
+      capturedAt: new Date('2026-07-06T10:00:00Z'),
+      expenseId: unrelated,
+    });
+
+    const result = await getBalance(
+      database.db,
+      cast.userPersonId,
+      cast.person['person_flatmate_c']!,
+      cast.person['person_flatmate_a']!,
+    );
+
+    expect(result.evidenceStatus).toBe('open_unconfirmed');
   });
 });
 
@@ -916,5 +975,202 @@ describe('adjustments and settlements are audited like any other approved change
     const expenses = await database.db.select({ id: schema.expenses.id }).from(schema.expenses);
 
     expect(expenses).toEqual([]);
+  });
+});
+
+/* ============================================ ADR-0016: the full outflow identity */
+
+describe('ADR-0016 — every reconciliation term, in one period, end to end', () => {
+  /**
+   * The six categories invariant #20 has to keep apart, all present at once, driven through
+   * the real services and a real database rather than asserted against a hand-built input.
+   * If any term's scope is wrong, this is where the identity stops balancing.
+   */
+  async function seedEveryCategory(): Promise<void> {
+    // 1. A self-funded expense — the only kind that explains the user's own outflow.
+    const selfFunded = await addExpense(database.db, {
+      description: 'Groceries the user paid for',
+      amount: paise(90000n),
+      occurredAt: new Date('2026-07-03T10:00:00Z'),
+      relationshipType: 'household_shared_flat',
+      paidByPersonId: cast.userPersonId,
+    });
+    const selfFundedPayment = await addPayment(database.db, cast, {
+      accountId: cast.account['account_hdfc_upi']!,
+      amount: paise(90000n),
+      direction: 'debit',
+      occurredAt: new Date('2026-07-03T10:00:00Z'),
+      rawDescription: 'UPI-ZEPTO',
+      channel: 'upi',
+      counterpartyType: 'merchant',
+    });
+    await linkPaymentToExpense(database.db, {
+      paymentId: selfFundedPayment,
+      expenseId: selfFunded,
+      amount: paise(90000n),
+    });
+
+    // 2. An externally-funded expense — real, approved, but no outflow of the user's.
+    await addExpense(database.db, {
+      description: 'Electrician, fronted by Flatmate A',
+      amount: paise(300000n),
+      occurredAt: new Date('2026-07-04T10:00:00Z'),
+      relationshipType: 'household_shared_flat',
+      paidByPersonId: cast.person['person_flatmate_a']!,
+    });
+
+    // 3. A settlement the user paid — a debit, inside the outflow scope.
+    const settlementOut = await addPayment(database.db, cast, {
+      accountId: cast.account['account_hdfc_upi']!,
+      amount: paise(100000n),
+      direction: 'debit',
+      occurredAt: new Date('2026-07-20T09:00:00Z'),
+      rawDescription: 'UPI TO FLATMATE A',
+      channel: 'upi',
+      counterpartyType: 'person',
+    });
+    await recordSettlement(database.db, {
+      paymentId: settlementOut,
+      counterpartyPersonId: cast.person['person_flatmate_a']!,
+      amount: paise(100000n),
+      audit: AS_USER,
+    });
+
+    // 4. A settlement the user received — a credit, outside the outflow scope entirely.
+    const settlementIn = await addPayment(database.db, cast, {
+      accountId: cast.account['account_hdfc_upi']!,
+      amount: paise(50000n),
+      direction: 'credit',
+      occurredAt: new Date('2026-07-21T09:00:00Z'),
+      rawDescription: 'UPI CREDIT FROM FRIEND A',
+      channel: 'upi',
+      counterpartyType: 'person',
+    });
+    await recordSettlement(database.db, {
+      paymentId: settlementIn,
+      counterpartyPersonId: cast.person['person_friend_a']!,
+      amount: paise(50000n),
+      audit: AS_USER,
+    });
+
+    // 5. A transfer and an investment — excluded by counterparty_type alone.
+    await addPayment(database.db, cast, {
+      accountId: cast.account['account_hdfc_savings']!,
+      amount: paise(200000n),
+      direction: 'debit',
+      occurredAt: new Date('2026-07-06T09:00:00Z'),
+      rawDescription: 'TRANSFER TO OWN UPI',
+      channel: 'bank_transfer',
+      counterpartyType: 'internal_account',
+    });
+    await addPayment(database.db, cast, {
+      accountId: cast.account['account_hdfc_upi']!,
+      amount: paise(500000n),
+      direction: 'debit',
+      occurredAt: new Date('2026-07-05T06:00:00Z'),
+      rawDescription: 'UPI AUTOPAY SIP',
+      channel: 'upi',
+      counterpartyType: 'investment_instrument',
+    });
+
+    // 6. A duplicate capture, confirmed and ignored — not more money.
+    const original = await addPayment(database.db, cast, {
+      accountId: cast.account['account_hdfc_savings']!,
+      amount: paise(40000n),
+      direction: 'debit',
+      occurredAt: new Date('2026-07-12T19:00:00Z'),
+      rawDescription: 'BANK CAPTURE',
+      channel: 'bank_transfer',
+      externalReference: 'UPI/DUP/1',
+      referenceType: 'upi_utr',
+    });
+    const duplicate = await addPayment(database.db, cast, {
+      accountId: cast.account['account_hdfc_upi']!,
+      amount: paise(40000n),
+      direction: 'debit',
+      occurredAt: new Date('2026-07-12T19:00:03Z'),
+      rawDescription: 'UPI CAPTURE',
+      channel: 'upi',
+      externalReference: 'UPI/DUP/1',
+      referenceType: 'upi_utr',
+    });
+    await updatePaymentState(database.db, duplicate, 'ignored', `duplicate_of:${original}`);
+  }
+
+  it('balances the identity with all six categories present', async () => {
+    await seedEveryCategory();
+    const totals = await reconcileJuly();
+
+    // Outflow counts the debits once: 90000 groceries + 100000 settlement-out
+    // + 200000 transfer + 500000 investment + 40000 original capture. The credit
+    // settlement and the ignored duplicate contribute nothing.
+    expect(totals.ledgerTotalOutflow).toBe(930000n);
+    expect(totals.ledgerTransfersTotal).toBe(200000n);
+    expect(totals.ledgerInvestmentsTotal).toBe(500000n);
+    // Only the debit-carried settlement; the ₹500 received is outside the scope.
+    expect(totals.ledgerSettlementsTotal).toBe(100000n);
+    // Only the self-funded expense; the flatmate's ₹3,000 explains none of our outflow.
+    expect(totals.ledgerExplainedTotal).toBe(90000n);
+    // 930000 - 200000 - 500000 - 100000 - 90000 = 40000, the un-linked duplicate original.
+    expect(totals.ledgerUnexplainedTotal).toBe(40000n);
+  });
+
+  it('goes negative under the rejected wider reading — the failure ADR-0016 prevents', () => {
+    // The same period, recomputed with each scope widened, using the real domain function
+    // rather than arithmetic on the accepted result. This is the alternative ADR-0016
+    // rejected, and it produces a figure no user could interpret.
+    const payments = [
+      { direction: 'debit', amount: paise(90000n), counterpartyType: 'merchant', state: 'linked' },
+      {
+        direction: 'debit',
+        amount: paise(100000n),
+        counterpartyType: 'person',
+        state: 'linked',
+      },
+    ] as const;
+
+    const widenedExplained = computeUnexplained({
+      payments: [...payments],
+      settlements: [{ amount: paise(100000n), direction: 'debit' }],
+      // The externally-funded ₹3,000 counted as explained outflow, which it never was.
+      expenses: [
+        { netAmount: paise(90000n), selfFunded: true },
+        { netAmount: paise(300000n), selfFunded: true },
+      ],
+    });
+
+    const widenedSettlements = computeUnexplained({
+      payments: [...payments],
+      // A received settlement counted as outflow-discharging, which it never was.
+      settlements: [
+        { amount: paise(100000n), direction: 'debit' },
+        { amount: paise(50000n), direction: 'debit' },
+      ],
+      expenses: [{ netAmount: paise(90000n), selfFunded: true }],
+    });
+
+    expect(widenedExplained.ledgerUnexplainedTotal).toBe(-300000n);
+    expect(widenedSettlements.ledgerUnexplainedTotal).toBe(-50000n);
+  });
+
+  it('persists the run, so the row-level identity CHECK accepts what domain computed', async () => {
+    await seedEveryCategory();
+    const { reconciliationRunId } = await runReconciliation(database.db, {
+      userPersonId: cast.userPersonId,
+      periodStart: JULY.start,
+      periodEnd: JULY.end,
+      audit: AS_USER,
+    });
+
+    const [row] = await database.db
+      .select({
+        outflow: schema.reconciliationRuns.ledgerTotalOutflow,
+        unexplained: schema.reconciliationRuns.ledgerUnexplainedTotal,
+      })
+      .from(schema.reconciliationRuns)
+      .where(eq(schema.reconciliationRuns.id, reconciliationRunId));
+
+    expect(row?.outflow).toBe(930000n);
+    expect(row?.unexplained).toBe(40000n);
   });
 });

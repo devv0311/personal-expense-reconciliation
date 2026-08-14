@@ -43,6 +43,7 @@ import {
   AUDIT_ACTIONS,
   BENEFICIARY_TYPES,
   CONFIDENCE_LEVELS,
+  EVIDENCE_NOTE_KINDS,
   EVIDENCE_TYPES,
   EXPENSE_ADJUSTMENT_KINDS,
   EXPENSE_RELATIONSHIP_TYPES,
@@ -58,6 +59,7 @@ import {
   SPLITWISE_EXPENSE_SYNC_STATUSES,
   SPLITWISE_SETTLEMENT_SYNC_STATUSES,
 } from '../domain/enums.js';
+import { SETTLEMENT_CLAIM_NOTE_KIND } from '../domain/evidence.js';
 
 /**
  * Builds an `IN (...)` check from a domain enum array.
@@ -278,12 +280,32 @@ export const evidence = pgTable(
     capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
     linkedPaymentId: uuid('linked_payment_id').references(() => payments.id),
     linkedExpenseId: uuid('linked_expense_id').references((): AnyPgColumn => expenses.id),
+    /**
+     * What a manual note asserts — documentation, or a claim that a debt was cleared
+     * (ADR-0018). Required on manual notes, forbidden on every other evidence type.
+     */
+    noteKind: text('note_kind'),
     createdAt: createdAt(),
   },
   (table) => [
     index('evidence_linked_payment_idx').on(table.linkedPaymentId),
     index('evidence_linked_expense_idx').on(table.linkedExpenseId),
+    // Settlement-claim notes are read on every balance query; a partial index keeps that
+    // lookup off the far more numerous documentation rows.
+    index('evidence_settlement_claim_idx')
+      .on(table.linkedExpenseId)
+      .where(sql.raw(`note_kind = '${SETTLEMENT_CLAIM_NOTE_KIND}'`)),
     check('evidence_type_check', oneOf('type', EVIDENCE_TYPES)),
+    check(
+      'evidence_note_kind_check',
+      sql`${table.noteKind} is null or ${oneOf('note_kind', EVIDENCE_NOTE_KINDS)}`,
+    ),
+    // A manual note must say which of the two things it is; nothing else may claim to be
+    // either. This is what stops one shape carrying two opposite meanings (ADR-0018).
+    check(
+      'evidence_note_kind_only_on_notes_check',
+      sql`(${table.type} = 'manual_note') = (${table.noteKind} is not null)`,
+    ),
   ],
 );
 

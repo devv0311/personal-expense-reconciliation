@@ -14,6 +14,7 @@
   "evidence": {
     "id": "evidence_restaurant_002",
     "type": "manual_note",
+    "note_kind": "documentation",
     "storage_ref": null,
     "raw_text": "Lunch with Flatmate A, no receipt kept. Split evenly.",
     "captured_at": "2026-07-09T14:00:00Z"
