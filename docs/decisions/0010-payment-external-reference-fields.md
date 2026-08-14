@@ -33,7 +33,8 @@ Index: `(external_reference)` (partial, where `external_reference is not null`) 
 scoped by `account_id`, amended this revision; see below** — alongside the existing `(amount,
 occurred_at, account_id)` index.
 
-**Revised dedup rule (invariant #10):** deterministic duplicate = same `amount` +
+**Revised dedup rule (invariant #10):** deterministic duplicate = same `direction`
+(**amended again in Phase 6 — see the second amendment below**) + same `amount` +
 `external_reference` matches (non-null on both sides) + timestamps within a small window (source
 clock skew, not a meaningfully different transaction). Everything else — no reference available,
 or references present but not matching — falls back to the existing amount/timestamp-proximity
@@ -56,6 +57,16 @@ sources reuse reference numbers legitimately (a recurring cheque number format, 
 truncates references), and a hard constraint would risk rejecting two genuinely distinct
 payments. Matching stays an application-level decision inside `services`, consistent with how
 every other cross-row invariant in this system is enforced (`database-design.md`, Conventions).
+
+> **Second amendment (2026-08-15, Phase 6 — see ADR-0019).** `direction` was missing from the
+> matching criteria, and implementing the bank-statement importer against
+> `fixtures/bank-statement.csv` proved it was load-bearing rather than pedantic. That fixture's
+> rows 2 and 3 are the two legs of one internal transfer: identical `external_reference`
+> (`NEFT/N072026001`), identical `amount` (₹15,000), identical date — opposite directions. The
+> rule as written matched them, marking the credit leg a duplicate of the debit leg and
+> discarding it. A rule whose stated purpose is "must not double-count money" was, in this case,
+> under-counting it. `direction` now gates both the deterministic and the possible-duplicate
+> paths.
 
 ## Consequences
 

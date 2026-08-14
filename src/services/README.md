@@ -16,7 +16,8 @@ authoritative state).
 **Depends on:** `src/domain`, `src/db`. Calls into `src/ai` and `src/integrations` but never
 lets their output write authoritative state directly — see `docs/architecture/data-flow.md`.
 
-**Partly implemented.** Landed in the deterministic-foundation phase:
+**Partly implemented.** Landed in the deterministic-foundation phase, plus transaction
+import (phase 6):
 
 - `audit.ts` — `runAudited()`, which opens the transaction, hands the body the only executor in
   scope, and **refuses to commit a mutation that recorded no `AuditEvent`**. This is the
@@ -31,6 +32,9 @@ lets their output write authoritative state directly — see `docs/architecture/
   `Allocation` (invariant #9a).
 - `adjustment-service.ts` — `recordExpenseAdjustment` and `distributeAdjustment`.
 - `balance-service.ts` — `getBalance` and `runReconciliation`, both read-then-compute.
+- `import-service.ts` — `importBankStatementCsv`: parse, then `ImportBatch` + immutable
+  `Payment` rows, with deterministic duplicate handling at both the file and the row level
+  (ADR-0019). Classifies nothing.
 
-Not yet implemented: import, normalization, classification, review-queue, `decideInference`,
-and Splitwise sync orchestration — see `docs/roadmap.md` phases 6–11 and 14.
+Not yet implemented: normalization, classification, review-queue, `decideInference`, and
+Splitwise sync orchestration — see `docs/roadmap.md` phases 7–11 and 14.

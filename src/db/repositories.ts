@@ -28,6 +28,7 @@ import type {
   AllocationLineId,
   AuditEventId,
   ExpenseId,
+  ImportBatchId,
   GroupId,
   PaymentId,
   PersonId,
@@ -52,6 +53,7 @@ import {
   expenseItems,
   expenses,
   groupMemberships,
+  importBatches,
   paymentExpenseLinks,
   payments,
   reconciliationRuns,
@@ -487,6 +489,88 @@ export async function findPaymentsByExternalReference(
     .where(eq(payments.externalReference, externalReference))
     .orderBy(asc(payments.occurredAt), asc(payments.id));
   return rows as PaymentRow[];
+}
+
+/* ==================================================================== import batches */
+
+export interface ImportBatchDraft {
+  readonly sourceChannel: string;
+  readonly fileReference: string | null;
+  /** Content hash, so re-importing the identical file is detectable. */
+  readonly contentHash: string | null;
+  readonly parserVersion: string | null;
+  readonly rowCount: number;
+}
+
+export async function insertImportBatch(
+  exec: Executor,
+  draft: ImportBatchDraft,
+): Promise<ImportBatchId> {
+  const [row] = await exec
+    .insert(importBatches)
+    .values({
+      sourceChannel: draft.sourceChannel,
+      fileReference: draft.fileReference,
+      contentHash: draft.contentHash,
+      parserVersion: draft.parserVersion,
+      rowCount: draft.rowCount,
+    })
+    .returning({ id: importBatches.id });
+  return requireRow(row, 'import_batches').id as ImportBatchId;
+}
+
+/** Finds a previous import of byte-identical content, if there was one. */
+export async function findImportBatchByContentHash(
+  exec: Executor,
+  contentHash: string,
+): Promise<{ id: ImportBatchId; importedAt: Date } | null> {
+  const [row] = await exec
+    .select({ id: importBatches.id, importedAt: importBatches.importedAt })
+    .from(importBatches)
+    .where(eq(importBatches.contentHash, contentHash));
+  return row === undefined ? null : { id: row.id as ImportBatchId, importedAt: row.importedAt };
+}
+
+/**
+ * Inserts one SOURCE payment exactly as the import read it.
+ *
+ * Deliberately takes no `counterpartyType`/`counterpartyId`: deciding what a payment *is*
+ * belongs to classification, not to ingestion, and the column keeps its `unknown` default
+ * until then (`lifecycle.md`, `data-flow.md` steps 2-3).
+ */
+export interface PaymentDraft {
+  readonly accountId: string;
+  readonly importBatchId: ImportBatchId;
+  readonly amount: Paise;
+  readonly currency: string;
+  readonly direction: 'debit' | 'credit';
+  readonly occurredAt: Date;
+  readonly rawDescription: string;
+  readonly channel: string;
+  readonly externalReference: string | null;
+  readonly referenceType: string | null;
+  readonly sourceSystem: string;
+}
+
+export async function insertPayment(exec: Executor, draft: PaymentDraft): Promise<PaymentId> {
+  const [row] = await exec
+    .insert(payments)
+    .values({
+      accountId: draft.accountId,
+      importBatchId: draft.importBatchId,
+      amount: draft.amount,
+      currency: draft.currency,
+      direction: draft.direction,
+      occurredAt: draft.occurredAt,
+      rawDescription: draft.rawDescription,
+      channel: draft.channel,
+      externalReference: draft.externalReference,
+      referenceType: draft.referenceType,
+      sourceSystem: draft.sourceSystem,
+      state: 'imported',
+    })
+    .returning({ id: payments.id });
+  return requireRow(row, 'payments').id as PaymentId;
 }
 
 /** `state` and `ignored_reason` are DERIVED metadata layered on immutable SOURCE columns. */

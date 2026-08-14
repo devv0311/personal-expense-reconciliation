@@ -28,14 +28,21 @@ type Transitions<S extends string> = Readonly<Record<S, readonly S[]>>;
 /* ------------------------------------------------------------------------- payments */
 
 /**
- * `IMPORTED → NORMALIZED → (LINKED | IGNORED)`.
+ * `IMPORTED → NORMALIZED → (LINKED | IGNORED)`, plus `IMPORTED → IGNORED` (ADR-0019).
  *
- * Deliberately strict. A payment cannot skip normalization, cannot regress once linked
- * (a linked payment whose expense is later un-approved is handled at the `Expense` level,
- * not by regressing the payment — `lifecycle.md`), and cannot be revived once ignored.
+ * Deliberately strict. A payment cannot skip normalization on the way to `linked`, cannot
+ * regress once linked (a linked payment whose expense is later un-approved is handled at the
+ * `Expense` level, not by regressing the payment — `lifecycle.md`), and cannot be revived
+ * once ignored.
+ *
+ * `imported → ignored` is the one addition, for a duplicate the importer confirms
+ * deterministically against an existing payment (`invariants.md` #10). Being *explained*
+ * requires knowing what a payment is, so `linked` still demands normalization first; being
+ * *discarded* does not. Routing a row through `normalized` on its way to the bin would mean
+ * claiming a counterparty was resolved for a row nobody will ever look at again.
  */
 const PAYMENT_TRANSITIONS: Transitions<PaymentState> = {
-  imported: ['normalized'],
+  imported: ['normalized', 'ignored'],
   normalized: ['linked', 'ignored'],
   linked: [],
   ignored: [],

@@ -75,12 +75,16 @@ function asCandidate(row: {
   amount: bigint;
   occurredAt: Date;
   externalReference: string | null;
+  direction?: 'debit' | 'credit';
   accountId?: string;
 }): DuplicateCandidate {
   return {
     amount: paise(row.amount),
     occurredAt: row.occurredAt,
     externalReference: row.externalReference,
+    // Every candidate in these scenarios is an outgoing capture; direction is part of the
+    // match so the two legs of one transfer never collapse into each other (ADR-0019).
+    direction: row.direction ?? 'debit',
     ...(row.accountId === undefined ? {} : { accountId: row.accountId }),
   };
 }

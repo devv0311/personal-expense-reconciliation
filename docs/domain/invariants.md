@@ -138,10 +138,19 @@ never a mutation of `NetBalance` itself, and never treated as equivalent to a re
 `Settlement`.
 
 10. **Duplicate transactions must not double-count money.** Deduplication is deterministic when
-    two payments share `amount`, a matching non-null `external_reference` (**added per
-    ADR-0010** — the original wording promised this without a field to back it), and timestamps
-    within a small window; otherwise it is surfaced as a _possible_ duplicate for human
-    confirmation, never silently merged or silently kept as two. **`account_id` is deliberately
+    two payments share `direction` (**added during Phase 6 — see below**), `amount`, a matching
+    non-null `external_reference` (**added per ADR-0010** — the original wording promised this
+    without a field to back it), and timestamps within a small window; otherwise it is surfaced
+    as a _possible_ duplicate for human confirmation, never silently merged or silently kept as
+    two.
+
+    **`direction` is part of the match (added, ADR-0019).** Building the bank-statement importer
+    against `fixtures/bank-statement.csv` surfaced the omission: the two legs of a transfer
+    between the user's own accounts appear as two rows sharing one `external_reference`, one
+    `amount` and one date, differing **only** in direction (rows 2 and 3, `NEFT/N072026001`).
+    Without direction in the criteria the rule matched them and discarded half a real transfer —
+    the precise opposite of "must not double-count money". Money leaving is never a duplicate of
+    money arriving, so direction gates both the deterministic and the possible-duplicate paths. **`account_id` is deliberately
     not part of the match (corrected this revision — see ADR-0010's amendment)**: the same
     real-world transaction can legitimately land under two different `Account` rows in this
     schema (e.g. a bank CSV import captures a UPI payment under a `bank`-typed `Account`, while
