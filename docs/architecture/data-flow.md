@@ -63,7 +63,7 @@ during, or after classification. `ai.parseReceipt()` / `ai.extractReceiptItems()
 receipt-type `Evidence` into a `Receipt` + `ReceiptItem`s (DERIVED, per `domain-model.md`),
 again as inferences requiring confirmation before they're treated as settled. For an
 **externally-funded** expense (`paid_by_person_id` != the user, ADR-0006), `Evidence` is the
-*only* source that will ever exist — there is no `Payment` to eventually match against.
+_only_ source that will ever exist — there is no `Payment` to eventually match against.
 
 ## 5. Human review
 

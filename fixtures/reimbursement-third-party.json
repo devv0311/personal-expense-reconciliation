@@ -21,7 +21,9 @@
   "original_allocation_v1": {
     "superseded": true,
     "method": "equal",
-    "lines": [{ "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 1200.0 }]
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 1200.0 }
+    ]
   },
   "reimbursement_payment": {
     "id": "payment_employer_reimbursement_001",

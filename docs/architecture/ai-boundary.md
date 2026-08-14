@@ -94,7 +94,7 @@ approval:
 | `high`     | Eligible for auto-progression through review if amount/ambiguity thresholds also pass — but still requires an `accepted` transition, typically via a matched `Rule` the user previously approved. |
 | `medium`   | Enters `REVIEW_REQUIRED`; shown with the proposal pre-filled for fast confirmation.                                                                                                               |
 | `low`      | Enters `REVIEW_REQUIRED`; shown with a stronger visual flag and no pre-selected default beneficiary/allocation where ambiguity is highest.                                                        |
-| `unknown`  | Treated as `low`; typically means the model declined to guess (e.g. genuinely ambiguous merchant, or genuinely ambiguous expense-vs-settlement kind).                                              |
+| `unknown`  | Treated as `low`; typically means the model declined to guess (e.g. genuinely ambiguous merchant, or genuinely ambiguous expense-vs-settlement kind).                                             |
 
 ## Data sent to the AI provider
 

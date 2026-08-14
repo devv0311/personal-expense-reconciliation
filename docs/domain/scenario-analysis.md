@@ -85,7 +85,7 @@ already a single date though; **adjusted** `ExpenseOccasion` conceptually to rep
 _or range_ — noted for schema design (`database-design.md`) to use a start/end rather than a
 single `occurred_on` where trips are involved.
 
-**11. Refund.** *(revised 2026-08 — see ADR-0008)*
+**11. Refund.** _(revised 2026-08 — see ADR-0008)_
 A `Payment` with `direction = credit` from the same merchant shortly after the original debit.
 Modeled as an `ExpenseAdjustment` (`kind = merchant_refund`) referencing the **original**
 `Expense` — not a second `Expense`, which is what the original design did via
@@ -97,7 +97,7 @@ refund.amount`; a new `Allocation` version is created on the original expense, s
 new net amount. See #12 for the partial case, where the reduction actually has to be
 distributed by an explicit decision.
 
-**12. Partial refund.** *(revised 2026-08 — see ADR-0008)*
+**12. Partial refund.** _(revised 2026-08 — see ADR-0008)_
 Same as #11, but the refund `ExpenseAdjustment.amount` is less than the original
 `Expense.amount`. The current `Allocation` must be superseded (per invariant #6, a new version,
 never mutated in place) to sum to the new `netAmount`, with the reduction itself allocated
@@ -106,8 +106,8 @@ proportionally, or just the person who returned the item?) — **confirmed this 
 not a default**, same conclusion as the original analysis, now expressed against the corrected
 mechanism (`ExpenseAdjustment` + `Allocation` supersession) instead of a second `Expense`.
 
-**13. Duplicate transaction.** *(revised 2026-08 — see ADR-0010; amended in the
-implementation-readiness pass — see below)*
+**13. Duplicate transaction.** _(revised 2026-08 — see ADR-0010; amended in the
+implementation-readiness pass — see below)_
 Two `Payment`s, same amount/timestamp, from two overlapping imports (e.g. a bank CSV and a UPI
 export both capturing the same charge) — note these two payments land under **different**
 `Account` rows (`account_hdfc_savings` vs. `account_hdfc_upi`), since this schema models "bank"
@@ -130,7 +130,7 @@ Clean. Confirmed (2026-08) that this payment is not required to ever reach `LINK
 `IGNORED` — staying at `NORMALIZED` is valid, since exclusion is driven by `counterparty_type`
 directly (`lifecycle.md`).
 
-**15. Splitwise settlement payment.** *(revised 2026-08 — see ADR-0007)*
+**15. Splitwise settlement payment.** _(revised 2026-08 — see ADR-0007)_
 A UPI transfer to a friend, recorded in Splitwise as "you paid ₹1,000 to settle up." Modeled as
 a `Settlement` (its own entity, not an `Expense` or `Expense`-shell) referencing the `Payment`
 and `counterparty_person_id = Friend A`. **This scenario is what originally forced the
@@ -200,7 +200,7 @@ records old value, new value, reason, and actor. Confirms the `Allocation` versi
 (rather than mutable `AllocationLine`s) is necessary, not just nice-to-have — a straight
 `UPDATE` would have destroyed the fact that the expense was ever believed personal. Note:
 `Expense.amount` was never in question in this scenario (only `relationship_type`/`Allocation`
-changed) — had the *amount* itself been wrong, the correction path since the 2026-08 revision
+changed) — had the _amount_ itself been wrong, the correction path since the 2026-08 revision
 would be an `ExpenseAdjustment`, not a corrected `amount` field (`invariants.md` #6).
 
 **25. A Splitwise expense that differs from the application's ledger.**
@@ -210,32 +210,32 @@ A `SplitwiseExpense.their_snapshot` (fetched on reconciliation) no longer matche
 (invariant #18). The model does not attempt automatic resolution in either direction; this is
 by design, since either side could be the one that's wrong, and guessing risks silently
 corrupting the canonical ledger. Distinguished (2026-08) from the new `stale` status — see §30 —
-which means *our* side changed, not Splitwise's.
+which means _our_ side changed, not Splitwise's.
 
 ---
 
 ## Findings summary — Part 1 (original)
 
 1. **`Balance` calculation must exclude `gift` and `personal` expenses explicitly** (from #8) —
-   otherwise a gift would incorrectly generate a debt. *(Superseded by a stronger guarantee in
+   otherwise a gift would incorrectly generate a debt. _(Superseded by a stronger guarantee in
    the 2026-08 revision — see Part 2 findings below: `Obligation` is now only ever created by a
    fixed debt-creating `relationship_type` set, so `gift`/`personal` were never eligible, not
-   merely excluded afterward.)*
+   merely excluded afterward.)_
 2. **`Expense` needs a `refund_of_expense_id` self-reference** (from #11, #12) — the original
    model linked refunds only implicitly through payment timing, which isn't reliable enough to
-   build settlement math on. *(Superseded — see ADR-0008. Replaced by `ExpenseAdjustment`,
-   which also resolved the arithmetic ambiguity `refund_of_expense_id` left open.)*
+   build settlement math on. _(Superseded — see ADR-0008. Replaced by `ExpenseAdjustment`,
+   which also resolved the arithmetic ambiguity `refund_of_expense_id` left open.)_
 3. **`ExpenseOccasion` should support a date range, not a single date** (from #10) — trips span
-   multiple days. *(Still current — implemented in `database-design.md`.)*
+   multiple days. _(Still current — implemented in `database-design.md`.)_
 4. **`GroupMembership` must be a time-ranged entity, not a plain join table** (from #23) —
-   required for historical allocations to stay meaningful after membership changes. *(Still
-   current.)*
+   required for historical allocations to stay meaningful after membership changes. _(Still
+   current.)_
 5. **Confirmed (no change needed, but explicitly load-bearing):** `PaymentExpenseLink`'s
    many-to-many shape (#1, #21), `Receipt`/`Payment` amount independence (#20), `Allocation`
-   versioning instead of in-place mutation (#24). *(The decision not to give `Settlement` its
+   versioning instead of in-place mutation (#24). _(The decision not to give `Settlement` its
    own money-movement table, from #15, is still correct — see ADR-0007 — but the mechanism
    `Settlement` uses to avoid duplicating `Payment` changed; it's no longer routed through
-   `Expense`.)*
+   `Expense`.)_
 
 ---
 
@@ -342,8 +342,8 @@ computeBalance()` and any Splitwise sync for this expense read these three rows,
 group line — Flatmate A and Flatmate C each individually owe Dev ₹700; "the Flat" owes no one
 anything, because a `Group` is never itself a debtor. **In September, Flatmate C moves out and
 Flatmate D moves in.** This has **zero effect** on the three `AllocationLineGroupExpansion` rows
-already written for the July bill — they are never recomputed. A *new* August bill allocated
-after the membership change would resolve against the membership active at *its* `occurred_at`
+already written for the July bill — they are never recomputed. A _new_ August bill allocated
+after the membership change would resolve against the membership active at _its_ `occurred_at`
 and correctly include Flatmate D instead. This is the concrete mechanism §23 required but never
 specified (ADR-0009).
 
@@ -412,28 +412,28 @@ Every item below was explicitly requested to be re-verified after the 2026-08 re
 points to the worked example; the remaining columns are the specific facts that scenario
 establishes, not a re-derivation.
 
-| # | Requested scenario | Scenario(s) | Payer | Obligation created | Settlement mechanism | Spend classification | Splitwise |
-|---|---|---|---|---|---|---|---|
-| 1 | User pays restaurant bill for self | §35 | Dev | None (payer = sole beneficiary) | n/a | Counted in `ledger_explained_total` | Never syncs (`personal`) |
-| 2 | User pays restaurant bill for self + 2 friends, equal | §2 | Dev | Both friends owe Dev | n/a until settled | Explained spend | Syncs (`shared`) |
-| 3 | User pays restaurant bill, unequal shares | §3 | Dev | Per-line amounts owed to Dev | n/a until settled | Explained spend | Syncs |
-| 4 | User pays entirely on friend's behalf | §7 | Dev | Friend owes Dev 100% | n/a until settled | Explained spend | Syncs (`paid_on_behalf`) |
-| 5 | User pays flat expense | §5, §16 | Dev | Flatmates owe Dev (direct or via group expansion) | n/a until settled | Explained spend | Syncs |
-| 6 | User pays flat expense, items for different people | §1 | Dev | Per-expense, per invariant #2a | n/a until settled | Explained spend (both expenses) | Syncs (non-personal expense only) |
-| 7 | Flatmate pays flat expense, user owes share | §26 | Flatmate A | Dev, Flatmate C owe Flatmate A | Would be a `Settlement` on whichever side has a `Payment`; see §34 for the side that can't | Explained spend, no `PaymentExpenseLink` (evidence-only) | Syncs, debtor = Flatmate A's view |
-| 8 | Friend pays restaurant, user owes share | §27 | Friend A | Dev owes Friend A | Same as above | Explained spend, evidence-only | Syncs |
-| 9 | User sends settlement to flatmate | §28 | n/a (Settlement, not Expense) | Discharges §26's obligation | `Settlement`, `payment.direction = debit` | Excluded — `ledger_settlements_total` | `SplitwiseSettlement` |
-| 10 | Flatmate sends settlement to user | §29 | n/a | Discharges the reverse obligation | `Settlement`, `payment.direction = credit` | Excluded — `ledger_settlements_total` | `SplitwiseSettlement` |
-| 11 | Full refund | §11 | Dev | None | n/a | `netAmount` = 0, excluded from spend | `stale` if already synced |
-| 12 | Partial refund | §12 | Dev | None | n/a | `netAmount` reduced, explicit redistribution | `stale` if already synced |
-| 13 | Refund after Splitwise expense exists | §30 | Dev | Unaffected (already existed) | n/a | `netAmount` reduced | `sync_status = stale`, re-sync required |
-| 14 | Duplicate bank transaction, same external reference | §13 | n/a | n/a | n/a | Second payment `IGNORED` | n/a |
-| 15 | Multiple payments, one occasion | §10, §22 | Dev (each expense) | Per-expense | n/a | Explained spend, grouped by `ExpenseOccasion` | Syncs per-expense |
-| 16 | One payment, multiple expenses | §1, §21 | Dev | Per-expense | n/a | Explained spend, split via `PaymentExpenseLink` | Syncs non-personal expenses only |
-| 17 | Group beneficiary, membership changes later | §23, §33 | Dev | Per resolved member, snapshotted | n/a until settled | Explained spend | Syncs individual members only |
-| 18 | Settlement with no receipt | §28 (note) | n/a | Discharges existing | `Settlement`, zero `Evidence` rows | Excluded | `SplitwiseSettlement` |
-| 19 | Expense with no bank payment, someone else paid | §26, §27 | Flatmate/Friend | Owed to that payer | n/a until settled | Explained spend, no `PaymentExpenseLink` | Syncs |
-| 20 | Transfer between own accounts | §14 | n/a | None | n/a | Excluded — `ledger_transfers_total` | Never syncs |
-| 21 | Investment | §32 | n/a | None | n/a | Excluded — `ledger_investments_total` | Never syncs |
-| 22 | Gift | §8 | Dev | **None** (not a debt-creating type) | n/a | Explained spend | Never syncs |
-| 23 | Reimbursement | §31 | Dev | None | n/a (`ExpenseAdjustment`, not `Settlement`) | `netAmount` reduced | `stale` if already synced |
+| #   | Requested scenario                                    | Scenario(s) | Payer                         | Obligation created                                | Settlement mechanism                                                                       | Spend classification                                     | Splitwise                               |
+| --- | ----------------------------------------------------- | ----------- | ----------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------- | --------------------------------------- |
+| 1   | User pays restaurant bill for self                    | §35         | Dev                           | None (payer = sole beneficiary)                   | n/a                                                                                        | Counted in `ledger_explained_total`                      | Never syncs (`personal`)                |
+| 2   | User pays restaurant bill for self + 2 friends, equal | §2          | Dev                           | Both friends owe Dev                              | n/a until settled                                                                          | Explained spend                                          | Syncs (`shared`)                        |
+| 3   | User pays restaurant bill, unequal shares             | §3          | Dev                           | Per-line amounts owed to Dev                      | n/a until settled                                                                          | Explained spend                                          | Syncs                                   |
+| 4   | User pays entirely on friend's behalf                 | §7          | Dev                           | Friend owes Dev 100%                              | n/a until settled                                                                          | Explained spend                                          | Syncs (`paid_on_behalf`)                |
+| 5   | User pays flat expense                                | §5, §16     | Dev                           | Flatmates owe Dev (direct or via group expansion) | n/a until settled                                                                          | Explained spend                                          | Syncs                                   |
+| 6   | User pays flat expense, items for different people    | §1          | Dev                           | Per-expense, per invariant #2a                    | n/a until settled                                                                          | Explained spend (both expenses)                          | Syncs (non-personal expense only)       |
+| 7   | Flatmate pays flat expense, user owes share           | §26         | Flatmate A                    | Dev, Flatmate C owe Flatmate A                    | Would be a `Settlement` on whichever side has a `Payment`; see §34 for the side that can't | Explained spend, no `PaymentExpenseLink` (evidence-only) | Syncs, debtor = Flatmate A's view       |
+| 8   | Friend pays restaurant, user owes share               | §27         | Friend A                      | Dev owes Friend A                                 | Same as above                                                                              | Explained spend, evidence-only                           | Syncs                                   |
+| 9   | User sends settlement to flatmate                     | §28         | n/a (Settlement, not Expense) | Discharges §26's obligation                       | `Settlement`, `payment.direction = debit`                                                  | Excluded — `ledger_settlements_total`                    | `SplitwiseSettlement`                   |
+| 10  | Flatmate sends settlement to user                     | §29         | n/a                           | Discharges the reverse obligation                 | `Settlement`, `payment.direction = credit`                                                 | Excluded — `ledger_settlements_total`                    | `SplitwiseSettlement`                   |
+| 11  | Full refund                                           | §11         | Dev                           | None                                              | n/a                                                                                        | `netAmount` = 0, excluded from spend                     | `stale` if already synced               |
+| 12  | Partial refund                                        | §12         | Dev                           | None                                              | n/a                                                                                        | `netAmount` reduced, explicit redistribution             | `stale` if already synced               |
+| 13  | Refund after Splitwise expense exists                 | §30         | Dev                           | Unaffected (already existed)                      | n/a                                                                                        | `netAmount` reduced                                      | `sync_status = stale`, re-sync required |
+| 14  | Duplicate bank transaction, same external reference   | §13         | n/a                           | n/a                                               | n/a                                                                                        | Second payment `IGNORED`                                 | n/a                                     |
+| 15  | Multiple payments, one occasion                       | §10, §22    | Dev (each expense)            | Per-expense                                       | n/a                                                                                        | Explained spend, grouped by `ExpenseOccasion`            | Syncs per-expense                       |
+| 16  | One payment, multiple expenses                        | §1, §21     | Dev                           | Per-expense                                       | n/a                                                                                        | Explained spend, split via `PaymentExpenseLink`          | Syncs non-personal expenses only        |
+| 17  | Group beneficiary, membership changes later           | §23, §33    | Dev                           | Per resolved member, snapshotted                  | n/a until settled                                                                          | Explained spend                                          | Syncs individual members only           |
+| 18  | Settlement with no receipt                            | §28 (note)  | n/a                           | Discharges existing                               | `Settlement`, zero `Evidence` rows                                                         | Excluded                                                 | `SplitwiseSettlement`                   |
+| 19  | Expense with no bank payment, someone else paid       | §26, §27    | Flatmate/Friend               | Owed to that payer                                | n/a until settled                                                                          | Explained spend, no `PaymentExpenseLink`                 | Syncs                                   |
+| 20  | Transfer between own accounts                         | §14         | n/a                           | None                                              | n/a                                                                                        | Excluded — `ledger_transfers_total`                      | Never syncs                             |
+| 21  | Investment                                            | §32         | n/a                           | None                                              | n/a                                                                                        | Excluded — `ledger_investments_total`                    | Never syncs                             |
+| 22  | Gift                                                  | §8          | Dev                           | **None** (not a debt-creating type)               | n/a                                                                                        | Explained spend                                          | Never syncs                             |
+| 23  | Reimbursement                                         | §31         | Dev                           | None                                              | n/a (`ExpenseAdjustment`, not `Settlement`)                                                | `netAmount` reduced                                      | `stale` if already synced               |

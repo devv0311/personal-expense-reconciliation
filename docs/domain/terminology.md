@@ -9,7 +9,7 @@ this — see `docs/domain/domain-model.md` for full entity definitions.
 
 **Payment** — What actually caused money to leave or enter an `Account` the user owns. The
 bank/UPI-level fact. Never assumed to equal an expense or a receipt, and never able by itself to
-represent money someone *else* spent — see **Payer**, below.
+represent money someone _else_ spent — see **Payer**, below.
 
 **Payer** — The `Person` who actually fronted the money for an `Expense`
 (`Expense.paid_by_person_id`). Usually the user, but not always — a flatmate or friend can be

@@ -114,7 +114,7 @@ sync always resolve down to individual people. See `domain-model.md`
 Receipts are evidence supporting an expense — not the central object the system is built
 around. The system must function with a full itemized receipt, a receipt with partial detail,
 only a bank/UPI line, only the user's manual explanation, or a screenshot — and, for an expense
-someone else paid for, evidence is the *only* thing that will ever exist, since there is no
+someone else paid for, evidence is the _only_ thing that will ever exist, since there is no
 bank/UPI line in the user's own accounts to fall back on. Online orders (Blinkit, Swiggy,
 Zepto, and similar) are treated as one example of a merchant that happens to provide good
 itemized evidence, not as an architectural special case.

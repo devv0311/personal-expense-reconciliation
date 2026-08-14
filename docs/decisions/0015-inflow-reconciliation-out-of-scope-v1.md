@@ -22,7 +22,7 @@ reconciling ordinary credits that aren't a refund, a reimbursement, or a receive
 This is a scope decision made now, not a gap to be rediscovered.
 
 **Confirmed the schema does not block adding it later.** `payments.direction` already supports
-`credit`, and every credit that *is* meaningful today (a refund, a reimbursement, a received
+`credit`, and every credit that _is_ meaningful today (a refund, a reimbursement, a received
 settlement) is already fully modeled via `ExpenseAdjustment.adjustment_payment_id` and
 `Settlement.payment_id`. A plain, otherwise-unclassified credit simply isn't required to reach
 `Payment.state = linked` — it can stay at `normalized` indefinitely, exactly mirroring how

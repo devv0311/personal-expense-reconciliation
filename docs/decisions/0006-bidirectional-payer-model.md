@@ -47,7 +47,7 @@ not "the user," when deciding who owes whom. This is a one-field addition with a
 change in how downstream code reads it — worth calling out explicitly to whoever implements
 Phase 12/13 rather than letting it be discovered mid-implementation.
 
-A structural limitation remains and is documented, not solved: the system can only *observe*
+A structural limitation remains and is documented, not solved: the system can only _observe_
 money movement (a `Payment`) when it passes through the user's own `Account`. A debt between two
 other people (e.g., Flatmate C owing Flatmate A from an expense Flatmate A fronted) is
 representable in the `Obligation`/`Balance` formula, but can never be backed by a `Payment` record
@@ -60,7 +60,7 @@ just to future implementers reading this ADR.
 
 - **Infer payer from `PaymentExpenseLink` presence, no new field.** Rejected: this can only ever
   express "the user paid" (link exists) or leaves "someone else paid" with no representation at
-  all — it can't express *which* other person paid, which is the entire point of the reverse
+  all — it can't express _which_ other person paid, which is the entire point of the reverse
   case.
 - **A full double-entry ledger with a `Ledger`/`JournalEntry` abstraction.** Considered, since it
   would generalize the payer/beneficiary relationship further than a single field. Rejected as

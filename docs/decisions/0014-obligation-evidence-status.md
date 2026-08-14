@@ -6,7 +6,7 @@
 
 ADR-0006 generalized `Balance`/`Obligation` to a pairwise function between any two people, which
 correctly makes an obligation between, say, two flatmates (neither of whom is the user)
-representable and computable. But its *discharge* — a `Settlement` — can only ever be backed by
+representable and computable. But its _discharge_ — a `Settlement` — can only ever be backed by
 a real `Payment`, and a `Payment` can only exist for money that moved through an `Account` the
 user owns (`Account` invariants). A settlement between two people who are both someone other than
 the user can never produce a `Settlement` row here. This was documented as "a known, documented
@@ -41,7 +41,7 @@ whenever `NetBalance(X, Y) > 0`, from data already in the model — no new table
 This is purely a display-time annotation. It never mutates `NetBalance`, is never itself an
 `AIInference`, and requires a human's explicit, audited action (e.g. resolving the matching
 `ReconciliationRun` discrepancy) before the underlying `Balance` figure stops surfacing the
-open obligation — the status can *say* "believed settled" without the ledger's own numbers
+open obligation — the status can _say_ "believed settled" without the ledger's own numbers
 silently agreeing.
 
 ## Consequences
@@ -58,7 +58,7 @@ a smaller, better-scoped remainder.
 ## Alternatives considered
 
 - **Do nothing further; leave it as prose in the "known limitation" paragraph.** Rejected — the
-  user explicitly asked for the system to be able to *show* "expected obligation exists, but no
+  user explicitly asked for the system to be able to _show_ "expected obligation exists, but no
   settlement evidence is available," which prose in a design doc does not satisfy; it needed a
   computable, named concept.
 - **A new `believed_settlements` table a human explicitly writes to.** Considered — would let a

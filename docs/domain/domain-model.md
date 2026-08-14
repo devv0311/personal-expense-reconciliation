@@ -51,11 +51,11 @@ something that changes the net picture of an existing spend event or existing ob
 without itself being new consumption). Confusing the two was the root cause of most of the
 findings this revision fixes. Concretely:
 
-| It is...                                             | ...if it                                                                 |
-| ------------------------------------------------------ | --------------------------------------------------------------------------- |
-| A new `Expense` (needs `Allocation`)                   | Represents something bought/paid for, with beneficiaries who benefited      |
-| A `Settlement` (references a `Payment` + a counterparty `Person`) | Discharges an **existing** obligation created by a prior `Expense`'s `Allocation` |
-| An `ExpenseAdjustment` (references an existing `Expense`) | Returns money against an **existing** `Expense`, from the same counterparty (`merchant_refund`) or a third party (`third_party_reimbursement`) |
+| It is...                                                          | ...if it                                                                                                                                       |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| A new `Expense` (needs `Allocation`)                              | Represents something bought/paid for, with beneficiaries who benefited                                                                         |
+| A `Settlement` (references a `Payment` + a counterparty `Person`) | Discharges an **existing** obligation created by a prior `Expense`'s `Allocation`                                                              |
+| An `ExpenseAdjustment` (references an existing `Expense`)         | Returns money against an **existing** `Expense`, from the same counterparty (`merchant_refund`) or a third party (`third_party_reimbursement`) |
 
 ---
 
@@ -323,13 +323,14 @@ original `Evidence` file.
 `payment_id` or `expense_id` column of its own** (clarified in this revision — the original text
 here was ambiguous enough to read as if it did, which does not match `database-design.md`).
 Its Payment/Expense linkage is always indirect:
-  - The single-payment / single-expense case goes through its `Evidence` row:
-    `evidence.linked_payment_id` / `evidence.linked_expense_id`.
-  - The "one receipt, split across several expenses" case (e.g. one Blinkit basket containing a
-    personal item and a flat item, scenario #1) goes through item-level linkage —
-    `ReceiptItem → ExpenseItem → Expense` — not through the `Receipt` row itself. A `Receipt` is
-    never directly linked to "one or more Expenses" as a first-class relationship; that plurality
-    only exists at the item level.
+
+- The single-payment / single-expense case goes through its `Evidence` row:
+  `evidence.linked_payment_id` / `evidence.linked_expense_id`.
+- The "one receipt, split across several expenses" case (e.g. one Blinkit basket containing a
+  personal item and a flat item, scenario #1) goes through item-level linkage —
+  `ReceiptItem → ExpenseItem → Expense` — not through the `Receipt` row itself. A `Receipt` is
+  never directly linked to "one or more Expenses" as a first-class relationship; that plurality
+  only exists at the item level.
 
 **Lifecycle.** Created by AI extraction (`parseReceipt`/`extractReceiptItems`, see
 `ai-boundary.md`) or manual entry when no receipt image exists but the user wants item-level
@@ -385,14 +386,15 @@ reimbursement went" below), `category` (DERIVED/advisory), `occasion_id` (nullab
 money for this expense; not necessarily the user — added per ADR-0006).
 
 **Where settlement and reimbursement went.** `relationship_type` used to include `settlement`
-and `reimbursement`. Neither survived the 2026-08 revision as a way of classifying a *new*
+and `reimbursement`. Neither survived the 2026-08 revision as a way of classifying a _new_
 expense:
-  - A settlement isn't a new expense at all — it's the discharge of an obligation an earlier
-    expense already created. It's now the `Settlement` entity (below), tied to a `Payment`, never
-    an `Expense`. See ADR-0007.
-  - A reimbursement (like a refund) isn't a new expense either — it's money coming back against
-    an expense that already exists and was already classified as whatever it actually was. It's
-    now `ExpenseAdjustment.kind = third_party_reimbursement` (below). See ADR-0008.
+
+- A settlement isn't a new expense at all — it's the discharge of an obligation an earlier
+  expense already created. It's now the `Settlement` entity (below), tied to a `Payment`, never
+  an `Expense`. See ADR-0007.
+- A reimbursement (like a refund) isn't a new expense either — it's money coming back against
+  an expense that already exists and was already classified as whatever it actually was. It's
+  now `ExpenseAdjustment.kind = third_party_reimbursement` (below). See ADR-0008.
 
 **`paid_by_person_id`, explained.** For the common case — the user personally paid — this is the
 `Person` row representing the system's own `User`, and the expense is normally linked to a
@@ -432,7 +434,7 @@ READY_TO_SYNC → SYNCED → RECONCILED`, adapted from the brief's states — se
   change via a new, audited decision (`AuditEvent`), never a silent overwrite
   (`scenario-analysis.md` §24).
 - `domain.netAmount(expense) = expense.amount − sum(ExpenseAdjustment.amount where
-  original_expense_id = expense.id)`. Always derived, never stored. See invariant #11.
+original_expense_id = expense.id)`. Always derived, never stored. See invariant #11.
 
 **Classification.** DERIVED until `APPROVED`; APPROVED thereafter. `amount` is APPROVED and
 immutable from that point on; `netAmount` is always DERIVED, recomputed on read.
@@ -487,7 +489,7 @@ at 0 — the same three people who originally benefited, still visibly present i
 authoritative allocation, at zero cost rather than absent. This means a full refund never makes
 the system "forget" **what was purchased** (`Expense.description`/`amount`, untouched, gross,
 forever), **the original amount** (`Expense.amount = <original>`, immutable), **who originally
-benefited** (present in both the superseded `Allocation` version *and* the current one, at 0),
+benefited** (present in both the superseded `Allocation` version _and_ the current one, at 0),
 or **how it was originally allocated** (the superseded `Allocation` version's `method` and
 per-line amounts are kept, never deleted — `Allocation` versions are append-only per invariant
 #6). `netAmount(expense) = 0` and "no current spend" are visible at the derived-figure level
@@ -501,12 +503,12 @@ Splitwise expense, not a $0-amount update. Splitwise has no first-class concept 
 expense, and pushing one would misrepresent the group's ledger there; the correct action once a
 human confirms the fresh proposal is `integrations/splitwise` issuing a delete against
 `splitwise_expense_id`, then marking the local `SplitwiseExpense` row accordingly (its own
-terminal state — implementation detail for Phase 14, but the *policy* — delete, don't zero-out —
+terminal state — implementation detail for Phase 14, but the _policy_ — delete, don't zero-out —
 is decided here, not left open). A **partial** adjustment (netAmount > 0 but reduced) is the
 ordinary `stale` → re-sync-with-new-amount path already described for §30.
 
 **Analytics implications.** A net-zero expense is excluded from `ledger_explained_total`'s
-*current* contribution (its `netAmount` is 0, contributing exactly 0 — not omitted, just
+_current_ contribution (its `netAmount` is 0, contributing exactly 0 — not omitted, just
 correctly zero), but remains fully visible in historical/audit views: "you bought this for
 `amount`, and it was fully refunded/reimbursed on `<adjustment.occurred_at>`" is answerable by
 querying `Expense` + its `ExpenseAdjustment`s directly, and should be surfaced as its own
@@ -719,7 +721,7 @@ If `NetBalance(X, Y) > 0`, X owes Y that amount, net of everything recorded so f
 and `gift` expenses never enter `GrossObligation` at all (not merely excluded after the fact —
 they were never debt-creating `relationship_type`s to begin with, which is a stronger, simpler
 guarantee than the original design's after-the-fact exclusion list). Neither do `Settlement`s or
-`ExpenseAdjustment`s directly contribute new obligation — a `Settlement` only ever *reduces*
+`ExpenseAdjustment`s directly contribute new obligation — a `Settlement` only ever _reduces_
 `NetBalance` via the subtraction/addition terms above, never appears on the `GrossObligation`
 side.
 
@@ -728,8 +730,8 @@ only be observed when it moves through an `Account` the user owns (see `Account`
 this is a fact about what data can physically reach this system, not a gap in how the data that
 does arrive is modeled. `NetBalance(X, Y)` is fully computable, correctly, for **any** two
 people from `AllocationLine`/`AllocationLineGroupExpansion` data alone — the obligation itself is
-never unobservable. What can be unobservable is one specific thing: the *discharge* half of the
-formula, when neither party to a settling payment is the user. A settlement between two *other*
+never unobservable. What can be unobservable is one specific thing: the _discharge_ half of the
+formula, when neither party to a settling payment is the user. A settlement between two _other_
 people (e.g. Flatmate C repaying Flatmate A directly, `scenario-analysis.md` §34) can never
 produce a `Settlement` row in this ledger, because there is no `Payment` — and there must never
 be a fabricated one (see `CLAUDE.md`'s financial safety rules: "do not invent fake `Payment`
@@ -1014,9 +1016,9 @@ below).
 
 **Lifecycle.** Created when an `Expense` reaches `READY_TO_SYNC` and the user confirms the
 Splitwise proposal. Updated on each reconciliation check if Splitwise-side data has changed.
-When the *original* expense receives an `ExpenseAdjustment` after having already synced, the
+When the _original_ expense receives an `ExpenseAdjustment` after having already synced, the
 existing `SplitwiseExpense` moves to `sync_status = stale` — distinct from `drifted`, which means
-*Splitwise's* side changed independently. `stale` means *our* side changed and a fresh sync
+_Splitwise's_ side changed independently. `stale` means _our_ side changed and a fresh sync
 proposal is owed: for a partial adjustment (`netAmount` still > 0) that proposal is an amount
 update; for an adjustment that brings `netAmount` all the way to 0, the proposal is a
 **deletion** of the Splitwise expense, not a $0-amount push — Splitwise has no first-class

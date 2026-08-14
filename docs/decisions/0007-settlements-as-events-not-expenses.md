@@ -8,12 +8,12 @@ ADR-0004" below).
 The pre-implementation review found the settlement design self-contradictory in three ways
 (review findings #1, #2):
 
-1. `invariants.md` #2 required *every* `APPROVED` Expense to have an `Allocation`, with no
+1. `invariants.md` #2 required _every_ `APPROVED` Expense to have an `Allocation`, with no
    exception — but the reference fixture for the canonical settlement scenario had none.
 2. `domain-model.md` documented a second settlement path directly on `Payment`
    (`is_settlement = true`) that had no corresponding column anywhere in
    `database-design.md`.
-3. If a settlement *did* get a trivial Allocation (to satisfy #1), nothing excluded
+3. If a settlement _did_ get a trivial Allocation (to satisfy #1), nothing excluded
    `relationship_type = settlement` from the Balance calculation the way `gift` and `personal`
    were explicitly excluded — so a settlement risked being counted twice: once as debt discharge,
    once as new debt.
@@ -45,7 +45,7 @@ Settlement is **not** a kind of `Expense`. It is a new entity, `Settlement`, tha
 - Removes `settlement` from `expenses.relationship_type` entirely — an expense can no longer be
   "of type settlement."
 - `expenses.relationship_type` shrinks to `personal | shared | paid_on_behalf | gift |
-  household_shared_flat`.
+household_shared_flat`.
 
 Because a `Settlement` is not an `Expense`, invariant #2 ("every APPROVED expense needs an
 Allocation") simply no longer applies to it — there's no contradiction to patch, because the
@@ -71,10 +71,10 @@ cleanly. See `database-design.md`.
 ## Relationship to ADR-0004
 
 ADR-0004 rejected a standalone `SettlementTransaction` table on the grounds that "a settlement
-repayment *is* a payment; giving it its own table would create two ways to represent 'money
+repayment _is_ a payment; giving it its own table would create two ways to represent 'money
 moved.'" That reasoning still holds and is preserved here: `Settlement` does **not** duplicate
 `Payment` — it never records an amount independent of a `Payment` row, and money movement is
-still represented exactly once, by `Payment`. What ADR-0004 got wrong was the *second* half of its
+still represented exactly once, by `Payment`. What ADR-0004 got wrong was the _second_ half of its
 settlement decision — routing settlements through an `Expense` shell "so it still flows through
 the same Allocation/AuditEvent machinery." That part is superseded: `Settlement` gets its own
 `AuditEvent` writes directly (it's an APPROVED-classified record like any other), without needing

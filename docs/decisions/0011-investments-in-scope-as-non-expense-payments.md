@@ -9,7 +9,7 @@
 `invariants.md` #20's reconciliation formula — no column, no `relationship_type` value, no
 `counterparty_type` value. An investment payment (a mutual fund SIP, a stock purchase) had no
 representable classification at all; it would have fallen into "unexplained" by default, which
-is exactly backwards for a category the product docs explicitly say is *not* spending (review
+is exactly backwards for a category the product docs explicitly say is _not_ spending (review
 finding #11).
 
 ## Decision
@@ -27,8 +27,8 @@ classification that excludes the payment from spend, not as an `Expense`.
   totals the same way.
 - `ReconciliationRun` gains `ledger_investments_total`, parallel to `ledger_transfers_total`.
 - Revised formula (invariant #20): `ledger_unexplained_total = ledger_total_outflow −
-  ledger_transfers_total − ledger_investments_total − ledger_settlements_total (ADR-0007) −
-  ledger_explained_total`.
+ledger_transfers_total − ledger_investments_total − ledger_settlements_total (ADR-0007) −
+ledger_explained_total`.
 - A `Payment` classified this way is a valid terminal state at `NORMALIZED` — like
   `internal_account` payments, it is not required to reach `LINKED` or `IGNORED`; it's excluded
   by its `counterparty_type` directly. `lifecycle.md` states this explicitly for both categories
@@ -41,8 +41,8 @@ tables. `product/overview.md` and `terminology.md` now have a real mechanism bac
 already used, instead of an aspirational one.
 
 Explicitly **out of scope** for the foundation phase, and noted as an open question: this ADR
-only classifies investment *outflows* (money leaving to buy an investment). It does not address
-investment *performance* (gains/losses, valuation) or the *inflow* side (a matured investment or a
+only classifies investment _outflows_ (money leaving to buy an investment). It does not address
+investment _performance_ (gains/losses, valuation) or the _inflow_ side (a matured investment or a
 dividend coming back in) — those are portfolio-tracking concerns, not expense-reconciliation
 concerns, and remain genuinely out of scope, not just deferred by oversight.
 

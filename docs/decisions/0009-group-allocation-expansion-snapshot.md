@@ -8,7 +8,7 @@
 itself as computing balances "for each Person/Group." Two problems (review finding #5):
 
 1. Real money settlement happens between individuals. A `Group` ("the Flat") cannot itself send
-   or receive a UPI transfer — someone would eventually need to know *which* flatmate owes what.
+   or receive a UPI transfer — someone would eventually need to know _which_ flatmate owes what.
 2. Splitwise's own data model has no concept of a group as a debtor — a Splitwise expense splits
    among individual Splitwise users. Nothing in `data-flow.md`'s sync step described how a
    group-level `AllocationLine` becomes valid Splitwise API input.
@@ -58,7 +58,7 @@ numbers.
 - **Resolve group membership live, at Balance-computation or sync time, instead of snapshotting.**
   Rejected directly by the historical-stability requirement: a live resolution would silently
   change a two-month-old expense's obligations the moment a flatmate moves out, which
-  `scenario-analysis.md` #23 already identified as unacceptable for the *AllocationLine* itself —
+  `scenario-analysis.md` #23 already identified as unacceptable for the _AllocationLine_ itself —
   the same reasoning applies one level down, to its expansion.
 - **Disallow `beneficiary_type = group` entirely; require the user to always enumerate
   individual beneficiaries.** Considered — it would remove the need for this table entirely.

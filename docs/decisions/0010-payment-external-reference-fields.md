@@ -22,11 +22,11 @@ Add to `payments`:
   (`services.normalizePayments()`), from structured import fields where the source format
   provides them, or parsed out of `raw_description` where it doesn't.
 - `reference_type text` (nullable), `check (reference_type in ('upi_utr', 'upi_rrn',
-  'bank_reference', 'card_reference', 'merchant_order_id', 'cheque_number', 'other'))`.
+'bank_reference', 'card_reference', 'merchant_order_id', 'cheque_number', 'other'))`.
 - `source_system text` (nullable) — the originating app/institution (e.g. `'hdfc_bank_csv'`,
   `'gpay_export'`, `'phonepe_export'`, `'manual'`), distinct from `channel` (the transport: UPI vs
   bank vs card vs cash) and from `import_batches.source_channel` (the same transport concept at
-  the batch level). `source_system` matters because reference-number *format* and reliability
+  the batch level). `source_system` matters because reference-number _format_ and reliability
   differ by originating app even within one channel — two UPI apps format UTRs differently.
 
 Index: `(external_reference)` (partial, where `external_reference is not null`) — **global, not
@@ -37,14 +37,14 @@ occurred_at, account_id)` index.
 `external_reference` matches (non-null on both sides) + timestamps within a small window (source
 clock skew, not a meaningfully different transaction). Everything else — no reference available,
 or references present but not matching — falls back to the existing amount/timestamp-proximity
-heuristic and is surfaced as a *possible* duplicate for confirmation, never auto-merged.
+heuristic and is surfaced as a _possible_ duplicate for confirmation, never auto-merged.
 
 > **Amendment (2026-08, implementation-readiness pass).** The rule above originally also
 > required matching `account_id`, and the index was `(account_id, external_reference)`. Building
 > `fixtures/duplicate-transaction.json` against the scenario this ADR itself cites — "a bank CSV
 > and a UPI export both capturing the same charge" (`scenario-analysis.md` §13) — surfaced a
-> direct contradiction: a bank-channel import and a UPI-channel import of the *same real-world
-> transaction* land under two different `Account` rows in this schema (`account_hdfc_savings`
+> direct contradiction: a bank-channel import and a UPI-channel import of the _same real-world
+> transaction_ land under two different `Account` rows in this schema (`account_hdfc_savings`
 > vs. `account_hdfc_upi`), so an `account_id` match would never actually fire for the scenario
 > the rule was written to handle. `account_id` is removed from the matching criteria; the index
 > is now a global lookup on `external_reference` alone. `amount` + `external_reference` +
@@ -71,7 +71,7 @@ responsibility (reference extraction) that wasn't previously specified. `scenari
   isolation, and — critically — throws away the parsed value instead of persisting it, so every
   future query needing the reference (not just dedup) would re-implement the same parsing.
 - **A hard `UNIQUE(external_reference)` (or, originally, `UNIQUE(account_id,
-  external_reference)`) constraint.** Rejected above — real bank data isn't clean enough to make
+external_reference)`) constraint.** Rejected above — real bank data isn't clean enough to make
   this safe without risking silently rejected legitimate imports.
 - **Fold `source_system` into `import_batches` only, not `payments`.** Considered, since
   `import_batches.source_channel` already exists at the batch level. Rejected because a single

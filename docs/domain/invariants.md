@@ -33,23 +33,23 @@ list is the primary input to `docs/testing/testing-strategy.md`'s required test 
    unscoped wording created against the settlement fixture.
 
 2a. **A non-payer beneficiary line is an obligation; the payer's own line is not.** On a
-    debt-creating `Expense` (`relationship_type ∈ {shared, paid_on_behalf,
+debt-creating `Expense` (`relationship_type ∈ {shared, paid_on_behalf,
     household_shared_flat}`), an `AllocationLine` (or, for a group line, an
-    `AllocationLineGroupExpansion` row — see #2b) whose beneficiary is `Expense.paid_by_person_id`
-    represents that person's own share and creates no obligation; every other line's beneficiary
-    owes `paid_by_person_id` — not necessarily the user — the line's amount. _Why:_ added per
-    ADR-0006 so the model can represent someone other than the user fronting money.
-    _Enforced by:_ `domain.computeBalance()`.
+`AllocationLineGroupExpansion` row — see #2b) whose beneficiary is `Expense.paid_by_person_id`
+represents that person's own share and creates no obligation; every other line's beneficiary
+owes `paid_by_person_id` — not necessarily the user — the line's amount. _Why:_ added per
+ADR-0006 so the model can represent someone other than the user fronting money.
+_Enforced by:_ `domain.computeBalance()`.
 
 2b. **A `group`-typed `AllocationLine` is not itself an obligation; its expansion is.** Before an
-    `Expense` with a `group`-typed line can be considered `ALLOCATED`, a corresponding
-    `AllocationLineGroupExpansion` must exist, resolving `GroupMembership` as of
-    `Expense.occurred_at` into individual per-person shares summing to the line's amount. `Balance`
-    and Splitwise sync always read the expansion, never the raw group line — a `Group` can never
-    be a debtor or creditor. _Why:_ added per ADR-0009; real settlement and Splitwise sync both
-    require an individual person, not a group, on the other end. _Enforced by:_
-    `services.approveAllocation()` (writes the expansion), `domain.computeBalance()` and
-    `services.proposeSplitwiseSync()` (read only the expansion for group lines).
+`Expense` with a `group`-typed line can be considered `ALLOCATED`, a corresponding
+`AllocationLineGroupExpansion` must exist, resolving `GroupMembership` as of
+`Expense.occurred_at` into individual per-person shares summing to the line's amount. `Balance`
+and Splitwise sync always read the expansion, never the raw group line — a `Group` can never
+be a debtor or creditor. _Why:_ added per ADR-0009; real settlement and Splitwise sync both
+require an individual person, not a group, on the other end. _Enforced by:_
+`services.approveAllocation()` (writes the expansion), `domain.computeBalance()` and
+`services.proposeSplitwiseSync()` (read only the expansion for group lines).
 
 3. **Evidence, inference, and decision are distinct.** A field's classification
    (SOURCE/DERIVED/APPROVED) determines who may write it and whether the write is audited.
@@ -84,7 +84,7 @@ list is the primary input to `docs/testing/testing-strategy.md`'s required test 
 ## Money classification
 
 7. **Transfers and investments are not expenses.** A `Payment` with `counterparty_type =
-   internal_account` or `counterparty_type = investment_instrument` (added per ADR-0011) must
+internal_account` or `counterparty_type = investment_instrument` (added per ADR-0011) must
    never be linked to an `Expense`, and must be excluded from all spend totals. Neither is
    required to ever reach `Payment.state = linked` or `ignored` — staying at `normalized` is a
    valid terminal state for both, since exclusion is driven by `counterparty_type` directly, not
@@ -111,28 +111,28 @@ list is the primary input to `docs/testing/testing-strategy.md`'s required test 
    `ledger_settlements_total` (invariant #20).
 
 9a. **A `Settlement` never has an `Allocation`.** _Why:_ `Allocation` divides a spend event among
-    beneficiaries; a settlement isn't a spend event, it discharges an obligation a prior spend
-    event's `Allocation` already created. Giving it one risks double-counting the same debt (once
-    as the discharge, once as if it were new debt) — this is exactly what the pre-revision design
-    got wrong. _Enforced by:_ `Settlement` has no `allocation_id` column at all
-    (`database-design.md`); there is no code path that could attach one.
+beneficiaries; a settlement isn't a spend event, it discharges an obligation a prior spend
+event's `Allocation` already created. Giving it one risks double-counting the same debt (once
+as the discharge, once as if it were new debt) — this is exactly what the pre-revision design
+got wrong. _Enforced by:_ `Settlement` has no `allocation_id` column at all
+(`database-design.md`); there is no code path that could attach one.
 
 9b. **A `Payment` is never fabricated to make a settlement observable.** (**Added this
-    revision.**) When neither party to a real-world settling transaction is the user, no
-    `Payment` row exists for it and none may be created to paper over that fact — this is a
-    permanent observability boundary (`domain-model.md`'s "An observability boundary, not a
-    modeling failure"), not a bug to be worked around at the data layer. `Balance`,
-    `ReconciliationRun`, Splitwise reconciliation, and `services.recordSettlement()` must all
-    continue to function correctly with this boundary in place — none of them may assume every
-    real-world settlement is observable, none may throw or silently zero out `NetBalance` when
-    one isn't, and none may substitute a synthetic `Payment`/`Settlement` for a transaction this
-    ledger never actually saw. Where a human wants to record their *belief* that such a debt was
-    cleared, that belief is captured as an ordinary `Evidence` row (`type = manual_note`,
-    `linked_expense_id` set) or surfaces via a `ReconciliationRun` discrepancy against Splitwise
-    — both read-only signals, computed into `domain.obligationEvidenceStatus(X, Y)` (`open,
+revision.**) When neither party to a real-world settling transaction is the user, no
+`Payment` row exists for it and none may be created to paper over that fact — this is a
+permanent observability boundary (`domain-model.md`'s "An observability boundary, not a
+modeling failure"), not a bug to be worked around at the data layer. `Balance`,
+`ReconciliationRun`, Splitwise reconciliation, and `services.recordSettlement()` must all
+continue to function correctly with this boundary in place — none of them may assume every
+real-world settlement is observable, none may throw or silently zero out `NetBalance` when
+one isn't, and none may substitute a synthetic `Payment`/`Settlement` for a transaction this
+ledger never actually saw. Where a human wants to record their _belief_ that such a debt was
+cleared, that belief is captured as an ordinary `Evidence` row (`type = manual_note`,
+`linked_expense_id` set) or surfaces via a `ReconciliationRun` discrepancy against Splitwise
+— both read-only signals, computed into `domain.obligationEvidenceStatus(X, Y)` (`open,
     unconfirmed | believed_settled, unconfirmed_by_ledger | settled, confirmed`) for display —
-    never a mutation of `NetBalance` itself, and never treated as equivalent to a real
-    `Settlement`.
+never a mutation of `NetBalance` itself, and never treated as equivalent to a real
+`Settlement`.
 
 10. **Duplicate transactions must not double-count money.** Deduplication is deterministic when
     two payments share `amount`, a matching non-null `external_reference` (**added per
@@ -200,7 +200,7 @@ domain.netAmount(Expense)` (**revised per ADR-0008** — was `Expense.amount`; s
     - `AllocationLineGroupExpansion` rows (`w_i = 1` per resolved member, or the user's override
       shares).
     - `ExpenseAdjustment` distribution — the adjustment amount is the `A` being divided across
-      the *current* `Allocation`'s lines; the default weight set is each line's own pre-
+      the _current_ `Allocation`'s lines; the default weight set is each line's own pre-
       adjustment `amount` (proportional-to-existing-share); a user may instead choose an
       explicit, non-proportional weight set (e.g. "this refund benefits only Dev" —
       `scenario-analysis.md` §12), subject to invariant #12a below.
@@ -223,16 +223,16 @@ domain.netAmount(Expense)` (**revised per ADR-0008** — was `Expense.amount`; s
 
 12a. **No `AllocationLine`/`AllocationLineGroupExpansion` amount is ever negative.** `amount >=
     0` (weakened from `> 0` this revision — see below for why zero is valid) is enforced at the
-    DB (`check`) and service level. The proportional-to-existing-share default distribution for
-    an `ExpenseAdjustment` can never violate this: its weights are the lines' own existing
-    non-negative shares, and `Σ ExpenseAdjustment.amount ≤ Expense.amount` (existing invariant,
-    see #8) guarantees the total being divided never exceeds the total being divided *from*, so
-    every `base_i ≥ 0` by construction. A **custom, non-proportional** distribution the user
-    picks explicitly (e.g. "only Dev absorbs this refund") is not automatically safe this way —
-    if it would drive any line below zero, the service layer **rejects it outright** with a
-    validation error. It never silently clamps a would-be-negative line to zero — clamping would
-    make the distributed amounts stop summing to the adjustment's amount, silently losing money
-    from the ledger's arithmetic, which is worse than refusing the input.
+DB (`check`) and service level. The proportional-to-existing-share default distribution for
+an `ExpenseAdjustment` can never violate this: its weights are the lines' own existing
+non-negative shares, and `Σ ExpenseAdjustment.amount ≤ Expense.amount` (existing invariant,
+see #8) guarantees the total being divided never exceeds the total being divided _from_, so
+every `base_i ≥ 0` by construction. A **custom, non-proportional** distribution the user
+picks explicitly (e.g. "only Dev absorbs this refund") is not automatically safe this way —
+if it would drive any line below zero, the service layer **rejects it outright** with a
+validation error. It never silently clamps a would-be-negative line to zero — clamping would
+make the distributed amounts stop summing to the adjustment's amount, silently losing money
+from the ledger's arithmetic, which is worse than refusing the input.
 
     **The full-refund / net-zero case, resolved (see also #6 and #11):** applying the Largest
     Remainder Method with `A = 0` against the existing beneficiary set (the proportional
@@ -263,8 +263,8 @@ domain.netAmount(Expense)` (**revised per ADR-0008** — was `Expense.amount`; s
     the same purchase) that is adequately, and more simply, represented as ordinary new spend.
 
 13. **Percentage-method lines still store a resolved amount.** `AllocationLine.amount` is
-    always authoritative; `percentage` is informational, so settlement math never re-derives
-    from a percentage and a possibly-stale total.
+always authoritative; `percentage` is informational, so settlement math never re-derives
+from a percentage and a possibly-stale total.
 
 14. **Item/quantity-based allocation sums must reconcile at both the whole-expense and per-item
     level.** Sum of `ExpenseItem.amount` equals `Expense.amount` (gross). Sum of
@@ -315,7 +315,7 @@ domain.netAmount(Expense)` (**revised per ADR-0008** — was `Expense.amount`; s
 
 20. **Unexplained money is always computed, never assumed to be zero.**
     `ledger_unexplained_total = ledger_total_outflow − ledger_transfers_total −
-    ledger_investments_total − ledger_settlements_total − ledger_explained_total`
+ledger_investments_total − ledger_settlements_total − ledger_explained_total`
     (**revised per ADR-0007 and ADR-0011** — added the investments and settlements terms, which
     the original formula omitted entirely, meaning a settlement or investment payment would have
     inflated `ledger_unexplained_total` by mistake), where `ledger_explained_total` sums

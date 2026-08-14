@@ -42,7 +42,7 @@ domain model now) or `LATER` (real requirement, but implemented in a later roadm
   friend) without fabricating a payment record that never happened (**added, ADR-0006**).
 - MUST: compute obligations and balances as a general function between any two people, not only
   "the user vs. someone else" — required so that an obligation between two people other than the
-  user (e.g. two flatmates) is still representable, even though it can never be *settled* via a
+  user (e.g. two flatmates) is still representable, even though it can never be _settled_ via a
   `Payment` this system observes — a deliberate observability boundary, not a gap
   (`invariants.md` #9b, `docs/domain/scenario-analysis.md` §34). MUST additionally surface,
   read-only, whether ledger-confirmed settlement evidence exists for such a pair
@@ -65,7 +65,7 @@ domain model now) or `LATER` (real requirement, but implemented in a later roadm
   ADR-0008** — refund and reimbursement are now the same mechanism, distinct from settlement).
 - MUST: flag likely duplicate transactions rather than silently deduplicating them when the
   evidence is not conclusively deterministic; a matching, non-null external reference on both
-  sides plus matching amount/timestamp *is* conclusive, **without also requiring the two
+  sides plus matching amount/timestamp _is_ conclusive, **without also requiring the two
   payments to be on the same account** — the same real-world transaction can be captured under
   two different `Account` rows by two different import channels (e.g. a bank CSV vs. a UPI
   export) (**revised, ADR-0010; account-match requirement removed in the implementation-
@@ -168,7 +168,7 @@ domain model now) or `LATER` (real requirement, but implemented in a later roadm
 - Database migrations (schema is designed and reviewed first; see
   `docs/architecture/database-design.md`).
 - Analytics and natural-language interface (both `LATER`, end of roadmap).
-- Investment *performance* tracking (valuation, gains/losses) — only the outflow-classification
+- Investment _performance_ tracking (valuation, gains/losses) — only the outflow-classification
   side of investments is in scope (**clarified, ADR-0011**).
 - A settlement record for a debt between two people, neither of whom is the user — an
   observability boundary, not a modeling gap (`invariants.md` #9b): structurally unobservable by

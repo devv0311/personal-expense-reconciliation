@@ -33,7 +33,7 @@ PAYMENT → PURPOSE → EVIDENCE → EXPENSE → BENEFICIARIES → ALLOCATION �
 Two categories of financial event exist and must never be conflated: a **spend event**
 (`Expense` — requires an `Allocation`, has beneficiaries) and an **adjustment/discharge event**
 (`Settlement`, `ExpenseAdjustment` — references an existing spend event or obligation, never has
-its own `Allocation`). Settlement and reimbursement are *not* expense purposes; see
+its own `Allocation`). Settlement and reimbursement are _not_ expense purposes; see
 `docs/domain/domain-model.md`'s "two categories" table.
 
 Full entity definitions: `docs/domain/domain-model.md`. Glossary: `docs/domain/terminology.md`.
@@ -58,7 +58,7 @@ Full entity definitions: `docs/domain/domain-model.md`. Glossary: `docs/domain/t
    representation. Model explicit allocations with a method (equal, exact, percentage,
    item-based, quantity-based, custom) and explicit beneficiaries.
 6. **The payer is not always the user.** `Expense.paid_by_person_id` names who actually fronted
-   the money; obligations run from every other beneficiary to *that* person, not automatically
+   the money; obligations run from every other beneficiary to _that_ person, not automatically
    to the user. A flatmate or friend paying and the user owing their share must never be
    represented by fabricating a payment the user never made (`domain-model.md`, ADR-0006).
 7. **A settlement discharges a debt; it does not create one.** Never model a settlement as an
@@ -76,7 +76,7 @@ Full entity definitions: `docs/domain/domain-model.md`. Glossary: `docs/domain/t
    `Expense`/`Settlement` split.
 10. **Unexplained money is a first-class concept**, not a bug to hide. The system should always
     be able to show `total outflow − transfers − investments − settlements − explained expenses
-    (net of adjustments) = unexplained`, and surface that number rather than making it disappear
+(net of adjustments) = unexplained`, and surface that number rather than making it disappear
     through silent assumptions.
 
 Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
@@ -185,20 +185,20 @@ Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
 
 ## Where things live
 
-| Topic                          | Doc                                          |
-| -------------------------------- | ----------------------------------------------- |
-| Product problem & vision        | `docs/product/overview.md`                     |
-| Detailed requirements            | `docs/product/requirements.md`                 |
-| Domain entities                  | `docs/domain/domain-model.md`                  |
-| Glossary                         | `docs/domain/terminology.md`                   |
-| Invariants                       | `docs/domain/invariants.md`                    |
-| State lifecycle                  | `docs/domain/lifecycle.md`                     |
-| Scenario stress-tests            | `docs/domain/scenario-analysis.md`             |
-| System architecture              | `docs/architecture/system-architecture.md`     |
-| Data flow                        | `docs/architecture/data-flow.md`               |
-| AI service boundary              | `docs/architecture/ai-boundary.md`             |
-| Database design                  | `docs/architecture/database-design.md`         |
-| Architecture Decision Records    | `docs/decisions/`                              |
-| Testing strategy                 | `docs/testing/testing-strategy.md`             |
-| Security model                   | `docs/security/security-model.md`              |
-| Roadmap / current phase          | `docs/roadmap.md`                              |
+| Topic                         | Doc                                        |
+| ----------------------------- | ------------------------------------------ |
+| Product problem & vision      | `docs/product/overview.md`                 |
+| Detailed requirements         | `docs/product/requirements.md`             |
+| Domain entities               | `docs/domain/domain-model.md`              |
+| Glossary                      | `docs/domain/terminology.md`               |
+| Invariants                    | `docs/domain/invariants.md`                |
+| State lifecycle               | `docs/domain/lifecycle.md`                 |
+| Scenario stress-tests         | `docs/domain/scenario-analysis.md`         |
+| System architecture           | `docs/architecture/system-architecture.md` |
+| Data flow                     | `docs/architecture/data-flow.md`           |
+| AI service boundary           | `docs/architecture/ai-boundary.md`         |
+| Database design               | `docs/architecture/database-design.md`     |
+| Architecture Decision Records | `docs/decisions/`                          |
+| Testing strategy              | `docs/testing/testing-strategy.md`         |
+| Security model                | `docs/security/security-model.md`          |
+| Roadmap / current phase       | `docs/roadmap.md`                          |

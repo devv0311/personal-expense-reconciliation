@@ -13,7 +13,7 @@ resulting `Allocation` an open implementation choice — either an empty `lines:
 single zero-amount line to the payer — "valid either way," deferred to Phase 12.
 
 This ambiguity was a real risk to the stated goal of preserving historical truth: an empty
-`lines: []` set on the *current* allocation reads, to any code or person inspecting it later, as
+`lines: []` set on the _current_ allocation reads, to any code or person inspecting it later, as
 "this expense has no beneficiaries," which is not true — it had beneficiaries; the refund made
 their net cost zero, not their existence disappear. It also complicates "who benefited from a
 fully-refunded expense" queries, which would have to fall back to a superseded `Allocation`
@@ -62,5 +62,5 @@ assuming every `stale` row implies an amount update.
   out of the general rule.
 - **A single collapsed line to the original payer, regardless of how many beneficiaries there
   were.** Rejected for the same reason as the empty-set option: it silently drops every
-  beneficiary except the payer from the *current* view, even though all of them are still
+  beneficiary except the payer from the _current_ view, even though all of them are still
   factually the people who benefited from ₹0 of net cost.
