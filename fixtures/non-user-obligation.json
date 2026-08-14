@@ -11,12 +11,14 @@
       "evidence": {
         "id": "evidence_flatmate_c_settled_with_a_001",
         "type": "manual_note",
+        "note_kind": "settlement_claim",
         "storage_ref": null,
         "raw_text": "Flatmate C: 'paid Flatmate A back for the electrician bill directly, we're square.'",
         "captured_at": "2026-07-25T10:00:00Z",
         "linked_payment_id": null,
-        "linked_expense_id": null
+        "linked_expense_id": "expense_electrician_001"
       },
+      "note_on_shape": "Two corrections made when ADR-0018 landed. (1) linked_expense_id was null while this fixture's own effect_on_balance text said the note 'references the contributing expense' — obligationEvidenceStatus only reads notes attached to a contributing expense, so as written this signal could never have fired. It now points at flatmate-pays-flat-expense.json's expense_electrician_001. (2) note_kind is required on every manual_note and is what makes this a settlement claim rather than documentation: the note in flatmate-pays-flat-expense.json describing the same expense is note_kind = 'documentation', and the two must not be confused (ADR-0018).",
       "effect_on_balance": "Balance(Flatmate C, Flatmate A) as computed by domain.computeBalance() STILL shows Flatmate C owing Flatmate A 1000.0 — the Evidence note alone does not discharge it, because there is no Settlement (the only mechanism invariant #9 recognizes). domain.obligationEvidenceStatus(Flatmate C, Flatmate A) now reads 'believed_settled, unconfirmed_by_ledger' (finalized this revision — domain-model.md's ObligationEvidenceStatus) precisely because this manual_note Evidence row exists and references the contributing expense, but NetBalance itself is untouched by that status — a human must take an explicit, audited action (e.g. resolving the matching ReconciliationRun discrepancy) before the ledger stops surfacing the debt as open."
     },
     {

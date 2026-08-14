@@ -33,9 +33,18 @@ whenever `NetBalance(X, Y) > 0`, from data already in the model — no new table
 `Payment`/`Settlement`:
 
 - `open, unconfirmed` — no `Settlement` and no other evidence either. The default.
-- `believed_settled, unconfirmed_by_ledger` — a manual `Evidence` row (`type = manual_note`)
-  referencing a contributing `Expense` claims it was cleared some other way, **or** the latest
-  `ReconciliationRun` shows a Splitwise-side discrepancy suggesting a lower/zero balance.
+- `believed_settled, unconfirmed_by_ledger` — a manual `Evidence` row (`type = manual_note`,
+  `note_kind = 'settlement_claim'`) referencing a contributing `Expense` claims it was cleared
+  some other way, **or** the latest `ReconciliationRun` shows a Splitwise-side discrepancy
+  suggesting a lower/zero balance.
+
+  > **Amendment (2026-08-15, ADR-0018).** As originally written this bullet said only
+  > "a manual `Evidence` row (`type = manual_note`)". That is the _same shape_ ADR-0006 gives
+  > every externally-funded expense as its only evidence, so implementing the rule literally
+  > reported every such obligation as believed-settled the moment it was recorded — the exact
+  > opposite of what this status exists to show. `evidence.note_kind` discriminates the two;
+  > see ADR-0018.
+
 - `settled, confirmed` — `NetBalance` is 0, or reachable via an actual `Settlement`.
 
 This is purely a display-time annotation. It never mutates `NetBalance`, is never itself an

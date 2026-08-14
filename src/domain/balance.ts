@@ -202,8 +202,15 @@ export interface ObligationEvidenceInput {
   readonly netBalance: Paise;
   /** The expenses whose lines contribute to this pair's balance. */
   readonly contributingExpenseIds: readonly ExpenseId[];
-  /** Expenses referenced by a `manual_note` `Evidence` row claiming the debt was cleared. */
-  readonly manualNoteExpenseIds: readonly ExpenseId[];
+  /**
+   * Expenses carrying a `settlement_claim` manual note — a human's recorded belief that
+   * the debt was cleared some other way (ADR-0014, discriminated per ADR-0018).
+   *
+   * Deliberately *not* "expenses with a manual note": an externally-funded expense always
+   * has one, and reading those as claims reported every such obligation settled the moment
+   * it was recorded.
+   */
+  readonly settlementClaimExpenseIds: readonly ExpenseId[];
   readonly latestReconciliationRun: ReconciliationEvidence | null;
   readonly personAId: PersonId;
   readonly personBId: PersonId;
@@ -226,8 +233,10 @@ export function obligationEvidenceStatus(input: ObligationEvidenceInput): Obliga
   if (input.netBalance === 0n) return 'settled_confirmed';
 
   const contributing = new Set(input.contributingExpenseIds);
-  const hasManualNote = input.manualNoteExpenseIds.some((expenseId) => contributing.has(expenseId));
-  if (hasManualNote) return 'believed_settled_unconfirmed_by_ledger';
+  const hasSettlementClaim = input.settlementClaimExpenseIds.some((expenseId) =>
+    contributing.has(expenseId),
+  );
+  if (hasSettlementClaim) return 'believed_settled_unconfirmed_by_ledger';
 
   const magnitude = absolutePaise(input.netBalance);
   const externalSuggestsLower = (input.latestReconciliationRun?.discrepancies ?? []).some(

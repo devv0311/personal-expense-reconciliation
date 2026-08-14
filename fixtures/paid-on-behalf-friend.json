@@ -14,6 +14,7 @@
   "evidence": {
     "id": "evidence_on_behalf_001",
     "type": "manual_note",
+    "note_kind": "documentation",
     "storage_ref": null,
     "raw_text": "Bought Friend B's concert ticket because their card didn't work. They'll pay me back in full.",
     "captured_at": "2026-07-13T10:05:00Z"

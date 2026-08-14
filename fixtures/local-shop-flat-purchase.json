@@ -13,6 +13,7 @@
   "evidence": {
     "id": "evidence_local_shop_001",
     "type": "manual_note",
+    "note_kind": "documentation",
     "storage_ref": null,
     "raw_text": "Bought spices and dish soap for the flat from the corner shop, paid cash, no bill.",
     "captured_at": "2026-07-08T11:05:00Z"

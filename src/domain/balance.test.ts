@@ -434,7 +434,7 @@ describe('obligationEvidenceStatus — ADR-0014', () => {
       obligationEvidenceStatus({
         netBalance: paise(100000n),
         contributingExpenseIds: [electrician],
-        manualNoteExpenseIds: [],
+        settlementClaimExpenseIds: [],
         latestReconciliationRun: null,
         personAId: flatmateC,
         personBId: flatmateA,
@@ -447,7 +447,7 @@ describe('obligationEvidenceStatus — ADR-0014', () => {
       obligationEvidenceStatus({
         netBalance: paise(0n),
         contributingExpenseIds: [electrician],
-        manualNoteExpenseIds: [],
+        settlementClaimExpenseIds: [],
         latestReconciliationRun: null,
         personAId: flatmateC,
         personBId: flatmateA,
@@ -455,12 +455,12 @@ describe('obligationEvidenceStatus — ADR-0014', () => {
     ).toBe('settled_confirmed');
   });
 
-  it('is "believed settled" when a manual note references a contributing expense', () => {
+  it('is "believed settled" when a settlement-claim note references a contributing expense', () => {
     expect(
       obligationEvidenceStatus({
         netBalance: paise(100000n),
         contributingExpenseIds: [electrician],
-        manualNoteExpenseIds: [electrician],
+        settlementClaimExpenseIds: [electrician],
         latestReconciliationRun: null,
         personAId: flatmateC,
         personBId: flatmateA,
@@ -468,12 +468,12 @@ describe('obligationEvidenceStatus — ADR-0014', () => {
     ).toBe('believed_settled_unconfirmed_by_ledger');
   });
 
-  it('ignores a manual note against an unrelated expense', () => {
+  it('ignores a settlement-claim note against an unrelated expense', () => {
     expect(
       obligationEvidenceStatus({
         netBalance: paise(100000n),
         contributingExpenseIds: [electrician],
-        manualNoteExpenseIds: [expenseId('expense_unrelated')],
+        settlementClaimExpenseIds: [expenseId('expense_unrelated')],
         latestReconciliationRun: null,
         personAId: flatmateC,
         personBId: flatmateA,
@@ -486,7 +486,7 @@ describe('obligationEvidenceStatus — ADR-0014', () => {
       obligationEvidenceStatus({
         netBalance: paise(100000n),
         contributingExpenseIds: [electrician],
-        manualNoteExpenseIds: [],
+        settlementClaimExpenseIds: [],
         latestReconciliationRun: {
           discrepancies: [
             {
@@ -509,7 +509,7 @@ describe('obligationEvidenceStatus — ADR-0014', () => {
       obligationEvidenceStatus({
         netBalance: paise(100000n),
         contributingExpenseIds: [electrician],
-        manualNoteExpenseIds: [],
+        settlementClaimExpenseIds: [],
         latestReconciliationRun: {
           discrepancies: [
             {
@@ -532,7 +532,7 @@ describe('obligationEvidenceStatus — ADR-0014', () => {
       obligationEvidenceStatus({
         netBalance: paise(100000n),
         contributingExpenseIds: [electrician],
-        manualNoteExpenseIds: [],
+        settlementClaimExpenseIds: [],
         latestReconciliationRun: {
           discrepancies: [
             {
@@ -555,7 +555,7 @@ describe('obligationEvidenceStatus — ADR-0014', () => {
       obligationEvidenceStatus({
         netBalance: paise(100000n),
         contributingExpenseIds: [electrician],
-        manualNoteExpenseIds: [],
+        settlementClaimExpenseIds: [],
         latestReconciliationRun: {
           discrepancies: [
             {
@@ -580,7 +580,7 @@ describe('obligationEvidenceStatus — ADR-0014', () => {
       obligationEvidenceStatus({
         netBalance: paise(0n),
         contributingExpenseIds: [electrician],
-        manualNoteExpenseIds: [electrician],
+        settlementClaimExpenseIds: [electrician],
         latestReconciliationRun: null,
         personAId: flatmateC,
         personBId: flatmateA,

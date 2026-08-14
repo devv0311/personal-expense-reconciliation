@@ -372,6 +372,7 @@ describe('Scenario 6 — a flatmate pays and the user owes them (§26, ADR-0006)
     });
     await addManualNote(database.db, {
       text: 'Flatmate A: paid the electrician, ₹3,000, split three ways',
+      noteKind: 'documentation',
       capturedAt: JULY_10,
       expenseId: expense,
     });
@@ -727,6 +728,7 @@ describe('Scenario 20 — an externally funded expense is traceable through Evid
     });
     await addManualNote(database.db, {
       text: 'Flatmate A: paid the electrician, ₹3,000, split three ways',
+      noteKind: 'documentation',
       capturedAt: JULY_10,
       expenseId: expense,
     });

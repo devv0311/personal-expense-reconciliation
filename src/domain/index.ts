@@ -15,6 +15,7 @@ export * from './balance.js';
 export * from './entities.js';
 export * from './enums.js';
 export * from './errors.js';
+export * from './evidence.js';
 export * from './expense.js';
 export * from './group-expansion.js';
 export * from './ids.js';

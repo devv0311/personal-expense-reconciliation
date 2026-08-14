@@ -1,7 +1,8 @@
 # 0016. `ledger_explained_total` and `ledger_settlements_total` are scoped to observed outflow
 
-**Status:** Proposed — raised by the Phase 1 implementation; needs confirmation before it is
-treated as settled.
+**Status:** Accepted (2026-08-15). Raised by the Phase 1 implementation and confirmed against
+`invariants.md` #20, `domain-model.md`'s `ReconciliationRun`, and `scenario-analysis.md` §26,
+§29 and the stress-test coverage matrix before acceptance.
 
 ## Context
 
@@ -64,9 +65,19 @@ clamping it to zero would hide exactly what the run exists to surface. A `CHECK`
 settlement. Both are already available — `expenses.paid_by_person_id` and the settlement's
 linked `payments.direction` — so no schema change is needed and no new column is introduced.
 
-`invariants.md` #20's prose is not edited by this ADR. If this decision is accepted, #20's two
-term definitions should gain the scoping clause; that edit is deliberately left to the reviewer
-rather than made unilaterally, since #20 is a reviewed invariant.
+On acceptance, three reviewed documents gained the scope explicitly rather than by implication:
+
+- `invariants.md` #20 — each term now states its own outflow scope, and the negative-total
+  integrity signal is stated rather than left to the implementation.
+- `domain-model.md`'s `ReconciliationRun` field list — same two clauses, at the point the
+  columns are defined.
+- `scenario-analysis.md`'s coverage matrix — rows 8, 10 and 19 said "Explained spend" and
+  "Excluded — `ledger_settlements_total`" for cases that are explained _expenses_ but not
+  explained _outflow_, and for a credit-carried settlement. That phrasing is the same
+  conflation this ADR exists to remove, one document further out, so it was disambiguated too.
+
+**The naming is the heart of it:** `ledger_explained_total` means _explained outflow_, not
+_explained expenses_. Everything else follows from reading it that way.
 
 An inflow-side reconciliation (ADR-0015, explicitly out of scope for V1) is where a
 received settlement and an externally-funded expense would eventually be accounted for, if

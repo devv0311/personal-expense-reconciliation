@@ -367,6 +367,26 @@ describe('CHECK constraints enforce the invariants a per-row rule can express', 
     expect(error.message).toMatch(/reconciliation_runs_unexplained_identity_check/);
   });
 
+  it('stores a negative unexplained total — the integrity signal is not clamped (ADR-0016)', async () => {
+    // An over-explained ledger (a double-linked payment, a mis-scoped period) is exactly what
+    // this figure exists to surface. The CHECK enforces the identity, not the sign.
+    const [run] = await database.db
+      .insert(schema.reconciliationRuns)
+      .values({
+        periodStart: new Date('2026-07-01T00:00:00Z'),
+        periodEnd: new Date('2026-07-31T00:00:00Z'),
+        ledgerTotalOutflow: 10000n,
+        ledgerTransfersTotal: 0n,
+        ledgerInvestmentsTotal: 0n,
+        ledgerSettlementsTotal: 0n,
+        ledgerExplainedTotal: 90000n,
+        ledgerUnexplainedTotal: -80000n,
+      })
+      .returning({ unexplained: schema.reconciliationRuns.ledgerUnexplainedTotal });
+
+    expect(run?.unexplained).toBe(-80000n);
+  });
+
   it('accepts a reconciliation run whose totals satisfy invariant #20', async () => {
     const [run] = await database.db
       .insert(schema.reconciliationRuns)
@@ -383,6 +403,85 @@ describe('CHECK constraints enforce the invariants a per-row rule can express', 
       .returning({ unexplained: schema.reconciliationRuns.ledgerUnexplainedTotal });
 
     expect(run?.unexplained).toBe(15000n);
+  });
+});
+
+describe('evidence.note_kind keeps one shape from carrying two meanings (ADR-0018)', () => {
+  it('accepts a documenting manual note', async () => {
+    const [row] = await database.db
+      .insert(schema.evidence)
+      .values({
+        type: 'manual_note',
+        rawText: 'Flatmate A paid the electrician, split three ways',
+        capturedAt: new Date('2026-07-05T10:00:00Z'),
+        noteKind: 'documentation',
+      })
+      .returning({ noteKind: schema.evidence.noteKind });
+
+    expect(row?.noteKind).toBe('documentation');
+  });
+
+  it('accepts a settlement-claim manual note', async () => {
+    const [row] = await database.db
+      .insert(schema.evidence)
+      .values({
+        type: 'manual_note',
+        rawText: 'Flatmate C says they repaid Flatmate A in cash',
+        capturedAt: new Date('2026-07-22T10:00:00Z'),
+        noteKind: 'settlement_claim',
+      })
+      .returning({ noteKind: schema.evidence.noteKind });
+
+    expect(row?.noteKind).toBe('settlement_claim');
+  });
+
+  it('rejects a manual note that does not say which kind it is', async () => {
+    const error = await captureError(() =>
+      database.db.insert(schema.evidence).values({
+        type: 'manual_note',
+        rawText: 'ambiguous',
+        capturedAt: new Date(),
+      }),
+    );
+
+    expect(error.message).toMatch(/evidence_note_kind_only_on_notes_check/);
+  });
+
+  it('rejects a non-note evidence row that claims a kind', async () => {
+    const error = await captureError(() =>
+      database.db.insert(schema.evidence).values({
+        type: 'receipt_image',
+        storageRef: 'evidence/2026/07/receipt-001.jpg',
+        capturedAt: new Date(),
+        noteKind: 'settlement_claim',
+      }),
+    );
+
+    expect(error.message).toMatch(/evidence_note_kind_only_on_notes_check/);
+  });
+
+  it('rejects an unknown note kind', async () => {
+    const error = await captureError(() =>
+      database.db.execute(
+        sql`insert into evidence (type, captured_at, note_kind)
+            values ('manual_note', now(), 'probably_settled')`,
+      ),
+    );
+
+    expect(error.message).toMatch(/evidence_note_kind_check/);
+  });
+
+  it('accepts every other evidence type with no kind', async () => {
+    const [row] = await database.db
+      .insert(schema.evidence)
+      .values({
+        type: 'bank_line',
+        rawText: 'UPI-BLINKIT',
+        capturedAt: new Date(),
+      })
+      .returning({ noteKind: schema.evidence.noteKind });
+
+    expect(row?.noteKind).toBeNull();
   });
 });
 

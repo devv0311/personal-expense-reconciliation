@@ -66,7 +66,7 @@ describe('computeUnexplained — invariant #20', () => {
     expect(totals.ledgerTotalOutflow).toBe(0n);
   });
 
-  it('excludes a payment confirmed as a duplicate, so money is not counted twice (§13)', () => {
+  it('ADR-0016 (ignored payment): excludes a confirmed duplicate, so money is counted once (§13)', () => {
     const totals = computeUnexplained(
       ledger({
         payments: [
@@ -125,7 +125,7 @@ describe('computeUnexplained — invariant #20', () => {
     expect(totals.ledgerUnexplainedTotal).toBe(0n);
   });
 
-  it('gives settlements their own bucket, never counting them as spend (§28, #9)', () => {
+  it('ADR-0016 (debit settlement): own bucket, never counted as spend (§28, #9)', () => {
     const totals = computeUnexplained(
       ledger({
         payments: [
@@ -145,7 +145,7 @@ describe('computeUnexplained — invariant #20', () => {
     expect(totals.ledgerUnexplainedTotal).toBe(0n);
   });
 
-  it('excludes a settlement received by the user, which was never outflow (§29)', () => {
+  it('ADR-0016 (credit settlement): a received settlement never entered outflow (§29)', () => {
     const totals = computeUnexplained(
       ledger({
         payments: [
@@ -164,7 +164,7 @@ describe('computeUnexplained — invariant #20', () => {
     expect(totals.ledgerUnexplainedTotal).toBe(0n);
   });
 
-  it('sums net amounts, not gross, for explained expenses (ADR-0008)', () => {
+  it('ADR-0016 (self-funded expense): sums net amounts, not gross (ADR-0008)', () => {
     const totals = computeUnexplained(
       ledger({
         payments: [
@@ -202,7 +202,7 @@ describe('computeUnexplained — invariant #20', () => {
     expect(totals.ledgerUnexplainedTotal).toBe(45000n);
   });
 
-  it('excludes an externally-funded expense, which involved no outflow of the user’s (§26)', () => {
+  it('ADR-0016 (externally-funded expense): explains no outflow of the user’s (§26)', () => {
     // Flatmate A paid the electrician: a real, approved Expense with no PaymentExpenseLink
     // and no debit through any Account the user owns. Counting it as explained *outflow*
     // would drive ledger_unexplained_total negative.
@@ -283,7 +283,7 @@ describe('computeUnexplained — invariant #20', () => {
     });
   });
 
-  it('can report a negative unexplained figure rather than clamping it to zero', () => {
+  it('ADR-0016 (integrity signal): reports a negative unexplained figure, never clamped', () => {
     // Over-explained is a real signal (double-linked payments, a mis-scoped period) and
     // must be visible, not hidden behind a floor of zero.
     const totals = computeUnexplained(

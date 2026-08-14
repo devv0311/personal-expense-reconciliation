@@ -3,6 +3,7 @@
   "evidence": {
     "id": "evidence_friend_dinner_001",
     "type": "manual_note",
+    "note_kind": "documentation",
     "storage_ref": null,
     "raw_text": "Friend A covered dinner, 1800 total, we're splitting it evenly.",
     "captured_at": "2026-07-18T21:30:00Z"

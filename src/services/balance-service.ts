@@ -14,7 +14,6 @@ import {
   validateReconciliationTotals,
 } from '../domain/index.js';
 import type {
-  ExpenseId,
   ObligationContribution,
   ObligationEvidenceStatus,
   Paise,
@@ -25,7 +24,7 @@ import type {
 import {
   getLatestReconciliationRun,
   insertReconciliationRun,
-  listManualNoteExpenseIds,
+  listSettlementClaimExpenseIds,
   loadBalanceInput,
   loadReconciliationInput,
 } from '../db/index.js';
@@ -49,18 +48,6 @@ export interface BalanceResult {
   readonly contributions: readonly ObligationContribution[];
 }
 
-export interface GetBalanceOptions {
-  /**
-   * Expenses whose `manual_note` `Evidence` the caller has confirmed is a **claim that the
-   * debt was cleared**, rather than documentation of the expense itself.
-   *
-   * Opt-in, and empty by default, because the schema cannot currently tell the two apart —
-   * see {@link getBalance}. Passing ids here is an explicit human judgement, exactly as
-   * ADR-0014 intends the signal to be.
-   */
-  readonly believedSettledExpenseIds?: readonly string[];
-}
-
 /**
  * Computes the pairwise balance between any two people, in either direction.
  *
@@ -69,25 +56,19 @@ export interface GetBalanceOptions {
  * unobservable to this ledger (`invariants.md` #9b, `scenario-analysis.md` §34).
  *
  * @remarks
- * **The `manual_note` signal is not inferred automatically, deliberately.** ADR-0014 reads a
- * `manual_note` `Evidence` row linked to a contributing expense as "believed settled". But
- * ADR-0006 specifies the *same shape* — `type = manual_note`, `linked_expense_id` set — as
- * the only evidence an externally-funded expense ever has. With no field distinguishing the
- * two, auto-detecting the signal would mark every externally-funded expense's obligation
- * "believed settled" the moment it was recorded, which is precisely backwards.
- *
- * Rather than invent a schema field to break the tie, this service does not guess: the
- * signal is opt-in via {@link GetBalanceOptions.believedSettledExpenseIds}, and the
- * unambiguous Splitwise-discrepancy signal is wired as normal. `domain` still implements
- * ADR-0014 in full. Resolving the collision is a documentation decision, raised in the
- * Phase 1 report rather than settled here.
+ * Both of ADR-0014's signals are now read deterministically. The `manual_note` signal was
+ * briefly opt-in, because ADR-0006 gives every externally-funded expense a manual note as its
+ * only evidence and ADR-0014 read *any* manual note on a contributing expense as "believed
+ * settled" — one shape, two opposite meanings, so inferring it marked those obligations
+ * settled the moment they were recorded. `evidence.note_kind` (ADR-0018) distinguishes them,
+ * so the service no longer has to choose between guessing and abstaining: it reads
+ * `settlement_claim` notes and ignores documenting ones.
  */
 export async function getBalance(
   db: Executor,
   userPersonId: PersonId,
   personAId: PersonId,
   personBId: PersonId,
-  options: GetBalanceOptions = {},
 ): Promise<BalanceResult> {
   const input = await loadBalanceInput(db, userPersonId);
   const netBalance = computeNetBalance(input, personAId, personBId);
@@ -99,11 +80,12 @@ export async function getBalance(
   );
 
   const latestRun = await getLatestReconciliationRun(db);
+  const settlementClaimExpenseIds = await listSettlementClaimExpenseIds(db);
 
   const evidenceStatus = obligationEvidenceStatus({
     netBalance,
     contributingExpenseIds: contributions.map((obligation) => obligation.expenseId),
-    manualNoteExpenseIds: (options.believedSettledExpenseIds ?? []) as ExpenseId[],
+    settlementClaimExpenseIds,
     latestReconciliationRun:
       latestRun === null ? null : { discrepancies: toDiscrepancies(latestRun.discrepancies) },
     personAId,
@@ -111,17 +93,6 @@ export async function getBalance(
   });
 
   return { personAId, personBId, netBalance, evidenceStatus, contributions };
-}
-
-/**
- * Every expense named by a `manual_note` `Evidence` row.
- *
- * Exposed so a review UI can *offer* these as candidate "believed settled" claims for a
- * human to confirm — never so a caller can feed them straight into {@link getBalance}
- * (see that function's remarks on why the shape is ambiguous).
- */
-export async function listCandidateSettlementNotes(db: Executor): Promise<readonly ExpenseId[]> {
-  return listManualNoteExpenseIds(db);
 }
 
 export interface RunReconciliationInput {
