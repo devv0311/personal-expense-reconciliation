@@ -1,0 +1,55 @@
+{
+  "scenario": "A third-party reimbursement against a personal expense (scenario-analysis.md #31, ADR-0008 — this is what 'reimbursement' means now, replacing the previously-undefined Expense.relationship_type value)",
+  "original_payment": {
+    "id": "payment_client_dinner_001",
+    "account_id": "account_icici_credit_card",
+    "amount_inr": 1200.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-22T20:00:00Z",
+    "raw_description": "SAMPLE STEAKHOUSE",
+    "channel": "card",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Sample Steakhouse"
+  },
+  "original_expense": {
+    "id": "expense_client_dinner_001",
+    "description": "Client dinner while traveling for work",
+    "amount_inr": 1200.0,
+    "relationship_type": "personal",
+    "paid_by_person_id": "person_dev"
+  },
+  "original_allocation_v1": {
+    "superseded": true,
+    "method": "equal",
+    "lines": [{ "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 1200.0 }]
+  },
+  "reimbursement_payment": {
+    "id": "payment_employer_reimbursement_001",
+    "account_id": "account_hdfc_savings",
+    "amount_inr": 1200.0,
+    "direction": "credit",
+    "occurred_at": "2026-08-05T10:00:00Z",
+    "raw_description": "NEFT EMPLOYER EXPENSE REIMBURSEMENT",
+    "channel": "bank_transfer",
+    "counterparty_type": "unknown",
+    "counterparty_hint": "Employer payroll/expense system — not modeled as a Person; there is no beneficiary-graph relationship to it"
+  },
+  "expense_adjustment": {
+    "id": "adjustment_client_dinner_reimbursement_001",
+    "original_expense_id": "expense_client_dinner_001",
+    "kind": "third_party_reimbursement",
+    "amount_inr": 1200.0,
+    "adjustment_payment_id": "payment_employer_reimbursement_001",
+    "reason": "Employer travel expense reimbursement",
+    "occurred_at": "2026-08-05T10:00:00Z"
+  },
+  "net_amount_after_adjustment": 0.0,
+  "original_allocation_v2": {
+    "superseded": false,
+    "current": true,
+    "method": "equal",
+    "lines": [{ "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 0.0 }],
+    "note": "Net-zero, resolved the same deterministic way as fixtures/refund-full.json — one line per original beneficiary (here, just Dev), each at amount 0, never an empty lines array (invariants.md #12a)."
+  },
+  "note": "No Obligation and no Settlement anywhere in this fixture — the employer was never a beneficiary in the ledger's graph, so there was never a debt to discharge, only a cost to net out. This is mechanically identical to a merchant_refund (same ExpenseAdjustment table, same netAmount computation, same Allocation-supersession mechanism); only kind and the counterparty differ. Contrast with docs/decisions/0008-refunds-and-reimbursements-as-adjustments.md's comparison table (paid_on_behalf vs merchant_refund vs third_party_reimbursement vs Settlement)."
+}

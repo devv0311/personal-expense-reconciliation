@@ -1,0 +1,26 @@
+{
+  "scenario": "The user sends a settlement to a flatmate, discharging an obligation from flatmate-pays-flat-expense.json (scenario-analysis.md #28, ADR-0007)",
+  "payment": {
+    "id": "payment_settle_dev_to_flatmate_a_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 1000.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-20T09:00:00Z",
+    "raw_description": "UPI-FLATMATEA-TRANSFER",
+    "channel": "upi",
+    "counterparty_type": "person",
+    "counterparty_id": "person_flatmate_a",
+    "external_reference": "UPI/2607200900/P2P",
+    "reference_type": "upi_utr",
+    "source_system": "phonepe_export"
+  },
+  "settlement": {
+    "id": "settlement_dev_to_flatmate_a_001",
+    "payment_id": "payment_settle_dev_to_flatmate_a_001",
+    "counterparty_person_id": "person_flatmate_a",
+    "amount_inr": 1000.0,
+    "reason": "Clearing the electrician-bill share from expense_electrician_001",
+    "recorded_at": "2026-07-20T09:05:00Z"
+  },
+  "note": "No Expense, no Allocation (invariants.md #9a). Discharges the obligation created in fixtures/flatmate-pays-flat-expense.json — Balance(Dev, Flatmate A) moves from 'Dev owes 1000' to 'settled'. No Evidence/receipt is attached; this is the ordinary case, not a special one (see docs/domain/scenario-analysis.md #28's note on settlements with no receipt)."
+}

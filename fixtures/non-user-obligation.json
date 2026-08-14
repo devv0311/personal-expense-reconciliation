@@ -1,0 +1,29 @@
+{
+  "scenario": "An obligation between two people, neither of whom is the user — and why it can never get a Settlement row (scenario-analysis.md #34, ADR-0006, invariants.md #9b — a documented observability boundary, not a modeling failure)",
+  "context": "Continuing fixtures/flatmate-pays-flat-expense.json: Flatmate A fronted the electrician bill; Dev and Flatmate C each owe Flatmate A 1000.0. This fixture covers what happens if FLATMATE C settles directly with FLATMATE A, never involving Dev's own accounts.",
+  "what_cannot_exist": {
+    "settlement_row": "None. A Settlement always requires payment_id referencing a Payment (database-design.md), and a Payment always requires account_id referencing an Account this ledger's User owns (domain-model.md, Account invariants). Money moving from Flatmate C's account to Flatmate A's account never touches an Account Dev owns, so no Payment — and therefore no Settlement — can ever be created for it in this ledger."
+  },
+  "how_it_can_still_be_known": [
+    {
+      "path": "manual_evidence",
+      "description": "Flatmate A or Flatmate C tells Dev the debt is cleared; Dev records an Evidence row (manual_note) with no accompanying Payment or Settlement.",
+      "evidence": {
+        "id": "evidence_flatmate_c_settled_with_a_001",
+        "type": "manual_note",
+        "storage_ref": null,
+        "raw_text": "Flatmate C: 'paid Flatmate A back for the electrician bill directly, we're square.'",
+        "captured_at": "2026-07-25T10:00:00Z",
+        "linked_payment_id": null,
+        "linked_expense_id": null
+      },
+      "effect_on_balance": "Balance(Flatmate C, Flatmate A) as computed by domain.computeBalance() STILL shows Flatmate C owing Flatmate A 1000.0 — the Evidence note alone does not discharge it, because there is no Settlement (the only mechanism invariant #9 recognizes). domain.obligationEvidenceStatus(Flatmate C, Flatmate A) now reads 'believed_settled, unconfirmed_by_ledger' (finalized this revision — domain-model.md's ObligationEvidenceStatus) precisely because this manual_note Evidence row exists and references the contributing expense, but NetBalance itself is untouched by that status — a human must take an explicit, audited action (e.g. resolving the matching ReconciliationRun discrepancy) before the ledger stops surfacing the debt as open."
+    },
+    {
+      "path": "splitwise_reconciliation",
+      "description": "If all three people use the same Splitwise group, Splitwise's own record shows the settlement between Flatmate C and Flatmate A. A ReconciliationRun comparing this ledger's Balance(Flatmate C, Flatmate A) against Splitwise's balance surfaces the discrepancy as a discrepancy, not a silent auto-correction (invariants.md #18).",
+      "effect": "Reconciliation surfaces 'our ledger says 1000.0 owed, Splitwise says 0' — this discrepancy is the second, independent signal feeding domain.obligationEvidenceStatus() into 'believed_settled, unconfirmed_by_ledger'. A human resolves it, same as any other drift."
+    }
+  ],
+  "note": "This fixture exists to make the observability boundary explicit and testable (a test can assert Balance still shows the debt as open after only an Evidence row is added, that obligationEvidenceStatus() correctly flips to 'believed_settled, unconfirmed_by_ledger' from either signal above, and that it moves to a reconciliation 'discrepancy' rather than silently closing after a Splitwise fetch) rather than leaving it as an undocumented gap discovered later. Confirms invariants.md #9b's four guarantees (Balance, reconciliation, Splitwise reconciliation, settlement logic all keep working) directly."
+}

@@ -1,0 +1,27 @@
+{
+  "scenario": "A flatmate sends a settlement to the user — the reverse direction (scenario-analysis.md #29, ADR-0007)",
+  "context": "Unlike flatmate-pays-flat-expense.json, here Dev is the payer of the original expense (see fixtures/utility-bill.json, where Dev paid electricity and Flatmate A owes 700). Flatmate A now repays.",
+  "payment": {
+    "id": "payment_settle_flatmate_a_to_dev_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 700.0,
+    "direction": "credit",
+    "occurred_at": "2026-07-21T11:00:00Z",
+    "raw_description": "UPI-FLATMATEA-TRANSFER-IN",
+    "channel": "upi",
+    "counterparty_type": "person",
+    "counterparty_id": "person_flatmate_a",
+    "external_reference": "UPI/2607211100/P2P",
+    "reference_type": "upi_utr",
+    "source_system": "gpay_export"
+  },
+  "settlement": {
+    "id": "settlement_flatmate_a_to_dev_001",
+    "payment_id": "payment_settle_flatmate_a_to_dev_001",
+    "counterparty_person_id": "person_flatmate_a",
+    "amount_inr": 700.0,
+    "reason": "Clearing their share of the July electricity bill (expense_electricity_001)",
+    "recorded_at": "2026-07-21T11:05:00Z"
+  },
+  "note": "Direction is read entirely from payment.direction = credit — the Settlement record's shape is otherwise identical to the opposite-direction case in settlement-user-to-flatmate.json. Confirms Settlement is symmetric with respect to who initiated the transfer (scenario-analysis.md #29)."
+}

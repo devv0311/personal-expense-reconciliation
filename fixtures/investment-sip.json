@@ -1,0 +1,18 @@
+{
+  "scenario": "An investment payment (scenario-analysis.md #32, ADR-0011 — previously mentioned in product docs with no backing schema mechanism)",
+  "payment": {
+    "id": "payment_mutual_fund_sip_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 5000.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-01T06:00:00Z",
+    "raw_description": "UPI-AUTOPAY-SAMPLEMF-SIP-JUL2026",
+    "channel": "upi",
+    "counterparty_type": "investment_instrument",
+    "counterparty_hint": "Sample Mutual Fund AMC",
+    "external_reference": "UPI/2607010600/AUTOPAY",
+    "reference_type": "upi_utr",
+    "source_system": "gpay_export"
+  },
+  "note": "Never linked to an Expense (extended invariants.md #7). Payment.state remains 'normalized' indefinitely — this is a valid terminal state for an investment_instrument-classified payment, exactly as for an internal_account transfer (docs/domain/lifecycle.md). Counted in ReconciliationRun.ledger_investments_total for the period, excluded from ledger_total_outflow's spend interpretation and from ledger_unexplained_total. Out of scope: this fixture covers only the outflow-classification side, not investment performance/valuation tracking (docs/decisions/0011-investments-in-scope-as-non-expense-payments.md)."
+}

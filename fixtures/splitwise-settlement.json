@@ -1,6 +1,6 @@
 {
-  "scenario": "A settlement payment via Splitwise (scenario-analysis.md #15)",
-  "context": "Dev owes Friend A ₹1500 net (from expense_electronics_partly_friend and other shared expenses). Dev settles up.",
+  "scenario": "A settlement payment via Splitwise (scenario-analysis.md #15, revised 2026-08 per ADR-0007 — settlement is its own entity, never an Expense)",
+  "context": "Dev owes Friend A net (from expense_electronics_partly_friend and other shared expenses). Dev settles part of it.",
   "payment": {
     "id": "payment_settlement_friend_a_001",
     "account_id": "account_hdfc_upi",
@@ -10,20 +10,25 @@
     "raw_description": "UPI-FRIENDA-TRANSFER",
     "channel": "upi",
     "counterparty_type": "person",
-    "counterparty_id": "person_friend_a"
+    "counterparty_id": "person_friend_a",
+    "external_reference": "UPI/2607071500/P2P",
+    "reference_type": "upi_utr",
+    "source_system": "gpay_export"
   },
-  "expense": {
-    "id": "expense_settlement_friend_a_001",
-    "description": "Partial settlement with Friend A",
+  "settlement": {
+    "id": "settlement_friend_a_001",
+    "payment_id": "payment_settlement_friend_a_001",
+    "counterparty_person_id": "person_friend_a",
     "amount_inr": 1000.0,
-    "relationship_type": "settlement"
+    "reason": "Partial settlement toward outstanding shared-expense balance",
+    "recorded_at": "2026-07-07T15:10:00Z"
   },
-  "splitwise_expense": {
-    "id": "splitwise_expense_settlement_001",
-    "expense_id": "expense_settlement_friend_a_001",
-    "splitwise_expense_id": "swx_998877",
-    "synced_at": "2026-07-07T15:10:00Z",
+  "splitwise_settlement": {
+    "id": "splitwise_settlement_001",
+    "settlement_id": "settlement_friend_a_001",
+    "splitwise_transaction_id": "swx_998877",
+    "synced_at": "2026-07-07T15:12:00Z",
     "sync_status": "synced"
   },
-  "note": "This 1000 reduces Dev's balance with Friend A; it does NOT appear in ReconciliationRun.ledger_explained_total as new spend — see docs/domain/invariants.md #9."
+  "note": "There is deliberately no Expense and no Allocation anywhere in this fixture (invariants.md #9a) — a Settlement discharges Balance(Dev, Friend A) directly. This 1000 reduces the balance and is counted in ReconciliationRun.ledger_settlements_total; it never appears in ledger_explained_total as new spend (invariants.md #9). No receipt or other Evidence is attached, which is valid and unremarkable (see scenario-analysis.md #28's note on settlements with no receipt) — Evidence has always been optional on a Payment. Contrast with the pre-2026-08 version of this fixture, which forced a trivial Expense + Allocation through the settlement path; that design is superseded, see docs/decisions/0007-settlements-as-events-not-expenses.md."
 }

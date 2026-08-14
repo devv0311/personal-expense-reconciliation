@@ -1,5 +1,5 @@
 {
-  "scenario": "The same charge appearing twice across two import sources (scenario-analysis.md #13)",
+  "scenario": "The same charge appearing twice across two import sources (scenario-analysis.md #13, revised 2026-08 per ADR-0010 — external_reference is now a real schema field, not an informal convention)",
   "payments": [
     {
       "id": "payment_blinkit_dup_bank",
@@ -10,7 +10,9 @@
       "occurred_at": "2026-07-12T19:00:00Z",
       "raw_description": "UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD",
       "channel": "bank_transfer",
-      "reference": "UPI/2607121234/BLINKIT"
+      "external_reference": "UPI/2607121234/BLINKIT",
+      "reference_type": "upi_utr",
+      "source_system": "hdfc_bank_csv"
     },
     {
       "id": "payment_blinkit_dup_upi",
@@ -21,7 +23,9 @@
       "occurred_at": "2026-07-12T19:00:03Z",
       "raw_description": "BLINKIT INDIA PVT LTD",
       "channel": "upi",
-      "reference": "UPI/2607121234/BLINKIT"
+      "external_reference": "UPI/2607121234/BLINKIT",
+      "reference_type": "upi_utr",
+      "source_system": "gpay_export"
     }
   ],
   "expected_outcome": {
@@ -29,6 +33,6 @@
       "state": "ignored",
       "ignored_reason": "duplicate_of:payment_blinkit_dup_bank"
     },
-    "detection_basis": "Same account-linked UPI reference number, same amount, timestamps within seconds — deterministic dedup per docs/domain/invariants.md #10."
+    "detection_basis": "Same external_reference (UTR), same amount, timestamps within seconds — deterministic dedup per docs/domain/invariants.md #10, matched WITHOUT requiring account_id to match (these two payments are on different Account rows, account_hdfc_savings vs account_hdfc_upi, precisely because a bank-CSV capture and a UPI-export capture of the same real-world UPI transaction land under different Account types in this schema — see docs/decisions/0010-payment-external-reference-fields.md's amendment). Prior to ADR-0010 this fixture used an informal 'reference' field with no backing schema column; external_reference/reference_type/source_system are now real payments columns (docs/architecture/database-design.md)."
   }
 }

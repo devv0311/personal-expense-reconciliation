@@ -1,0 +1,29 @@
+{
+  "scenario": "A friend pays a restaurant bill; the user owes their share (scenario-analysis.md #27, ADR-0006 — bidirectional payer, no Group involved)",
+  "evidence": {
+    "id": "evidence_friend_dinner_001",
+    "type": "manual_note",
+    "storage_ref": null,
+    "raw_text": "Friend A covered dinner, 1800 total, we're splitting it evenly.",
+    "captured_at": "2026-07-18T21:30:00Z"
+  },
+  "expense": {
+    "id": "expense_friend_dinner_001",
+    "description": "Dinner with Friend A — they paid",
+    "amount_inr": 1800.0,
+    "relationship_type": "shared",
+    "paid_by_person_id": "person_friend_a",
+    "occurred_at": "2026-07-18T20:30:00Z",
+    "note": "Evidence-only, no payment_expense_link — confirms the reverse-payer mechanism works bilaterally, without any Group involved."
+  },
+  "allocation": {
+    "method": "equal",
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 900.0 },
+      { "beneficiary_type": "person", "beneficiary_id": "person_friend_a", "amount_inr": 900.0 }
+    ]
+  },
+  "resulting_obligations": {
+    "balances": [{ "owes": "person_dev", "owed_to": "person_friend_a", "amount_inr": 900.0 }]
+  }
+}

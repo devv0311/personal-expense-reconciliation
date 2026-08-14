@@ -12,7 +12,16 @@
       "display_name": "Flatmate B",
       "notes": "Moved out 2026-06-30 — see group_memberships."
     },
-    { "id": "person_flatmate_c", "display_name": "Flatmate C", "notes": "Moved in 2026-07-01." },
+    {
+      "id": "person_flatmate_c",
+      "display_name": "Flatmate C",
+      "notes": "Moved in 2026-07-01, moved out 2026-08-31 — see group_memberships and scenario-analysis.md §33."
+    },
+    {
+      "id": "person_flatmate_d",
+      "display_name": "Flatmate D",
+      "notes": "Moved in 2026-09-01 — see group_memberships and scenario-analysis.md §33."
+    },
     { "id": "person_friend_a", "display_name": "Friend A" },
     { "id": "person_friend_b", "display_name": "Friend B" }
   ],
@@ -44,6 +53,12 @@
       "group_id": "group_flat",
       "person_id": "person_flatmate_c",
       "joined_at": "2026-07-01T00:00:00Z",
+      "left_at": "2026-08-31T00:00:00Z"
+    },
+    {
+      "group_id": "group_flat",
+      "person_id": "person_flatmate_d",
+      "joined_at": "2026-09-01T00:00:00Z",
       "left_at": null
     },
     {
@@ -90,5 +105,6 @@
       "last4": "9013"
     },
     { "id": "account_cash_wallet", "owner_person_id": "person_dev", "name": "Cash", "type": "cash" }
-  ]
+  ],
+  "revision_note_2026_08": "Flatmate D and Flatmate C's 2026-08-31 departure were added to support scenario-analysis.md §33 (group-allocation expansion snapshot mechanics) — see docs/decisions/0009-group-allocation-expansion-snapshot.md. All other fixtures referencing 'the flat' predate 2026-08-31 and are unaffected by Flatmate C's departure or Flatmate D's arrival."
 }

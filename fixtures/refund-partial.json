@@ -1,25 +1,40 @@
 {
-  "scenario": "A partial refund (scenario-analysis.md #12)",
+  "scenario": "A partial refund (scenario-analysis.md #12, revised 2026-08 per ADR-0008 — refunds are ExpenseAdjustments against the original Expense, which is never mutated)",
+  "original_payment": {
+    "id": "payment_grocery_partial_refund_001",
+    "account_id": "account_hdfc_upi",
+    "amount_inr": 900.0,
+    "direction": "debit",
+    "occurred_at": "2026-07-08T18:00:00Z",
+    "raw_description": "UPI-ZEPTOMARKETPLACE-zepto@axl",
+    "channel": "upi",
+    "counterparty_type": "merchant",
+    "counterparty_hint": "Zepto"
+  },
   "original_expense": {
     "id": "expense_grocery_partial_refund_001",
     "description": "Zepto grocery order",
     "amount_inr": 900.0,
     "relationship_type": "household_shared_flat",
-    "allocation": {
-      "method": "equal",
-      "lines": [
-        { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 300.0 },
-        {
-          "beneficiary_type": "person",
-          "beneficiary_id": "person_flatmate_a",
-          "amount_inr": 300.0
-        },
-        { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_c", "amount_inr": 300.0 }
-      ]
-    }
+    "paid_by_person_id": "person_dev",
+    "note": "amount_inr stays 900.0 forever, even after the refund below — gross, historical, immutable once APPROVED (invariants.md #6)."
+  },
+  "original_allocation_v1": {
+    "superseded": true,
+    "method": "equal",
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 300.0 },
+      {
+        "beneficiary_type": "person",
+        "beneficiary_id": "person_flatmate_a",
+        "amount_inr": 300.0
+      },
+      { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_c", "amount_inr": 300.0 }
+    ],
+    "note": "Sums to 900.0 = netAmount before any adjustment existed (netAmount == gross amount when there are no adjustments yet)."
   },
   "refund_payment": {
-    "id": "payment_grocery_partial_refund_001",
+    "id": "payment_grocery_partial_refund_credit_001",
     "account_id": "account_hdfc_upi",
     "amount_inr": 150.0,
     "direction": "credit",
@@ -29,20 +44,25 @@
     "counterparty_type": "merchant",
     "counterparty_hint": "Zepto"
   },
-  "refund_expense": {
-    "id": "expense_grocery_partial_refund_credit_001",
-    "description": "Refund — damaged item from Zepto order",
+  "expense_adjustment": {
+    "id": "adjustment_grocery_partial_refund_001",
+    "original_expense_id": "expense_grocery_partial_refund_001",
+    "kind": "merchant_refund",
     "amount_inr": 150.0,
-    "relationship_type": "household_shared_flat",
-    "refund_of_expense_id": "expense_grocery_partial_refund_001"
+    "adjustment_payment_id": "payment_grocery_partial_refund_credit_001",
+    "reason": "Damaged item, refunded by Zepto",
+    "occurred_at": "2026-07-09T08:00:00Z"
   },
-  "new_allocation_after_refund": {
+  "net_amount_after_adjustment": 750.0,
+  "original_allocation_v2": {
+    "superseded": false,
+    "current": true,
     "method": "equal",
     "lines": [
       { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 250.0 },
       { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_a", "amount_inr": 250.0 },
       { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_c", "amount_inr": 250.0 }
     ],
-    "note": "A new Allocation version (750 total, per docs/domain/invariants.md #6) supersedes the original 900 one; the refund was allocated proportionally across all three by explicit decision, not by default. See docs/domain/scenario-analysis.md #12."
+    "note": "Supersedes original_allocation_v1 (invariants.md #6). Sums to 750.0 = domain.netAmount(expense) = 900.0 - 150.0, satisfying invariants.md #11 exactly — this is the arithmetic that was ambiguous in the pre-2026-08 version of this fixture (the original Expense.amount was never shown changing while the allocation summed to only 750). The refund's reduction was distributed proportionally across all three beneficiaries by explicit decision, not by a silent default (scenario-analysis.md #12)."
   }
 }

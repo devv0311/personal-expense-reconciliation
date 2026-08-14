@@ -1,5 +1,5 @@
 {
-  "scenario": "A full refund against a prior expense (scenario-analysis.md #11)",
+  "scenario": "A full refund against a prior expense (scenario-analysis.md #11, revised 2026-08 per ADR-0008)",
   "original_payment": {
     "id": "payment_electronics_faulty_001",
     "account_id": "account_icici_credit_card",
@@ -15,7 +15,14 @@
     "id": "expense_electronics_faulty_001",
     "description": "USB cable (faulty, later returned)",
     "amount_inr": 450.0,
-    "relationship_type": "personal"
+    "relationship_type": "personal",
+    "paid_by_person_id": "person_dev",
+    "note": "amount_inr stays 450.0 forever — never mutated, per invariants.md #6."
+  },
+  "original_allocation_v1": {
+    "superseded": true,
+    "method": "equal",
+    "lines": [{ "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 450.0 }]
   },
   "refund_payment": {
     "id": "payment_electronics_refund_001",
@@ -28,12 +35,22 @@
     "counterparty_type": "merchant",
     "counterparty_hint": "Sample Electronics Store"
   },
-  "refund_expense": {
-    "id": "expense_electronics_refund_001",
-    "description": "Refund — faulty USB cable",
+  "expense_adjustment": {
+    "id": "adjustment_electronics_faulty_refund_001",
+    "original_expense_id": "expense_electronics_faulty_001",
+    "kind": "merchant_refund",
     "amount_inr": 450.0,
-    "relationship_type": "personal",
-    "refund_of_expense_id": "expense_electronics_faulty_001"
+    "adjustment_payment_id": "payment_electronics_refund_001",
+    "reason": "Faulty item, full refund",
+    "occurred_at": "2026-07-05T10:00:00Z"
   },
-  "note": "Net effect on Dev's personal spend for this purchase is 0 — the original 450 expense and the 450 refund are both kept as distinct, evidenced records rather than deleting/editing the original. See docs/domain/invariants.md #4, #8."
+  "net_amount_after_adjustment": 0.0,
+  "original_allocation_v2": {
+    "superseded": false,
+    "current": true,
+    "method": "equal",
+    "lines": [{ "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 0.0 }],
+    "note": "netAmount is 0 — resolved this revision (invariants.md #12a, domain-model.md's 'Full refunds, resolved'): applying the Largest Remainder Method with a total of 0 against the original one-line beneficiary set deterministically yields one line, at amount 0, never an empty lines array. The sum of current AllocationLine.amount (0) equals domain.netAmount(expense) (450.0 - 450.0 = 0), satisfying invariants.md #11, and Dev is still visibly the (zero-cost) beneficiary rather than the allocation appearing to have no beneficiaries at all."
+  },
+  "note": "Net effect on Dev's personal spend for this purchase is 0 — the original 450 expense stays on the books exactly as it was (gross, historical, auditable), the refund is a separate ExpenseAdjustment referencing it, and only the derived netAmount reflects the net-zero outcome; the current allocation still names Dev as the (zero-cost) beneficiary rather than going blank. If this expense had already synced to Splitwise, the correct next action would be deleting the SplitwiseExpense, not pushing a $0 update — see domain-model.md's 'Splitwise implications of a net-zero adjustment.' Contrast with the pre-2026-08 version of this fixture, which created a second Expense (expense_electronics_refund_001) via refund_of_expense_id — that mechanism is removed, see docs/decisions/0008-refunds-and-reimbursements-as-adjustments.md."
 }

@@ -1,0 +1,100 @@
+{
+  "scenario": "Group beneficiary allocation, expanded to individual shares at approval time, unaffected by a later membership change (scenario-analysis.md #33, ADR-0009)",
+  "july_expense": {
+    "payment": {
+      "id": "payment_electricity_july_001",
+      "account_id": "account_hdfc_upi",
+      "amount_inr": 2100.0,
+      "direction": "debit",
+      "occurred_at": "2026-07-10T08:00:00Z",
+      "raw_description": "ELECTRICITY BOARD BBPS BILLPAY",
+      "channel": "upi",
+      "counterparty_type": "merchant",
+      "counterparty_hint": "State Electricity Board"
+    },
+    "expense": {
+      "id": "expense_electricity_july_001",
+      "description": "Electricity bill — July",
+      "amount_inr": 2100.0,
+      "relationship_type": "household_shared_flat",
+      "paid_by_person_id": "person_dev",
+      "occurred_at": "2026-07-10T08:00:00Z"
+    },
+    "allocation": {
+      "method": "equal",
+      "lines": [
+        {
+          "id": "allocation_line_flat_july",
+          "beneficiary_type": "group",
+          "beneficiary_id": "group_flat",
+          "amount_inr": 2100.0
+        }
+      ]
+    },
+    "allocation_line_group_expansion": {
+      "allocation_line_id": "allocation_line_flat_july",
+      "resolved_as_of": "2026-07-10T08:00:00Z (expense.occurred_at, not 'today')",
+      "resolved_members": ["person_dev", "person_flatmate_a", "person_flatmate_c"],
+      "note_on_resolution": "Flatmate B had already left (2026-06-30) and Flatmate C had already joined (2026-07-01) as of this expense's date — resolved from fixtures/people-and-groups.json's group_memberships, per docs/decisions/0009-group-allocation-expansion-snapshot.md.",
+      "rows": [
+        { "person_id": "person_dev", "amount_inr": 700.0 },
+        { "person_id": "person_flatmate_a", "amount_inr": 700.0 },
+        { "person_id": "person_flatmate_c", "amount_inr": 700.0 }
+      ]
+    },
+    "resulting_obligations": {
+      "note": "Balance and any Splitwise sync for this expense read ONLY these three expansion rows, never the raw group line. 'The Flat' is never a debtor.",
+      "balances": [
+        { "owes": "person_flatmate_a", "owed_to": "person_dev", "amount_inr": 700.0 },
+        { "owes": "person_flatmate_c", "owed_to": "person_dev", "amount_inr": 700.0 }
+      ]
+    }
+  },
+  "membership_change": {
+    "event": "2026-08-31: Flatmate C moves out. 2026-09-01: Flatmate D moves in.",
+    "effect_on_july_expansion": "NONE. The three allocation_line_group_expansion rows above, written on 2026-07-10, are never recomputed or touched. Flatmate C still individually owes Dev 700.0 for July even after moving out — invariants.md #2b, #6."
+  },
+  "september_expense": {
+    "payment": {
+      "id": "payment_electricity_september_001",
+      "account_id": "account_hdfc_upi",
+      "amount_inr": 2400.0,
+      "direction": "debit",
+      "occurred_at": "2026-09-10T08:00:00Z",
+      "raw_description": "ELECTRICITY BOARD BBPS BILLPAY",
+      "channel": "upi",
+      "counterparty_type": "merchant",
+      "counterparty_hint": "State Electricity Board"
+    },
+    "expense": {
+      "id": "expense_electricity_september_001",
+      "description": "Electricity bill — September",
+      "amount_inr": 2400.0,
+      "relationship_type": "household_shared_flat",
+      "paid_by_person_id": "person_dev",
+      "occurred_at": "2026-09-10T08:00:00Z"
+    },
+    "allocation": {
+      "method": "equal",
+      "lines": [
+        {
+          "id": "allocation_line_flat_september",
+          "beneficiary_type": "group",
+          "beneficiary_id": "group_flat",
+          "amount_inr": 2400.0
+        }
+      ]
+    },
+    "allocation_line_group_expansion": {
+      "allocation_line_id": "allocation_line_flat_september",
+      "resolved_as_of": "2026-09-10T08:00:00Z",
+      "resolved_members": ["person_dev", "person_flatmate_a", "person_flatmate_d"],
+      "note_on_resolution": "A NEW resolution, correctly picking up Flatmate D (joined 2026-09-01) instead of Flatmate C (left 2026-08-31) — this is the 'a later expense correctly uses current membership' half of the mechanism; the July expense's expansion (above) is the 'a past expense is unaffected' half.",
+      "rows": [
+        { "person_id": "person_dev", "amount_inr": 800.0 },
+        { "person_id": "person_flatmate_a", "amount_inr": 800.0 },
+        { "person_id": "person_flatmate_d", "amount_inr": 800.0 }
+      ]
+    }
+  }
+}

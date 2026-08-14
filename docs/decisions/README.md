@@ -22,10 +22,20 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 
 ## Index
 
-| ADR                                             | Title                                                                 | Status   |
-| ----------------------------------------------- | --------------------------------------------------------------------- | -------- |
-| [0001](0001-record-architecture-decisions.md)   | Record architecture decisions                                         | Accepted |
-| [0002](0002-technology-stack.md)                | Technology stack                                                      | Accepted |
-| [0003](0003-relational-database.md)             | Relational database over document/NoSQL                               | Accepted |
-| [0004](0004-beneficiary-settlement-modeling.md) | Fold Beneficiary/Classification/Decision/Settlement into fewer tables | Accepted |
-| [0005](0005-single-repo-no-microservices.md)    | Single deployable service, no microservices                           | Accepted |
+| ADR                                                          | Title                                                                 | Status                                    |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------- |
+| [0001](0001-record-architecture-decisions.md)                   | Record architecture decisions                                         | Accepted                                     |
+| [0002](0002-technology-stack.md)                                 | Technology stack                                                      | Accepted                                     |
+| [0003](0003-relational-database.md)                              | Relational database over document/NoSQL                               | Accepted                                     |
+| [0004](0004-beneficiary-settlement-modeling.md)                  | Fold Beneficiary/Classification/Decision/Settlement into fewer tables | Accepted — settlement paragraph partially superseded by 0007 |
+| [0005](0005-single-repo-no-microservices.md)                     | Single deployable service, no microservices                           | Accepted                                     |
+| [0006](0006-bidirectional-payer-model.md)                        | Explicit `paid_by_person_id` — bidirectional payer model               | Accepted                                     |
+| [0007](0007-settlements-as-events-not-expenses.md)               | Settlements are Payment-linked events, not Expenses                    | Accepted                                     |
+| [0008](0008-refunds-and-reimbursements-as-adjustments.md)        | Refunds and reimbursements are linked adjustment events                | Accepted                                     |
+| [0009](0009-group-allocation-expansion-snapshot.md)              | Group-beneficiary allocation lines get a per-member expansion snapshot | Accepted                                     |
+| [0010](0010-payment-external-reference-fields.md)                | Payment external-reference fields for deduplication                    | Accepted                                     |
+| [0011](0011-investments-in-scope-as-non-expense-payments.md)     | Investments in scope as a non-expense payment classification           | Accepted                                     |
+| [0012](0012-deterministic-money-rounding.md)                     | Deterministic money rounding — Largest Remainder Method                | Accepted                                     |
+| [0013](0013-full-refund-preserves-allocation-shape.md)           | Full refund's current allocation keeps zero-amount lines, not an empty set | Accepted                                  |
+| [0014](0014-obligation-evidence-status.md)                       | Non-user settlement observability — `ObligationEvidenceStatus`         | Accepted                                     |
+| [0015](0015-inflow-reconciliation-out-of-scope-v1.md)            | Inflow/income reconciliation explicitly out of scope for V1            | Accepted                                     |

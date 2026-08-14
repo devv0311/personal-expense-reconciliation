@@ -1,0 +1,40 @@
+{
+  "scenario": "A flatmate pays a flat expense; the user and another flatmate owe their shares (scenario-analysis.md #26, ADR-0006 — bidirectional payer)",
+  "evidence": {
+    "id": "evidence_electrician_001",
+    "type": "manual_note",
+    "storage_ref": null,
+    "raw_text": "Flatmate A: 'paid the electrician, 3000, let's split it three ways as usual'",
+    "captured_at": "2026-07-16T19:00:00Z"
+  },
+  "expense": {
+    "id": "expense_electrician_001",
+    "description": "Electrician — fixed the kitchen wiring",
+    "amount_inr": 3000.0,
+    "relationship_type": "household_shared_flat",
+    "paid_by_person_id": "person_flatmate_a",
+    "occurred_at": "2026-07-16T18:00:00Z",
+    "note": "No payment_expense_link exists or ever will for this expense — no money moved through an Account Dev owns. This is a permanent, valid category (paid_by_person_id != Dev), not a transitional evidence-pending state. See docs/decisions/0006-bidirectional-payer-model.md."
+  },
+  "allocation": {
+    "method": "equal",
+    "lines": [
+      { "beneficiary_type": "person", "beneficiary_id": "person_dev", "amount_inr": 1000.0 },
+      {
+        "beneficiary_type": "person",
+        "beneficiary_id": "person_flatmate_a",
+        "amount_inr": 1000.0
+      },
+      { "beneficiary_type": "person", "beneficiary_id": "person_flatmate_c", "amount_inr": 1000.0 }
+    ],
+    "note_on_cast": "Flatmate C (joined 2026-07-01), not Flatmate B (moved out 2026-06-30), is the third beneficiary — consistent with fixtures/people-and-groups.json's group_memberships timeline for a 2026-07-16 expense."
+  },
+  "resulting_obligations": {
+    "note": "Flatmate A's own line creates no obligation (invariants.md #2a — they benefited from their own money). Dev's and Flatmate C's lines each create an obligation OWED TO Flatmate A, not to Dev.",
+    "balances": [
+      { "owes": "person_dev", "owed_to": "person_flatmate_a", "amount_inr": 1000.0 },
+      { "owes": "person_flatmate_c", "owed_to": "person_flatmate_a", "amount_inr": 1000.0 }
+    ]
+  },
+  "splitwise": "Syncs as a normal shared expense from Flatmate A's perspective as the payer — Splitwise itself has always supported any member as the payer; this system previously could not represent that for its own ledger."
+}

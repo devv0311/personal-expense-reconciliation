@@ -3,6 +3,10 @@
 This system processes sensitive personal financial information. This document defines the
 rules for handling it, per `CLAUDE.md`'s security section.
 
+> **Revision note (2026-08).** One addition: `payments.external_reference` (ADR-0010) is treated
+> as a redaction-worthy identifier before any AI provider call, alongside account/card/UPI
+> identifiers — see "Data sent to external AI services" below. No other security rule changed.
+
 ## Principles
 
 - Least privilege — the application's database role has only the access each layer actually
@@ -47,12 +51,15 @@ governed independently of database access.
 Before any `Payment`/`Evidence`/`Receipt` data is sent to the AI provider
 (`docs/architecture/ai-boundary.md`):
 
-- Full account numbers, card numbers, and UPI IDs are redacted or omitted. Where a merchant or
-  counterparty needs to be identified, the already-normalized `Merchant`/`Person` reference is
-  sent where possible, not the raw statement line containing an identifier.
+- Full account numbers, card numbers, UPI IDs, **and `payments.external_reference` values**
+  (added, ADR-0010 — a UTR/RRN/bank reference is an identifier of the same sensitivity class as
+  an account number and is redacted or omitted on the same basis) are redacted or omitted.
+  Where a merchant or counterparty needs to be identified, the already-normalized
+  `Merchant`/`Person` reference is sent where possible, not the raw statement line or reference
+  number containing an identifier.
 - Only the minimum fields needed for the specific inference are sent (e.g.
   `classifyTransaction` needs amount/description/merchant, not the full account number the
-  payment came from).
+  payment came from, and not its `external_reference`).
 - This redaction step is a named function in `src/ai` (not inlined ad hoc at each call site),
   so it's implemented once and testable once.
 
