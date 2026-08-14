@@ -8,6 +8,13 @@
       "when": 1786704415900,
       "tag": "0000_initial_financial_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786734455295,
+      "tag": "0001_evidence_note_kind",
+      "breakpoints": true
     }
   ]
 }

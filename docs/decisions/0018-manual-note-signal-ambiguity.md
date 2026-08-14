@@ -1,7 +1,7 @@
 # 0018. A `manual_note` cannot currently distinguish "this documents the expense" from "this debt was cleared"
 
-**Status:** Proposed — this ADR reports a contradiction between two accepted ADRs and lays out
-the options. It does **not** pick one; that is a decision for review.
+**Status:** Accepted (2026-08-15). Reported a contradiction between two accepted ADRs; option 1
+below was chosen and implemented.
 
 ## Context
 
@@ -29,7 +29,10 @@ That is exactly backwards. The status exists so the product can show _"an obliga
 expected here, but this ledger has no settlement evidence for it"_; under the literal rule it
 would instead claim settlement evidence for every obligation that most needs the warning.
 
-## Decision (interim, deliberately minimal)
+## Decision (superseded — kept for the reasoning)
+
+_The interim below was what shipped while the contradiction was unresolved. It is retained
+because the reasoning still explains why the service refuses to guess._
 
 `domain.obligationEvidenceStatus` is **unchanged** and implements ADR-0014 exactly as written:
 it takes the set of expense ids whose notes claim settlement, and applies the documented rule.
@@ -45,7 +48,46 @@ The effect today: an obligation reports `open_unconfirmed` unless a human explic
 a note, or Splitwise disagrees. No behaviour is invented, no schema is changed, and no
 documented rule is silently weakened.
 
-## Options for resolving it properly
+## Resolution — option 1, an explicit discriminator on `evidence`
+
+`evidence.note_kind text` (nullable at the column level), with two check constraints:
+
+```sql
+check (note_kind is null or note_kind in ('documentation', 'settlement_claim'))
+check ((type = 'manual_note') = (note_kind is not null))
+```
+
+The second is what makes it honest: a manual note **must** declare which of the two things it
+is, and nothing else may declare either. There is no "unspecified" state to fall back on and
+therefore no default to get wrong — defaulting to `documentation` would silently discard a
+settlement claim, and defaulting to `settlement_claim` would mark every documented expense
+settled.
+
+Named `documentation`/`settlement_claim` rather than the `documents_expense`/`claims_settlement`
+this ADR first sketched: a manual note can attach to a `Payment` as well as an `Expense`, so the
+neutral noun reads correctly in both cases.
+
+**This makes the rule deterministic, so the interim opt-in is withdrawn.** `services.getBalance()`
+no longer takes `believedSettledExpenseIds` and no longer abstains — it reads
+`settlement_claim` notes directly, which is what ADR-0014 always intended. The escape hatch
+existed only because the data could not express the distinction; it can now.
+
+Implemented in: `evidence.note_kind` (schema + migration `0001_evidence_note_kind.sql`),
+`EVIDENCE_NOTE_KINDS` and `Evidence.noteKind` (domain), `domain.validateEvidenceNoteKind` and
+`domain.claimsSettlement` (validation), `db.listSettlementClaimExpenseIds`,
+`services.getBalance`, and `domain.obligationEvidenceStatus`'s input, renamed from
+`manualNoteExpenseIds` to `settlementClaimExpenseIds` so the parameter cannot be mistaken for
+the broader set again.
+
+**Migration note.** `0001` is additive and safe on an empty database. Applied to a database that
+already held `manual_note` rows, the second check would fail until those rows were backfilled
+with a kind — deliberately, since guessing on their behalf is the very thing this ADR forbids.
+No such database exists yet. The reverse of the migration is
+`alter table evidence drop column note_kind` (the constraints and index go with the column);
+Drizzle does not generate down-migrations, which is a pre-existing repository-wide gap rather
+than something specific to this change.
+
+## Options considered before choosing option 1
 
 1. **Add a discriminator to `evidence`** — e.g. `note_kind text check (note_kind in
 ('documents_expense', 'claims_settlement'))`, nullable for existing rows. Smallest change
@@ -65,8 +107,17 @@ not being made here.
 
 ## Consequences
 
-`services.getBalance()` gains an optional parameter; nothing else changes. Two tests pin the
-interim behaviour: an externally-funded expense with a documenting note reports
-`open_unconfirmed`, and the same pair reports `believed_settled_unconfirmed_by_ledger` when the
-note is explicitly nominated. Whichever option is chosen, those tests are the ones that should
-change with it.
+One nullable column, two check constraints, one partial index, and one additive migration.
+`services.getBalance()` loses its optional parameter and becomes deterministic. `ADR-0014`'s
+first bullet, `invariants.md` #9b, `domain-model.md`'s `Evidence` and `ObligationEvidenceStatus`
+sections, and `database-design.md`'s `evidence` table all now state the discriminator rather
+than the ambiguous shape.
+
+A manual note now costs the caller one decision it did not previously have to make. That is the
+point: the decision was always being made, silently and wrongly, by whichever rule happened to
+read the row.
+
+The regression suite in `tests/scenarios/` pins the behaviour that matters — an externally-funded
+expense documented with an ordinary note reports `open_unconfirmed`, the same pair reports
+`believed_settled_unconfirmed_by_ledger` only when a note actually claims settlement, and
+neither case moves `NetBalance` or fabricates a `Payment`/`Settlement` (invariant #9b).

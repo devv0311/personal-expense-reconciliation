@@ -23,6 +23,7 @@ import type {
   AuditableEntityType,
   BeneficiaryType,
   ConfidenceLevel,
+  EvidenceNoteKind,
   EvidenceType,
   ExpenseAdjustmentKind,
   ExpenseRelationshipType,
@@ -198,6 +199,14 @@ export interface Evidence {
   readonly capturedAt: Date;
   readonly linkedPaymentId: PaymentId | null;
   readonly linkedExpenseId: ExpenseId | null;
+  /**
+   * What a manual note asserts (ADR-0018). Non-null exactly when `type = 'manual_note'`.
+   *
+   * Without it, documenting an externally-funded expense (ADR-0006) and claiming a debt was
+   * cleared (ADR-0014) are the same row shape, and the second reading fires on every
+   * instance of the first.
+   */
+  readonly noteKind: EvidenceNoteKind | null;
 }
 
 /**

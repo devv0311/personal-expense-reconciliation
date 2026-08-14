@@ -69,6 +69,20 @@ export const EVIDENCE_TYPES = [
 ] as const;
 export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
 
+/**
+ * What a `manual_note` `Evidence` row is *asserting* (ADR-0018).
+ *
+ * Without this, one shape carries two opposite meanings: ADR-0006 documents an
+ * externally-funded expense with a manual note, and ADR-0014 reads a manual note on a
+ * contributing expense as "this debt was cleared". Both are `type = manual_note` with
+ * `linked_expense_id` set, so the second rule fired on every instance of the first —
+ * reporting an obligation as believed-settled the moment it was recorded.
+ *
+ * Set on manual notes and only on manual notes; see `validateEvidenceNoteKind`.
+ */
+export const EVIDENCE_NOTE_KINDS = ['documentation', 'settlement_claim'] as const;
+export type EvidenceNoteKind = (typeof EVIDENCE_NOTE_KINDS)[number];
+
 export const CONFIDENCE_LEVELS = ['high', 'medium', 'low', 'unknown'] as const;
 export type ConfidenceLevel = (typeof CONFIDENCE_LEVELS)[number];
 

@@ -14,9 +14,10 @@
 
 import { and, asc, eq, isNull } from 'drizzle-orm';
 
-import { asId } from '../../src/domain/index.js';
+import { asId, validateEvidenceNoteKind } from '../../src/domain/index.js';
 import type {
   AccountId,
+  EvidenceNoteKind,
   ExpenseId,
   ExpenseItemId,
   ExpenseOccasionId,
@@ -226,15 +227,29 @@ export async function addOccasion(
   return asId<'expense_occasion'>(row!.id);
 }
 
-/** Records a manual note — the evidence-only trail an externally-funded expense has. */
+/**
+ * Records a manual note.
+ *
+ * `noteKind` is required, exactly as the schema requires it: a note that documents an
+ * externally-funded expense and a note that claims a debt was cleared are the same shape
+ * otherwise, and the test helper is not allowed to guess either (ADR-0018).
+ */
 export async function addManualNote(
   db: Database,
-  input: { text: string; capturedAt: Date; expenseId?: ExpenseId; paymentId?: PaymentId },
+  input: {
+    text: string;
+    capturedAt: Date;
+    noteKind: EvidenceNoteKind;
+    expenseId?: ExpenseId;
+    paymentId?: PaymentId;
+  },
 ): Promise<void> {
+  validateEvidenceNoteKind('manual_note', input.noteKind);
   await db.insert(schema.evidence).values({
     type: 'manual_note',
     rawText: input.text,
     capturedAt: input.capturedAt,
+    noteKind: input.noteKind,
     linkedExpenseId: input.expenseId ?? null,
     linkedPaymentId: input.paymentId ?? null,
   });
