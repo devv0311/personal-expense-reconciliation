@@ -59,6 +59,18 @@ before the ones before it are solid; see `CLAUDE.md`, "Development workflow."
 - No UI exists beyond what a future framework choice mandates as a placeholder.
 - No real bank, card, or Splitwise account is connected anywhere in the repo or its config.
 
+> **Implementation note (2026-08-14, deterministic foundation).** A foundation pass has now
+> landed `src/domain`, `src/db` (schema + migrations), and the deterministic half of
+> `src/services`. It deliberately cuts **across** the phase numbering above rather than
+> following it: phase 4's migrations are written, and the allocation/adjustment/settlement/
+> balance/reconciliation machinery described under phases 12, 13 and 15 exists as pure domain
+> logic plus its service orchestration — while phases 6–11 (import, normalization,
+> classification, human review, receipts) remain **not started**. That ordering was explicitly
+> instructed, on the reasoning that a trustworthy financial core should exist before anything
+> feeds data into it; it is recorded here because it departs from `CLAUDE.md`'s "do not jump
+> ahead of the current phase" rule and should not be taken as precedent. No AI, Splitwise, bank
+> ingestion or UI code was written. See ADRs 0016–0018 for what the pass surfaced.
+
 ## Recommended next phase
 
 **Phase 6, Transaction import**, starting with a single source format (a synthetic UPI or bank

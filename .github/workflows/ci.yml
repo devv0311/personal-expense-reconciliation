@@ -9,6 +9,25 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+
+    # The integration suite runs against a real PostgreSQL server here, per
+    # docs/testing/testing-strategy.md. Locally it falls back to PGlite when
+    # TEST_DATABASE_URL is unset — see docs/decisions/0017-integration-test-database.md.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: expense_reconciliation_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -29,5 +48,15 @@ jobs:
       - name: Format check
         run: npm run format:check
 
-      - name: Test
+      - name: Verify migrations match the schema
+        run: npm run db:check
+
+      - name: Test (against a real PostgreSQL server)
+        run: npm test
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/expense_reconciliation_test
+
+      - name: Test (against the in-process PGlite fallback)
+        # Runs the same suite the way a developer without Docker runs it, so the fallback
+        # path cannot silently rot.
         run: npm test
