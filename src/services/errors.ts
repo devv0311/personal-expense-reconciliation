@@ -13,6 +13,8 @@ export type ServiceErrorCode =
   | 'ENTITY_NOT_FOUND'
   /** The operation is not valid for the entity's current state. */
   | 'PRECONDITION_FAILED'
+  /** A source file could not be read; every rejected row is reported (Phase 6). */
+  | 'IMPORT_SOURCE_INVALID'
   /**
    * A mutating transaction completed without recording an `AuditEvent`.
    *

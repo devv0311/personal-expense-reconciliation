@@ -651,7 +651,18 @@ export const auditEvents = pgTable(
     source: text('source'),
     reason: text('reason'),
     aiInferenceId: uuid('ai_inference_id').references(() => aiInferences.id),
-    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * `clock_timestamp()`, deliberately not `now()`.
+     *
+     * PostgreSQL's `now()` is the *transaction* start time, so every event written inside one
+     * audited unit of work would share a timestamp and `listAuditEvents`'s ordering would fall
+     * through to a random UUID. An append-only log whose order is arbitrary cannot answer
+     * "what happened, and then what happened next" — which is most of the point of keeping it
+     * (`invariants.md` #21, #22).
+     */
+    occurredAt: timestamp('occurred_at', { withTimezone: true })
+      .notNull()
+      .default(sql`clock_timestamp()`),
     createdAt: createdAt(),
   },
   (table) => [

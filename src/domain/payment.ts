@@ -4,7 +4,7 @@
  */
 
 import { isNonSpendCounterparty } from './enums.js';
-import type { PaymentCounterpartyType } from './enums.js';
+import type { PaymentCounterpartyType, PaymentDirection } from './enums.js';
 import { DomainError } from './errors.js';
 import { sumPaise } from './money.js';
 import type { Paise } from './money.js';
@@ -72,6 +72,15 @@ export interface DuplicateCandidate {
   readonly occurredAt: Date;
   readonly externalReference: string | null;
   /**
+   * Part of the match, and load-bearing.
+   *
+   * The two legs of a transfer between the user's own accounts share one reference, one
+   * amount and one timestamp, differing only in direction — `fixtures/bank-statement.csv`
+   * rows 2 and 3 are exactly this. Without direction in the match they collapse into one
+   * "duplicate" and half a real transfer is discarded.
+   */
+  readonly direction: PaymentDirection;
+  /**
    * Present for diagnostics only. Deliberately **not** part of the match: the same
    * real-world transaction can legitimately land under two different `Account` rows when
    * two import channels capture it (ADR-0010's amendment, `scenario-analysis.md` §13).
@@ -87,8 +96,8 @@ export interface DuplicateMatchOptions {
 const DEFAULT_DUPLICATE_WINDOW_SECONDS = 60;
 
 /**
- * A deterministic duplicate: same amount, matching non-null `external_reference`, and
- * timestamps within a small window (`invariants.md` #10).
+ * A deterministic duplicate: same **direction**, same amount, matching non-null
+ * `external_reference`, and timestamps within a small window (`invariants.md` #10).
  *
  * A UTR/RRN/bank reference already identifies the real-world transaction on its own;
  * amount and timestamp proximity corroborate it. Anything short of this is not
@@ -99,6 +108,7 @@ export function isDeterministicDuplicate(
   b: DuplicateCandidate,
   options: DuplicateMatchOptions = {},
 ): boolean {
+  if (a.direction !== b.direction) return false;
   if (a.externalReference === null || b.externalReference === null) return false;
   if (a.externalReference !== b.externalReference) return false;
   if (a.amount !== b.amount) return false;
@@ -118,6 +128,8 @@ export function isPossibleDuplicate(
   options: DuplicateMatchOptions = {},
 ): boolean {
   if (isDeterministicDuplicate(a, b, options)) return false;
+  // Money leaving is never a duplicate of money arriving, however alike they otherwise look.
+  if (a.direction !== b.direction) return false;
   if (a.amount !== b.amount) return false;
   return withinWindow(a, b, options);
 }

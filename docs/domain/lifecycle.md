@@ -16,7 +16,8 @@ A `Payment` has a short lifecycle — it's a fact about money moving, not someth
 
 ```
 IMPORTED ──▶ NORMALIZED ──┬─▶ LINKED     (explained: ≥1 PaymentExpenseLink and/or ≥1 Settlement)
-                          └─▶ IGNORED    (confirmed duplicate, or out of ledger scope)
+     │                    └─▶ IGNORED    (confirmed duplicate, or out of ledger scope)
+     └──────────────────────▶ IGNORED    (duplicate confirmed at import time — ADR-0019)
 
   (a payment whose counterparty_type is internal_account or investment_instrument
    is excluded from spend by that classification alone and may remain at
@@ -33,6 +34,14 @@ IMPORTED ──▶ NORMALIZED ──┬─▶ LINKED     (explained: ≥1 Paymen
   `PaymentExpenseLink`'s revised sum invariant).
 - **IGNORED** — explicitly excluded, with a reason (`duplicate_of: <payment_id>`,
   `out_of_scope`, etc.), recorded via `AuditEvent`. Never silently dropped from the import.
+- **`IMPORTED → IGNORED` directly (added, ADR-0019)** — for a duplicate the importer confirms
+  deterministically against an existing payment (`invariants.md` #10). The asymmetry with
+  `LINKED` is deliberate: being _explained_ requires knowing what a payment is, so `LINKED`
+  still demands normalization first; being _discarded_ does not. Routing a row through
+  `NORMALIZED` on its way to the bin would record that a counterparty was resolved for a row
+  nobody will look at again. The duplicate row is still written before being ignored — the
+  ledger did receive that evidence twice, and the second copy carries the reason it does not
+  count.
 - **A payment whose `counterparty_type` is `internal_account` (a transfer) or
   `investment_instrument` (ADR-0011) does not need to reach `LINKED` or `IGNORED` at all.**
   Exclusion from spend is driven by `counterparty_type` directly (invariant #7); staying at

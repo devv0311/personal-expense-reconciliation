@@ -32,9 +32,13 @@ describe('payment lifecycle (lifecycle.md, Payment)', () => {
     expect(canTransitionPayment('normalized', 'ignored')).toBe(true);
   });
 
-  it('refuses to skip normalization', () => {
+  it('moves imported → ignored for a duplicate confirmed at import time (ADR-0019)', () => {
+    expect(canTransitionPayment('imported', 'ignored')).toBe(true);
+  });
+
+  it('still refuses to skip normalization on the way to linked', () => {
+    // Being *explained* requires knowing what the payment is; being *discarded* does not.
     expect(canTransitionPayment('imported', 'linked')).toBe(false);
-    expect(canTransitionPayment('imported', 'ignored')).toBe(false);
   });
 
   it('refuses to regress a linked payment', () => {

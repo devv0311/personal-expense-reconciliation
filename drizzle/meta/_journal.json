@@ -15,6 +15,13 @@
       "when": 1786734455295,
       "tag": "0001_evidence_note_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786736244108,
+      "tag": "0002_audit_event_clock_timestamp",
+      "breakpoints": true
     }
   ]
 }

@@ -103,12 +103,14 @@ describe('duplicate detection — invariant #10, ADR-0010', () => {
     amount: paise(124000n),
     occurredAt: new Date('2026-07-12T19:00:00Z'),
     externalReference: 'UPI/2607121234/BLINKIT',
+    direction: 'debit',
     accountId: 'account_hdfc_savings',
   };
   const upiCapture: DuplicateCandidate = {
     amount: paise(124000n),
     occurredAt: new Date('2026-07-12T19:00:03Z'),
     externalReference: 'UPI/2607121234/BLINKIT',
+    direction: 'debit',
     accountId: 'account_hdfc_upi',
   };
 
@@ -121,6 +123,36 @@ describe('duplicate detection — invariant #10, ADR-0010', () => {
     // capture and a UPI-export capture of one real transaction land on different Account
     // rows by construction (ADR-0010's amendment).
     expect(bankCapture.accountId).not.toBe(upiCapture.accountId);
+    expect(isDeterministicDuplicate(bankCapture, upiCapture)).toBe(true);
+  });
+
+  it('does not match two legs of one transfer, which share a reference (bank-statement.csv)', () => {
+    // fixtures/bank-statement.csv rows 2 and 3: a NEFT transfer between the user's own
+    // accounts appears twice under the SAME reference, same amount, same date — once leaving
+    // and once arriving. Both are real. Matching them would delete half a transfer.
+    const outgoing: DuplicateCandidate = {
+      amount: paise(1500000n),
+      occurredAt: new Date('2026-07-02T00:00:00Z'),
+      externalReference: 'NEFT/N072026001',
+      direction: 'debit',
+    };
+    const incoming: DuplicateCandidate = { ...outgoing, direction: 'credit' };
+
+    expect(isDeterministicDuplicate(outgoing, incoming)).toBe(false);
+  });
+
+  it('does not even flag opposite directions as a possible duplicate', () => {
+    const outgoing: DuplicateCandidate = {
+      amount: paise(1500000n),
+      occurredAt: new Date('2026-07-02T00:00:00Z'),
+      externalReference: 'NEFT/N072026001',
+      direction: 'debit',
+    };
+
+    expect(isPossibleDuplicate(outgoing, { ...outgoing, direction: 'credit' })).toBe(false);
+  });
+
+  it('still matches two captures of the same charge in the same direction', () => {
     expect(isDeterministicDuplicate(bankCapture, upiCapture)).toBe(true);
   });
 
