@@ -316,11 +316,20 @@ not null default true`, `times_applied integer not null default 0`.
 
 ### audit_events — SYSTEM, append-only
 
-`id`, `entity_type not null` (now includes `'settlement'` and `'expense_adjustment'` as valid
+`id`, `sequence bigserial not null` (**added during Phase 6** — monotonic insertion order; see
+below), `entity_type not null` (now includes `'settlement'` and `'expense_adjustment'` as valid
 values alongside `'expense'`, `'allocation'`, etc.), `entity_id uuid not null`, `action text not
 null check (action in ('create','update','supersede','delete'))`, `old_value jsonb`, `new_value
 jsonb not null`, `actor text not null`, `source`, `reason`, `ai_inference_id references
-ai_inferences(id)` (nullable), `occurred_at timestamptz not null default now()`.
+ai_inferences(id)` (nullable), `occurred_at timestamptz not null default clock_timestamp()`.
+
+**Reading order is `sequence`, not `occurred_at`.** `occurred_at` resolves to milliseconds, so
+two events written back-to-back inside one audited unit of work — a `create` and the `update`
+that immediately follows it, the common shape — routinely share a timestamp, leaving a random
+UUID to break the tie. An append-only log whose order is arbitrary cannot answer "what
+happened, and then what happened next". `occurred_at` is the human-facing _when_; `sequence` is
+the _order_. (`clock_timestamp()` rather than `now()` because `now()` is the _transaction_ start
+time, which is not when the event happened.)
 Index: `(entity_type, entity_id, occurred_at)`. No `UPDATE`/`DELETE` grants at the
 application-role level.
 

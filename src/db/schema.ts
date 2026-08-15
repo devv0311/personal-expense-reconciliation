@@ -21,6 +21,7 @@ import { sql } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import {
   bigint,
+  bigserial,
   boolean,
   check,
   date,
@@ -641,6 +642,19 @@ export const auditEvents = pgTable(
   'audit_events',
   {
     id: id(),
+    /**
+     * Monotonic insertion order, and the only thing `listAuditEvents` orders by.
+     *
+     * `occurred_at` cannot carry this. It resolves to milliseconds, so two events written in
+     * quick succession — a `create` and the `update` that immediately follows it, the common
+     * shape inside one audited unit of work — routinely share a timestamp, and the tiebreak
+     * then falls to a random UUID. An append-only log whose order is a coin flip cannot
+     * answer "what happened, and then what happened next", which is most of why it exists
+     * (`invariants.md` #21, #22). A sequence is exact regardless of clock resolution.
+     *
+     * `occurred_at` is still the human-facing *when*; this is the *order*.
+     */
+    sequence: bigserial('sequence', { mode: 'bigint' }).notNull(),
     entityType: text('entity_type').notNull(),
     entityId: uuid('entity_id').notNull(),
     action: text('action').notNull(),
