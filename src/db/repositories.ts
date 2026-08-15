@@ -118,20 +118,24 @@ export async function listAuditEvents(
     occurredAt: Date;
   }>
 > {
-  return exec
-    .select({
-      entityType: auditEvents.entityType,
-      entityId: auditEvents.entityId,
-      action: auditEvents.action,
-      oldValue: auditEvents.oldValue,
-      newValue: auditEvents.newValue,
-      actor: auditEvents.actor,
-      reason: auditEvents.reason,
-      occurredAt: auditEvents.occurredAt,
-    })
-    .from(auditEvents)
-    .where(and(eq(auditEvents.entityType, entityType), eq(auditEvents.entityId, entityId)))
-    .orderBy(asc(auditEvents.occurredAt), asc(auditEvents.id));
+  return (
+    exec
+      .select({
+        entityType: auditEvents.entityType,
+        entityId: auditEvents.entityId,
+        action: auditEvents.action,
+        oldValue: auditEvents.oldValue,
+        newValue: auditEvents.newValue,
+        actor: auditEvents.actor,
+        reason: auditEvents.reason,
+        occurredAt: auditEvents.occurredAt,
+      })
+      .from(auditEvents)
+      .where(and(eq(auditEvents.entityType, entityType), eq(auditEvents.entityId, entityId)))
+      // Ordered by the monotonic sequence, never by `occurred_at`: that column resolves to
+      // milliseconds, so events written back-to-back tie and the order becomes arbitrary.
+      .orderBy(asc(auditEvents.sequence))
+  );
 }
 
 /* ============================================================================ expenses */

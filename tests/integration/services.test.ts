@@ -390,3 +390,66 @@ describe('the audit log is append-only in practice as well as by policy', () => 
     expect(names).toContain('insertAuditEvent');
   });
 });
+
+describe('the audit log reads back in the order events were written', () => {
+  it('preserves insertion order for many events inside one unit of work', async () => {
+    // A millisecond-resolution clock plus a random-UUID tiebreak made this a coin flip:
+    // events written in quick succession shared `occurred_at` and came back shuffled. With
+    // enough pairs the failure is certain rather than occasional, which is what makes this a
+    // regression test rather than a flake.
+    const { runAudited } = await import('../../src/services/audit.js');
+    const expense = await anExpense('approved');
+    const written: string[] = [];
+
+    await runAudited(
+      database.db,
+      { actor: 'user', source: 'test/ordering' },
+      async ({ record }) => {
+        for (let index = 0; index < 25; index += 1) {
+          const label = `event-${String(index).padStart(2, '0')}`;
+          await record({
+            entityType: 'expense',
+            entityId: expense,
+            action: index % 2 === 0 ? 'create' : 'update',
+            newValue: { label },
+          });
+          written.push(label);
+        }
+      },
+    );
+
+    const readBack = (await listAuditEvents(database.db, 'expense', expense)).map(
+      (event) => (event.newValue as { label: string }).label,
+    );
+
+    expect(readBack).toEqual(written);
+  });
+
+  it('orders a create/update pair correctly even when both land in the same millisecond', async () => {
+    const { runAudited } = await import('../../src/services/audit.js');
+    const expense = await anExpense('approved');
+
+    await runAudited(
+      database.db,
+      { actor: 'user', source: 'test/ordering' },
+      async ({ record }) => {
+        await record({
+          entityType: 'expense',
+          entityId: expense,
+          action: 'create',
+          newValue: { n: 1 },
+        });
+        await record({
+          entityType: 'expense',
+          entityId: expense,
+          action: 'update',
+          newValue: { n: 2 },
+        });
+      },
+    );
+
+    const events = await listAuditEvents(database.db, 'expense', expense);
+
+    expect(events.map((event) => event.action)).toEqual(['create', 'update']);
+  });
+});

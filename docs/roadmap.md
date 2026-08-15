@@ -77,10 +77,17 @@ before the ones before it are solid; see `CLAUDE.md`, "Development workflow."
 > needed reviewed documents changed, both recorded in ADR-0019: duplicate matching omitted
 > `direction` (which collapsed the two legs of one transfer into a false duplicate), and the
 > payment lifecycle had no route from `imported` to `ignored` for a duplicate confirmed at
-> import. A third, smaller defect was fixed without an ADR: `audit_events.occurred_at`
-> defaulted to `now()` — PostgreSQL's _transaction_ start — so every event written inside one
-> audited unit of work shared a timestamp and the log's order was arbitrary; it now defaults to
-> `clock_timestamp()`.
+> import. A third defect was fixed without an ADR: the audit log's read order was
+> non-deterministic. `audit_events.occurred_at` defaulted to `now()` — PostgreSQL's
+> _transaction_ start — so every event written inside one audited unit of work shared a
+> timestamp and ordering fell through to a random UUID.
+>
+> **That fix was incomplete and is corrected in a follow-up.** Moving the default to
+> `clock_timestamp()` was right for the column's meaning (an event happened when it happened,
+> not when its transaction opened) but did not fix ordering: the clock resolves to
+> milliseconds, so events written back-to-back still tie. `audit_events` now carries a
+> monotonic `sequence bigserial`, and `listAuditEvents` orders by it alone. `occurred_at`
+> remains the human-facing _when_; `sequence` is the _order_.
 
 ## Recommended next phase
 
