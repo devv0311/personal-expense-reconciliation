@@ -122,6 +122,14 @@ export async function seedCast(db: Database): Promise<Cast> {
 }
 
 export interface PaymentSpec {
+  /**
+   * Forces the row's primary key.
+   *
+   * Only needed by a test whose subject is *ordering* between rows: `payments.id` is a random
+   * UUID, so a test that depends on which of two equally-matching rows sorts first is
+   * otherwise a coin toss rather than a test.
+   */
+  readonly id?: string;
   readonly accountId: AccountId;
   readonly amount: Paise;
   readonly direction: PaymentDirection;
@@ -134,6 +142,8 @@ export interface PaymentSpec {
   readonly referenceType?: string | null;
   readonly sourceSystem?: string | null;
   readonly state?: PaymentState;
+  /** Paired with `state: 'ignored'`, e.g. `duplicate_of:<id>` or `out_of_scope`. */
+  readonly ignoredReason?: string | null;
 }
 
 /** Inserts a payment as the importer would have. */
@@ -141,6 +151,7 @@ export async function addPayment(db: Database, cast: Cast, spec: PaymentSpec): P
   const [row] = await db
     .insert(schema.payments)
     .values({
+      ...(spec.id === undefined ? {} : { id: spec.id }),
       accountId: spec.accountId,
       importBatchId: cast.importBatchId,
       amount: spec.amount,
@@ -154,6 +165,7 @@ export async function addPayment(db: Database, cast: Cast, spec: PaymentSpec): P
       referenceType: spec.referenceType ?? null,
       sourceSystem: spec.sourceSystem ?? null,
       state: spec.state ?? 'normalized',
+      ignoredReason: spec.ignoredReason ?? null,
     })
     .returning({ id: schema.payments.id });
   return asId<'payment'>(row!.id);

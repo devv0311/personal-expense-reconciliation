@@ -4,14 +4,14 @@ import { join } from 'node:path';
 import { asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { asId } from '../../src/domain/index.js';
+import { asId, paise } from '../../src/domain/index.js';
 import type { AccountId } from '../../src/domain/index.js';
 import { listAuditEvents, schema } from '../../src/db/index.js';
 import { importBankStatementCsv } from '../../src/services/index.js';
 import type { ImportSourceError } from '../../src/services/index.js';
 import { captureError, createTestDatabase } from '../support/database.js';
 import type { TestDatabase } from '../support/database.js';
-import { AS_USER, seedCast } from '../support/ledger.js';
+import { addPayment, AS_USER, seedCast } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
 
 /**
@@ -326,6 +326,87 @@ describe('re-importing does not double-count', () => {
 
     expect(result.duplicates).toHaveLength(1);
     expect((await storedPayments()).filter((row) => row.state === 'ignored')).toHaveLength(1);
+  });
+});
+
+describe('a third statement restating an already-duplicated row', () => {
+  // Every copy of one transaction carries the same reference, so a third copy matches the
+  // canonical payment *and* the already-ignored second copy. Which one it names must not
+  // depend on which row the database happened to hand back first.
+  //
+  // These IDs are fixed deliberately. `payments.id` is a random UUID and both candidates share
+  // `occurred_at` (this format carries a date, not a timestamp), so `(occurred_at, id)` leaves
+  // a random winner — the ignored copy sorts first here, which is the case that used to be
+  // recorded. Letting the UUIDs fall where they may would make this a coin toss, not a test.
+  const CANONICAL_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+  const IGNORED_ID = '00000000-0000-4000-8000-000000000000';
+
+  const REFERENCE = 'UPI/2607011234/BLINKIT';
+  const RESTATED_ROW = [
+    'date,description,amount_inr,type,reference',
+    `2026-07-01,UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD,1240.00,DEBIT,${REFERENCE}`,
+  ].join('\n');
+
+  function priorCopy(id: string, state: 'imported' | 'ignored', ignoredReason: string | null) {
+    return {
+      id,
+      accountId,
+      amount: paise(124_000n),
+      direction: 'debit' as const,
+      occurredAt: new Date('2026-07-01T00:00:00.000Z'),
+      rawDescription: 'UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD',
+      channel: 'bank_transfer' as const,
+      externalReference: REFERENCE,
+      referenceType: 'upi_utr',
+      sourceSystem: 'synthetic_bank_csv',
+      state,
+      ignoredReason,
+    };
+  }
+
+  function importRestatement() {
+    return importBankStatementCsv(database.db, {
+      accountId,
+      sourceSystem: 'synthetic_bank_csv',
+      fileContent: RESTATED_ROW,
+      audit: AS_USER,
+    });
+  }
+
+  it('names the canonical payment, not the ignored copy that also matches', async () => {
+    await addPayment(database.db, cast, priorCopy(CANONICAL_ID, 'imported', null));
+    await addPayment(
+      database.db,
+      cast,
+      priorCopy(IGNORED_ID, 'ignored', `duplicate_of:${CANONICAL_ID}`),
+    );
+
+    const result = await importRestatement();
+    if (result.outcome !== 'imported') throw new Error('expected an import');
+
+    expect(result.duplicates).toHaveLength(1);
+    // Pointing at the ignored copy would make the trail to the surviving payment run through
+    // a discarded row — traceable only by walking a chain, and only by luck of the UUID.
+    expect(result.duplicates[0]?.duplicateOfPaymentId).toBe(CANONICAL_ID);
+
+    const stored = await storedPayments();
+    const third = stored.find((row) => row.id !== CANONICAL_ID && row.id !== IGNORED_ID);
+    expect(third?.state).toBe('ignored');
+    expect(third?.ignoredReason).toBe(`duplicate_of:${CANONICAL_ID}`);
+  });
+
+  it('still records a duplicate when every prior copy is ignored', async () => {
+    // The guard on the obvious fix. Skipping ignored candidates outright would leave this row
+    // at `imported` — and `computeUnexplained` counts an un-ignored debit, so a discarded
+    // transaction would come back as fresh spend. Under-counting a duplicate is a smaller
+    // failure than double-counting one (ADR-0019); dropping the match entirely is the larger.
+    await addPayment(database.db, cast, priorCopy(CANONICAL_ID, 'ignored', 'out_of_scope'));
+
+    const result = await importRestatement();
+    if (result.outcome !== 'imported') throw new Error('expected an import');
+
+    expect(result.duplicates).toHaveLength(1);
+    expect(result.duplicates[0]?.duplicateOfPaymentId).toBe(CANONICAL_ID);
   });
 });
 

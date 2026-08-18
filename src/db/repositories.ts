@@ -443,6 +443,8 @@ export interface PaymentRow {
   readonly direction: 'debit' | 'credit';
   readonly counterpartyType: string;
   readonly state: PaymentState;
+  /** Why this payment is `ignored`, e.g. `duplicate_of:<id>`. Null unless `state` is `ignored`. */
+  readonly ignoredReason: string | null;
   readonly occurredAt: Date;
   readonly externalReference: string | null;
   readonly accountId: string;
@@ -459,6 +461,7 @@ export async function getPaymentById(
       direction: payments.direction,
       counterpartyType: payments.counterpartyType,
       state: payments.state,
+      ignoredReason: payments.ignoredReason,
       occurredAt: payments.occurredAt,
       externalReference: payments.externalReference,
       accountId: payments.accountId,
@@ -485,6 +488,7 @@ export async function findPaymentsByExternalReference(
       direction: payments.direction,
       counterpartyType: payments.counterpartyType,
       state: payments.state,
+      ignoredReason: payments.ignoredReason,
       occurredAt: payments.occurredAt,
       externalReference: payments.externalReference,
       accountId: payments.accountId,

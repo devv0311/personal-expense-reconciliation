@@ -31,7 +31,7 @@ import {
   insertPayment,
   updatePaymentState,
 } from '../db/index.js';
-import type { Database, Executor } from '../db/index.js';
+import type { Database, Executor, PaymentRow } from '../db/index.js';
 import { parseBankStatementCsv } from '../integrations/bank-csv/index.js';
 import type { BankStatementCsvError, BankStatementCsvRow } from '../integrations/bank-csv/index.js';
 
@@ -54,6 +54,15 @@ const BANK_STATEMENT_SOURCE_CHANNEL = 'bank_statement_csv';
 
 /** Bumped when a change to the parser would alter how the same file is read. */
 export const BANK_STATEMENT_PARSER_VERSION = 'bank-csv@1';
+
+/**
+ * Prefix of the `payments.ignored_reason` written for a confirmed duplicate (`lifecycle.md`).
+ *
+ * Shared by the writer and the reader on purpose: the reason string *is* the stored edge
+ * between a duplicate and its original, so a change to how it is written has to be a change to
+ * how it is parsed, in one place.
+ */
+const DUPLICATE_OF_REASON_PREFIX = 'duplicate_of:';
 
 /** Raised when the source file cannot be read; carries every bad row, not just the first. */
 export class ImportSourceError extends ServiceError {
@@ -200,7 +209,7 @@ export async function importBankStatementCsv(
         // Never silently dropped from the import: the row is kept as the evidence it is, and
         // the reason it does not count is recorded against it (`lifecycle.md`, IGNORED).
         assertPaymentTransition('imported', 'ignored');
-        const reason = `duplicate_of:${existing}`;
+        const reason = `${DUPLICATE_OF_REASON_PREFIX}${existing}`;
         await updatePaymentState(exec, paymentId, 'ignored', reason);
         await record({
           entityType: 'payment',
@@ -226,11 +235,18 @@ export async function importBankStatementCsv(
 /* ------------------------------------------------------------------------- internals */
 
 /**
- * Finds an already-stored payment this row deterministically duplicates.
+ * Finds the already-stored payment this row deterministically duplicates.
  *
  * Only the deterministic path acts automatically. A row that merely *looks* like another —
  * same amount and time, no matching reference — is left alone for a human to confirm, per
  * `invariants.md` #10; surfacing those is review-queue work, not import work.
+ *
+ * The answer is the **canonical** payment — the head of the `duplicate_of` chain — not merely
+ * the first row that matched. A third statement restating the same transaction matches the
+ * original *and* the copy already ignored against it, and both sort under one `occurred_at`
+ * (this format carries a date, not a timestamp), so "first match" was decided by whichever
+ * random UUID sorted lower. Resolving to the chain head makes the result independent of that
+ * order, which is why the ordering itself is not what got fixed.
  */
 async function findDeterministicDuplicate(
   exec: Executor,
@@ -239,8 +255,8 @@ async function findDeterministicDuplicate(
   if (row.externalReference === null) return null;
 
   const candidates = await findPaymentsByExternalReference(exec, row.externalReference);
-  for (const candidate of candidates) {
-    const matches = isDeterministicDuplicate(
+  const match = candidates.find((candidate) =>
+    isDeterministicDuplicate(
       {
         amount: row.amount,
         occurredAt: row.occurredAt,
@@ -257,10 +273,46 @@ async function findDeterministicDuplicate(
       // the same calendar day rather than seconds apart. The window is widened accordingly;
       // amount + reference + direction still carry the identification.
       { windowSeconds: 24 * 60 * 60 },
-    );
-    if (matches) return candidate.id;
+    ),
+  );
+
+  return match === undefined ? null : resolveCanonical(match, candidates);
+}
+
+/**
+ * Walks a matched payment back to the head of its `duplicate_of` chain.
+ *
+ * Every copy of one transaction carries the same `external_reference` — a deterministic match
+ * requires it — so the whole chain is already inside `candidates` and no further query is
+ * needed.
+ *
+ * Stops at the first payment that is not an ignored duplicate. That includes a payment ignored
+ * for some *other* reason (`out_of_scope`): it is still the first copy this ledger saw, and
+ * naming it keeps the new row ignored. Skipping ignored candidates instead would leave a
+ * restatement at `imported`, where `domain.computeUnexplained` counts it — turning a discarded
+ * transaction back into fresh spend, the double-count `invariants.md` #10 exists to prevent.
+ */
+function resolveCanonical(match: PaymentRow, candidates: readonly PaymentRow[]): PaymentId {
+  const byId = new Map(candidates.map((candidate) => [String(candidate.id), candidate]));
+
+  // Guards against a cycle in stored data: a chain that loops would otherwise hang the import.
+  const seen = new Set<string>([String(match.id)]);
+
+  let current = match;
+  while (current.state === 'ignored') {
+    const parentId = parseDuplicateOf(current.ignoredReason);
+    if (parentId === null || seen.has(parentId)) break;
+    const parent = byId.get(parentId);
+    if (parent === undefined) break;
+    seen.add(parentId);
+    current = parent;
   }
-  return null;
+  return current.id;
+}
+
+function parseDuplicateOf(ignoredReason: string | null): string | null {
+  if (ignoredReason === null || !ignoredReason.startsWith(DUPLICATE_OF_REASON_PREFIX)) return null;
+  return ignoredReason.slice(DUPLICATE_OF_REASON_PREFIX.length);
 }
 
 function sha256(text: string): string {
