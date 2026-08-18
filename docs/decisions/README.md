@@ -43,3 +43,4 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0017](0017-integration-test-database.md)                    | Integration tests: real Postgres in CI, PGlite locally                     | Accepted                                                     |
 | [0018](0018-manual-note-signal-ambiguity.md)                 | `evidence.note_kind` distinguishes documentation from a settlement claim   | Accepted                                                     |
 | [0019](0019-import-time-duplicate-handling.md)               | Dedup matches on direction; a confirmed duplicate ignores from `imported`  | Accepted                                                     |
+| [0020](0020-reference-type-as-channel-evidence.md)           | `reference_type`, not the description, is the evidence for `channel`       | Accepted                                                     |

@@ -22,6 +22,7 @@ export * from './ids.js';
 export * from './immutability.js';
 export * from './lifecycle.js';
 export * from './money.js';
+export * from './normalization.js';
 export * from './payment.js';
 export * from './reconciliation.js';
 export * from './rounding.js';
