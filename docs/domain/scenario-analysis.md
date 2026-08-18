@@ -118,7 +118,8 @@ revised; **`account_id` was removed from the match criteria in the implementatio
 — building this exact fixture against the original account-scoped rule showed it could never
 fire for the cross-channel case this scenario describes, since the two captures are on different
 `Account` rows by construction**) and marks the second `IGNORED` with `reason =
-duplicate_of: <payment_id>`. Where the reference number doesn't match cleanly (or is absent on
+duplicate_of: <payment_id>`, naming the canonical payment even when a _third_ capture arrives
+and several earlier copies match (invariant #10). Where the reference number doesn't match cleanly (or is absent on
 one/both sides), it's flagged as a _possible_ duplicate `AIInference` for human confirmation
 rather than auto-merged. `ImportBatch` lineage still identifies where each row came from.
 `fixtures/duplicate-transaction.json` already anticipated this field informally (as `reference`)

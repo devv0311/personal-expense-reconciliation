@@ -161,6 +161,22 @@ never a mutation of `NetBalance` itself, and never treated as equivalent to a re
     identifier on its own, corroborated by amount and timestamp proximity, without also
     requiring the two payments to share a schema-level `Account` row.
 
+    **`duplicate_of` names the _canonical_ payment (added, ADR-0019's amendment).** A third
+    statement restating one transaction matches the original _and_ every copy already ignored
+    against it, since all of them carry the same `external_reference`. The recorded
+    `duplicate_of` is the head of that chain — never another ignored copy. Two reasons this is
+    a rule and not a preference: a chain makes the trail from a discarded row to the surviving
+    one indirect, and the copies tie on `occurred_at` (a bank CSV carries a date, not a
+    timestamp), so "whichever matched first" resolves to a random UUID comparison — the same
+    non-determinism that produced the audit-ordering defect fixed in ADR-0018's wake.
+
+    **A candidate that is itself `ignored` is still a match.** It is tempting to exclude
+    ignored rows from the candidate set instead; that is wrong. A payment ignored for a
+    non-duplicate reason (`out_of_scope`) is still the first copy this ledger saw, and skipping
+    it would leave the restatement at `imported`, where `domain.computeUnexplained` counts it —
+    turning a discarded transaction back into fresh spend, the exact double-count this
+    invariant exists to prevent.
+
 ## Allocation arithmetic
 
 11. **Allocation lines sum to the expense's net amount exactly.** `sum(AllocationLine.amount) ===

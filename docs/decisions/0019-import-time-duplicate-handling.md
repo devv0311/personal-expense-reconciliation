@@ -63,6 +63,35 @@ The duplicate row is still **written**, then ignored — never skipped at insert
 indistinguishable ones; the ledger did receive that evidence twice, and the second copy
 carries the reason it does not count.
 
+> **Amendment (2026-08-19).** The decision above said a confirmed duplicate is marked
+> `duplicate_of:<id>` without ever saying _which_ id, and the importer took the first candidate
+> the query returned. That is under-specified in a way that bites on the **third** capture of
+> one transaction: every copy carries the same `external_reference`, so the third row matches
+> the original _and_ the copy already ignored against it. The copies also tie on `occurred_at`
+> — this format carries a date, not a timestamp — so the `(occurred_at, id)` ordering was
+> decided by a random UUID. Observed: over twelve runs of a three-import scenario, seven
+> recorded the third copy as a duplicate of an already-ignored row and five named the original.
+>
+> No money was ever double-counted — the row is `ignored` either way, and
+> `domain.computeUnexplained` skips it — so this was an **explainability** defect
+> (`requirements.md`), not an arithmetic one. It is worth recording because of its shape: order
+> by a tuple whose members tie, tie broken by a random UUID, is precisely the defect that
+> reached `main` once already in `listAuditEvents`.
+>
+> **`duplicate_of` now names the canonical payment**, resolved by walking the matched
+> candidate's chain to its head. The chain is always within the candidate set already fetched
+> (every member shares the reference), so this costs no extra query, and — the point — the
+> result no longer depends on candidate order at all. Fixing the `ORDER BY` instead would have
+> made the answer stable without making it _correct_: a stable pointer to an ignored row is
+> still a pointer to an ignored row.
+>
+> A candidate that is itself `ignored` deliberately remains a match. Excluding ignored rows
+> from the candidate set is the obvious alternative and is wrong: a payment ignored as
+> `out_of_scope` is still the first copy the ledger saw, and skipping it would leave the
+> restatement at `imported`, where it counts as fresh spend. Both cases are covered by
+> deterministic tests in `tests/integration/import.test.ts` — the first pins the candidates'
+> UUIDs, since a test whose subject is ordering cannot be left to a coin toss.
+
 ## Consequences
 
 `invariants.md` #10 and `lifecycle.md`'s payment section both gain a clause. ADR-0010 gains a

@@ -34,6 +34,8 @@ IMPORTED ──▶ NORMALIZED ──┬─▶ LINKED     (explained: ≥1 Paymen
   `PaymentExpenseLink`'s revised sum invariant).
 - **IGNORED** — explicitly excluded, with a reason (`duplicate_of: <payment_id>`,
   `out_of_scope`, etc.), recorded via `AuditEvent`. Never silently dropped from the import.
+  A `duplicate_of` always names the **canonical** payment — the head of the chain, never
+  another ignored copy — so one hop always reaches the row that counts (`invariants.md` #10).
 - **`IMPORTED → IGNORED` directly (added, ADR-0019)** — for a duplicate the importer confirms
   deterministically against an existing payment (`invariants.md` #10). The asymmetry with
   `LINKED` is deliberate: being _explained_ requires knowing what a payment is, so `LINKED`
