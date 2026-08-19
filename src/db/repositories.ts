@@ -12,20 +12,24 @@
  * (`invariants.md` #4, #6, #22).
  */
 
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, inArray, isNull, sql } from 'drizzle-orm';
 
 import type {
   AiInferenceStatus,
+  AiInferenceType,
   AuditAction,
   AuditableEntityType,
+  ConfidenceLevel,
   EvidenceNoteKind,
   EvidenceType,
+  ExpenseRelationshipType,
   ExpenseState,
   PaymentChannel,
   PaymentCounterpartyType,
   PaymentState,
 } from '../domain/enums.js';
 import type {
+  AiInferenceId,
   AllocationId,
   AllocationLineId,
   AuditEventId,
@@ -47,6 +51,7 @@ import type { ReconciliationTotals } from '../domain/reconciliation.js';
 
 import type { Database } from './client.js';
 import {
+  aiInferences,
   allocationLineGroupExpansions,
   allocationLines,
   allocations,
@@ -58,11 +63,14 @@ import {
   groupMemberships,
   importBatches,
   merchantAliases,
+  merchants,
   paymentExpenseLinks,
   payments,
+  people,
   reconciliationRuns,
   settlements,
   splitwiseExpenses,
+  users,
 } from './schema.js';
 
 /** A `Database` or an open transaction — both satisfy the same query interface. */
@@ -187,6 +195,64 @@ export async function updateExpenseState(
   await exec
     .update(expenses)
     .set({ state, updatedAt: new Date() })
+    .where(eq(expenses.id, expenseId));
+}
+
+export interface ExpenseDraft {
+  readonly description: string | null;
+  readonly amount: Paise;
+  readonly currency: string;
+  readonly occurredAt: Date;
+  readonly relationshipType: ExpenseRelationshipType;
+  readonly category: string | null;
+  readonly paidByPersonId: PersonId;
+  readonly state: ExpenseState;
+}
+
+/**
+ * Creates an expense.
+ *
+ * The caller supplies `state`, because an expense's starting state is a decision (`proposed`
+ * for a fresh proposal), not a property of this table. `amount` is written exactly once, here:
+ * there is no update path for it anywhere in this file (`invariants.md` #6).
+ */
+export async function insertExpense(exec: Executor, draft: ExpenseDraft): Promise<ExpenseId> {
+  const [row] = await exec
+    .insert(expenses)
+    .values({
+      description: draft.description,
+      amount: draft.amount,
+      currency: draft.currency,
+      occurredAt: draft.occurredAt,
+      relationshipType: draft.relationshipType,
+      category: draft.category,
+      paidByPersonId: draft.paidByPersonId,
+      state: draft.state,
+    })
+    .returning({ id: expenses.id });
+  return requireRow(row, 'expenses').id as ExpenseId;
+}
+
+/**
+ * Rewrites the two fields `CLASSIFIED` means (`lifecycle.md`): `relationship_type` and
+ * `category`.
+ *
+ * Deliberately narrow. It exists for `decideInference`'s `modify` path — a human correcting a
+ * proposal before approving it — and touches nothing else: not `amount`, not
+ * `paid_by_person_id`, not `state`, each of which has its own path or none at all.
+ */
+export async function updateExpenseClassification(
+  exec: Executor,
+  expenseId: ExpenseId,
+  next: { readonly relationshipType: ExpenseRelationshipType; readonly category: string | null },
+): Promise<void> {
+  await exec
+    .update(expenses)
+    .set({
+      relationshipType: next.relationshipType,
+      category: next.category,
+      updatedAt: new Date(),
+    })
     .where(eq(expenses.id, expenseId));
 }
 
@@ -398,6 +464,30 @@ export async function listPaymentExpenseLinksByPayment(
   return rows as Array<{ amount: Paise }>;
 }
 
+export interface PaymentExpenseLinkDraft {
+  readonly paymentId: PaymentId;
+  readonly expenseId: ExpenseId;
+  readonly amount: Paise;
+}
+
+/**
+ * Attributes part of a payment to an expense.
+ *
+ * The caller validates the shared explanation budget first
+ * (`domain.validatePaymentExplanationBudget`): links and settlements draw on one payment's
+ * amount, and this function does not know that rule.
+ */
+export async function insertPaymentExpenseLink(
+  exec: Executor,
+  draft: PaymentExpenseLinkDraft,
+): Promise<void> {
+  await exec.insert(paymentExpenseLinks).values({
+    paymentId: draft.paymentId,
+    expenseId: draft.expenseId,
+    amount: draft.amount,
+  });
+}
+
 /* ======================================================================== adjustments */
 
 export interface ExpenseAdjustmentDraft {
@@ -444,8 +534,12 @@ export async function listAdjustmentAmounts(
 export interface PaymentRow {
   readonly id: PaymentId;
   readonly amount: Paise;
+  /** Read by classification, which copies it onto the `Expense` it proposes. */
+  readonly currency: string;
   readonly direction: 'debit' | 'credit';
   readonly counterpartyType: string;
+  /** Polymorphic per `counterpartyType`; a `MerchantId` when normalization resolved one. */
+  readonly counterpartyId: string | null;
   readonly state: PaymentState;
   /** Why this payment is `ignored`, e.g. `duplicate_of:<id>`. Null unless `state` is `ignored`. */
   readonly ignoredReason: string | null;
@@ -468,8 +562,10 @@ export async function getPaymentById(
     .select({
       id: payments.id,
       amount: payments.amount,
+      currency: payments.currency,
       direction: payments.direction,
       counterpartyType: payments.counterpartyType,
+      counterpartyId: payments.counterpartyId,
       state: payments.state,
       ignoredReason: payments.ignoredReason,
       occurredAt: payments.occurredAt,
@@ -498,8 +594,10 @@ export async function findPaymentsByExternalReference(
     .select({
       id: payments.id,
       amount: payments.amount,
+      currency: payments.currency,
       direction: payments.direction,
       counterpartyType: payments.counterpartyType,
+      counterpartyId: payments.counterpartyId,
       state: payments.state,
       ignoredReason: payments.ignoredReason,
       occurredAt: payments.occurredAt,
@@ -538,8 +636,10 @@ export async function listPaymentsAwaitingNormalization(
     .select({
       id: payments.id,
       amount: payments.amount,
+      currency: payments.currency,
       direction: payments.direction,
       counterpartyType: payments.counterpartyType,
+      counterpartyId: payments.counterpartyId,
       state: payments.state,
       ignoredReason: payments.ignoredReason,
       occurredAt: payments.occurredAt,
@@ -577,6 +677,28 @@ export async function findMerchantByAliasKey(
   return row === undefined ? null : (row.merchantId as MerchantId);
 }
 
+/** The catalogued merchant behind a resolved counterparty, for display and for context. */
+export async function getMerchantById(
+  exec: Executor,
+  merchantId: MerchantId,
+): Promise<{ id: MerchantId; canonicalName: string; defaultCategory: string | null } | null> {
+  const [row] = await exec
+    .select({
+      id: merchants.id,
+      canonicalName: merchants.canonicalName,
+      defaultCategory: merchants.defaultCategory,
+    })
+    .from(merchants)
+    .where(eq(merchants.id, merchantId));
+  return row === undefined
+    ? null
+    : {
+        id: row.id as MerchantId,
+        canonicalName: row.canonicalName,
+        defaultCategory: row.defaultCategory,
+      };
+}
+
 /**
  * Writes the DERIVED results of normalization and moves the payment to `normalized`.
  *
@@ -600,6 +722,102 @@ export async function applyPaymentNormalization(
       counterpartyId: next.counterpartyId,
       state: 'normalized',
     })
+    .where(eq(payments.id, paymentId));
+}
+
+/**
+ * A payment offered to classification, plus the one fact eligibility needs that the row
+ * itself does not carry.
+ */
+export interface ClassifiablePaymentRow extends PaymentRow {
+  /** Whether a `classify_transaction` inference already references this payment. */
+  readonly hasClassificationInference: boolean;
+}
+
+/**
+ * Payments classification may look at: those at `normalized`.
+ *
+ * A **pre-filter, not the rule**. `domain.classificationEligibility` is the authority on what
+ * may be classified and by which leg, and it re-checks everything this query filters on — so a
+ * row that slips through here is skipped with a reason rather than classified by accident.
+ * The state filter is here because scanning every payment ever imported to discard all but the
+ * normalized ones is a query, not a rule.
+ *
+ * `hasClassificationInference` comes back as a correlated `exists`, so eligibility does not
+ * need a second round-trip per payment.
+ *
+ * Ordering ties on `(occurred_at, id)` exactly as normalization's does, and is safe for the
+ * same reason: each payment is classified independently of every other. The one exception is
+ * the self-transfer pairing, which reads its counter-leg by external reference rather than by
+ * position in this list, so it cannot depend on the order either.
+ */
+export async function listPaymentsAwaitingClassification(
+  exec: Executor,
+  importBatchId?: ImportBatchId,
+): Promise<ClassifiablePaymentRow[]> {
+  const rows = await exec
+    .select({
+      id: payments.id,
+      amount: payments.amount,
+      currency: payments.currency,
+      direction: payments.direction,
+      counterpartyType: payments.counterpartyType,
+      counterpartyId: payments.counterpartyId,
+      state: payments.state,
+      ignoredReason: payments.ignoredReason,
+      occurredAt: payments.occurredAt,
+      externalReference: payments.externalReference,
+      accountId: payments.accountId,
+      channel: payments.channel,
+      referenceType: payments.referenceType,
+      rawDescription: payments.rawDescription,
+      // Drizzle's `exists` helper, not a raw fragment: a raw one renders the outer
+      // `payments.id` unqualified, where it silently binds to `ai_inferences.id` instead and
+      // the correlation quietly evaluates to false for every row.
+      hasClassificationInference: exists(
+        exec
+          .select({ one: sql`1` })
+          .from(aiInferences)
+          .where(
+            and(
+              eq(aiInferences.inferenceType, 'classify_transaction'),
+              eq(aiInferences.inputRefType, 'payment'),
+              eq(aiInferences.inputRefId, payments.id),
+            ),
+          ),
+      ),
+    })
+    .from(payments)
+    .where(
+      importBatchId === undefined
+        ? eq(payments.state, 'normalized')
+        : and(eq(payments.state, 'normalized'), eq(payments.importBatchId, importBatchId)),
+    )
+    .orderBy(asc(payments.occurredAt), asc(payments.id));
+  return rows as ClassifiablePaymentRow[];
+}
+
+/**
+ * Writes a classified counterparty onto an already-normalized payment.
+ *
+ * Separate from `applyPaymentNormalization`, which also sets `state = 'normalized'`. Here the
+ * state is deliberately untouched: a transfer stays at `normalized` forever
+ * (`lifecycle.md`, `invariants.md` #7), and a payment that is about to be explained moves to
+ * `linked` through `updatePaymentState` as its own audited step.
+ *
+ * Touches no SOURCE column, exactly as normalization does not.
+ */
+export async function applyPaymentCounterparty(
+  exec: Executor,
+  paymentId: PaymentId,
+  next: {
+    readonly counterpartyType: PaymentCounterpartyType;
+    readonly counterpartyId: string | null;
+  },
+): Promise<void> {
+  await exec
+    .update(payments)
+    .set({ counterpartyType: next.counterpartyType, counterpartyId: next.counterpartyId })
     .where(eq(payments.id, paymentId));
 }
 
@@ -693,6 +911,54 @@ export async function updatePaymentState(
   ignoredReason: string | null = null,
 ): Promise<void> {
   await exec.update(payments).set({ state, ignoredReason }).where(eq(payments.id, paymentId));
+}
+
+/* =============================================================================== people */
+
+/**
+ * The single user's `Person`, which is who "the user" means everywhere else.
+ *
+ * `domain-model.md` maps a `User` to exactly one `Person`; this is that mapping, read once per
+ * operation that needs to know whether a payer or a counterparty is the user themselves.
+ */
+export async function getPrimaryUserPerson(
+  exec: Executor,
+): Promise<{ personId: PersonId; displayName: string } | null> {
+  const [row] = await exec
+    .select({ personId: users.personId, displayName: people.displayName })
+    .from(users)
+    .innerJoin(people, eq(people.id, users.personId))
+    .orderBy(asc(users.createdAt), asc(users.id))
+    .limit(1);
+  return row === undefined
+    ? null
+    : { personId: row.personId as PersonId, displayName: row.displayName };
+}
+
+/** Everyone not archived, oldest first — the roster a proposal may name a counterparty from. */
+export async function listPeople(
+  exec: Executor,
+): Promise<Array<{ id: PersonId; displayName: string }>> {
+  const rows = await exec
+    .select({ id: people.id, displayName: people.displayName })
+    .from(people)
+    .where(isNull(people.archivedAt))
+    .orderBy(asc(people.createdAt), asc(people.id));
+  return rows as Array<{ id: PersonId; displayName: string }>;
+}
+
+/** One person, for confirming a proposal named someone who actually exists. */
+export async function getPersonById(
+  exec: Executor,
+  personId: PersonId,
+): Promise<{ id: PersonId; displayName: string; archivedAt: Date | null } | null> {
+  const [row] = await exec
+    .select({ id: people.id, displayName: people.displayName, archivedAt: people.archivedAt })
+    .from(people)
+    .where(eq(people.id, personId));
+  return row === undefined
+    ? null
+    : { id: row.id as PersonId, displayName: row.displayName, archivedAt: row.archivedAt };
 }
 
 /* ==================================================================== group membership */
@@ -1011,19 +1277,156 @@ export async function loadReconciliationInput(
   };
 }
 
-/* =========================================================================== helpers */
+/* ======================================================================= AI inferences */
 
-/** AI inference status, exposed so `services.decideInference` can persist a transition. */
-export async function updateAiInferenceStatus(
-  exec: Executor,
-  inferenceId: string,
-  status: AiInferenceStatus,
-  decidedBy: string,
-): Promise<void> {
-  await exec.execute(
-    sql`update ai_inferences set status = ${status}, decided_by = ${decidedBy}, decided_at = now() where id = ${inferenceId}`,
-  );
+export interface AiInferenceDraft {
+  readonly inferenceType: AiInferenceType;
+  /** What the inference was run on — `'payment'` for a classification. */
+  readonly inputRefType: string;
+  readonly inputRefId: string;
+  /** The **validated** proposal, never the raw model response (`ai-boundary.md`, gate 1). */
+  readonly proposedOutput: unknown;
+  readonly confidence: ConfidenceLevel;
+  readonly modelProvider: string | null;
+  readonly modelName: string | null;
+  readonly promptVersion: string | null;
 }
+
+export interface AiInferenceRow {
+  readonly id: AiInferenceId;
+  readonly inferenceType: string;
+  readonly inputRefType: string;
+  readonly inputRefId: string;
+  readonly proposedOutput: unknown;
+  readonly confidence: string;
+  readonly status: AiInferenceStatus;
+  readonly modelProvider: string | null;
+  readonly modelName: string | null;
+  readonly promptVersion: string | null;
+  readonly decidedBy: string | null;
+  readonly decidedAt: Date | null;
+  readonly resultingRecordType: string | null;
+  readonly resultingRecordId: string | null;
+}
+
+const AI_INFERENCE_COLUMNS = {
+  id: aiInferences.id,
+  inferenceType: aiInferences.inferenceType,
+  inputRefType: aiInferences.inputRefType,
+  inputRefId: aiInferences.inputRefId,
+  proposedOutput: aiInferences.proposedOutput,
+  confidence: aiInferences.confidence,
+  status: aiInferences.status,
+  modelProvider: aiInferences.modelProvider,
+  modelName: aiInferences.modelName,
+  promptVersion: aiInferences.promptVersion,
+  decidedBy: aiInferences.decidedBy,
+  decidedAt: aiInferences.decidedAt,
+  resultingRecordType: aiInferences.resultingRecordType,
+  resultingRecordId: aiInferences.resultingRecordId,
+} as const;
+
+/**
+ * Records one proposal. `status` defaults to `pending` at the database, which is the point:
+ * an inference is a proposal until `services.decideInference` says otherwise, and there is no
+ * way to insert one that is already accepted.
+ */
+export async function insertAiInference(
+  exec: Executor,
+  draft: AiInferenceDraft,
+): Promise<AiInferenceId> {
+  const [row] = await exec
+    .insert(aiInferences)
+    .values({
+      inferenceType: draft.inferenceType,
+      inputRefType: draft.inputRefType,
+      inputRefId: draft.inputRefId,
+      proposedOutput: draft.proposedOutput,
+      confidence: draft.confidence,
+      modelProvider: draft.modelProvider,
+      modelName: draft.modelName,
+      promptVersion: draft.promptVersion,
+    })
+    .returning({ id: aiInferences.id });
+  return requireRow(row, 'ai_inferences').id as AiInferenceId;
+}
+
+export async function getAiInferenceById(
+  exec: Executor,
+  inferenceId: AiInferenceId,
+): Promise<AiInferenceRow | null> {
+  const [row] = await exec
+    .select(AI_INFERENCE_COLUMNS)
+    .from(aiInferences)
+    .where(eq(aiInferences.id, inferenceId));
+  return row === undefined ? null : (row as AiInferenceRow);
+}
+
+/**
+ * The classification inference for one payment, newest first.
+ *
+ * At most one exists today — a payment that already carries one is not eligible for
+ * classification again (`domain.classificationEligibility`) — but the query is written to
+ * return the newest rather than to assume uniqueness, because `superseded` (`lifecycle.md`)
+ * will make several rows per payment normal as soon as re-classification exists.
+ */
+export async function findClassificationInferenceByPayment(
+  exec: Executor,
+  paymentId: PaymentId,
+): Promise<AiInferenceRow | null> {
+  const [row] = await exec
+    .select(AI_INFERENCE_COLUMNS)
+    .from(aiInferences)
+    .where(
+      and(
+        eq(aiInferences.inferenceType, 'classify_transaction'),
+        eq(aiInferences.inputRefType, 'payment'),
+        eq(aiInferences.inputRefId, paymentId),
+      ),
+    )
+    .orderBy(desc(aiInferences.createdAt), desc(aiInferences.id))
+    .limit(1);
+  return row === undefined ? null : (row as AiInferenceRow);
+}
+
+/**
+ * Points an inference at the record it produced.
+ *
+ * Written twice on the expense path, and that is deliberate: once when classification creates
+ * the DERIVED `Expense` (so the proposal and the row it produced are findable from each
+ * other), and once at the decision, which is when that row becomes authoritative (ADR-0026).
+ */
+export async function attachAiInferenceRecord(
+  exec: Executor,
+  inferenceId: AiInferenceId,
+  recordType: 'expense' | 'settlement',
+  recordId: string,
+): Promise<void> {
+  await exec
+    .update(aiInferences)
+    .set({ resultingRecordType: recordType, resultingRecordId: recordId })
+    .where(eq(aiInferences.id, inferenceId));
+}
+
+/**
+ * Persists the decision that took an inference out of `pending`.
+ *
+ * `decidedBy` is a person or a `Rule` (`rule:<id>`), never the model — `invariants.md` #17,
+ * enforced by `domain.parseDecisionActor` before this is called. The status transition itself
+ * is checked by `domain.assertAiInferenceTransition`; this function only writes.
+ */
+export async function recordAiInferenceDecision(
+  exec: Executor,
+  inferenceId: AiInferenceId,
+  decision: { readonly status: AiInferenceStatus; readonly decidedBy: string },
+): Promise<void> {
+  await exec
+    .update(aiInferences)
+    .set({ status: decision.status, decidedBy: decision.decidedBy, decidedAt: new Date() })
+    .where(eq(aiInferences.id, inferenceId));
+}
+
+/* =========================================================================== helpers */
 
 function requireRow<T>(row: T | undefined, table: string): T {
   if (row === undefined) {
