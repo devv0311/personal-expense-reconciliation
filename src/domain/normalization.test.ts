@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { refineChannel } from './normalization.js';
+import { merchantAliasKey, refineChannel } from './normalization.js';
 
 describe('refineChannel — the channel a reference type proves', () => {
   it('refines a UPI reference to the upi channel', () => {
@@ -34,5 +34,45 @@ describe('refineChannel — the channel a reference type proves', () => {
   it('never downgrades a channel the source already stated precisely', () => {
     expect(refineChannel('upi_utr', 'upi')).toBe('upi');
     expect(refineChannel('bank_reference', 'card')).toBe('card');
+  });
+});
+
+describe('merchantAliasKey — the canonical form a description matches on', () => {
+  it('is unchanged for a description already canonical', () => {
+    expect(merchantAliasKey('UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD')).toBe(
+      'UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD',
+    );
+  });
+
+  it('ignores casing', () => {
+    expect(merchantAliasKey('upi-blinkit9821paytm-blinkit india pvt ltd')).toBe(
+      'UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD',
+    );
+  });
+
+  it('ignores leading and trailing whitespace', () => {
+    expect(merchantAliasKey('   ELECTRICITY BOARD BBPS BILLPAY  ')).toBe(
+      'ELECTRICITY BOARD BBPS BILLPAY',
+    );
+  });
+
+  it('collapses runs of internal whitespace, including tabs and newlines', () => {
+    expect(merchantAliasKey('ELECTRICITY   BOARD\tBBPS\nBILLPAY')).toBe(
+      'ELECTRICITY BOARD BBPS BILLPAY',
+    );
+  });
+
+  it('maps descriptions differing only in casing and spacing onto one key', () => {
+    expect(merchantAliasKey('  zomato0091   sample  ')).toBe(merchantAliasKey('ZOMATO0091 SAMPLE'));
+  });
+
+  it('does not collide descriptions that genuinely differ', () => {
+    expect(merchantAliasKey('UPI-ZOMATO0091-A')).not.toBe(merchantAliasKey('UPI-ZOMATO0091-B'));
+  });
+
+  it('is empty for a description that is only whitespace', () => {
+    // The importer rejects an empty description, so this cannot arrive from an import —
+    // it is pinned so the function stays total rather than throwing on an odd input.
+    expect(merchantAliasKey('   ')).toBe('');
   });
 });

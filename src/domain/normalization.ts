@@ -40,3 +40,20 @@ export function refineChannel(
   if (referenceType === null) return currentChannel;
   return CHANNEL_BY_REFERENCE_TYPE[referenceType] ?? currentChannel;
 }
+
+/**
+ * Reduces a raw statement description to the key an alias is matched on.
+ *
+ * `toUpperCase()`, never `toLocaleUpperCase()`: the former is locale-independent, and the
+ * same statement normalized on a developer's machine and on a CI runner must produce the
+ * same key — the same reason `integrations/bank-csv/parse.ts` fixes dates at UTC.
+ *
+ * This function produces the key on **both** sides: it is used when an alias is seeded and
+ * again when a payment is matched, so `merchant_aliases.raw_pattern` always holds a
+ * canonical key. A change to how keys are formed is therefore one change, in one place.
+ * (Two copies of one rule drifting apart is a defect this project has already shipped —
+ * ADR-0019's amendment.)
+ */
+export function merchantAliasKey(rawDescription: string): string {
+  return rawDescription.trim().replace(/\s+/g, ' ').toUpperCase();
+}
