@@ -1385,3 +1385,29 @@ describe('decideInference — the gate itself', () => {
     ).rejects.toMatchObject({ code: 'ENTITY_NOT_FOUND' });
   });
 });
+
+describe('decideInference — invariant #7 on the decision path', () => {
+  it('refuses to fund an expense from a payment already classified as a transfer', async () => {
+    await importedAndNormalized();
+    const transferLeg = await paymentIdByDescription('NEFT TRANSFER TO SELF A/C X4821');
+    // A proposal that predates the transfer classification, as a re-run ordering could leave.
+    const inferenceId = await anInference(transferLeg);
+    await applyPaymentCounterparty(database.db, transferLeg, {
+      counterpartyType: 'internal_account',
+      counterpartyId: null,
+    });
+
+    await expect(
+      decideInference(database.db, {
+        inferenceId,
+        decision: 'accept',
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'NON_SPEND_PAYMENT_LINKED' });
+
+    // A transfer is not spending, whatever a proposal about it says (invariants.md #7).
+    expect(await database.db.select().from(schema.paymentExpenseLinks)).toEqual([]);
+    expect(await getAiInferenceById(database.db, inferenceId)).toMatchObject({ status: 'pending' });
+    expect(await paymentState(transferLeg)).toMatchObject({ state: 'normalized' });
+  });
+});

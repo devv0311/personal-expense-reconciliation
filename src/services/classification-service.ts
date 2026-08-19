@@ -412,6 +412,7 @@ function asTransferLeg(payment: PaymentRow): TransferLeg {
     occurredAt: payment.occurredAt,
     externalReference: payment.externalReference,
     state: payment.state,
+    counterpartyType: payment.counterpartyType as TransferLeg['counterpartyType'],
   };
 }
 

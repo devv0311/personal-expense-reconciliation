@@ -85,6 +85,20 @@ export interface TransferLeg {
   readonly occurredAt: Date;
   readonly externalReference: string | null;
   readonly state: PaymentState;
+  /** Read as evidence *against* a pair: see {@link isSelfTransferPair}. */
+  readonly counterpartyType: PaymentCounterpartyType;
+}
+
+/**
+ * Counterparty types that name someone outside the user's own accounts.
+ *
+ * A payment whose counterparty is a known merchant or a known person is, by that resolution,
+ * not money moving between the user's own accounts. `unknown` is not in this set (nothing has
+ * been established yet) and neither is `internal_account` (that is this rule's own conclusion,
+ * already written on the leg classified first).
+ */
+function namesAnOutsideParty(counterpartyType: PaymentCounterpartyType): boolean {
+  return counterpartyType === 'merchant' || counterpartyType === 'person';
 }
 
 export interface SelfTransferMatchOptions {
@@ -109,6 +123,13 @@ const DEFAULT_TRANSFER_WINDOW_SECONDS = 60;
  *
  * An `ignored` leg proves nothing — it is a row the ledger has already discarded — so a pair
  * involving one is not a match.
+ *
+ * Neither does a leg whose counterparty is already a known **merchant** or **person**. Amount,
+ * direction and reference alone would read a merchant refund that echoes its original payment's
+ * reference as a transfer — silently removing a real expense *and* its refund from spend. A
+ * resolved counterparty is evidence the money went outside the user's own accounts, and it
+ * outranks the shape of the pair. `internal_account` is deliberately not disqualifying: it is
+ * this rule's own conclusion, already written on whichever leg was classified first.
  */
 export function isSelfTransferPair(
   a: TransferLeg,
@@ -117,6 +138,9 @@ export function isSelfTransferPair(
 ): boolean {
   if (a.paymentId === b.paymentId) return false;
   if (a.state === 'ignored' || b.state === 'ignored') return false;
+  if (namesAnOutsideParty(a.counterpartyType) || namesAnOutsideParty(b.counterpartyType)) {
+    return false;
+  }
   if (a.externalReference === null || b.externalReference === null) return false;
   if (a.externalReference !== b.externalReference) return false;
   if (a.amount !== b.amount) return false;

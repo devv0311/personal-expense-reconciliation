@@ -35,9 +35,20 @@ ADR-0022 closes by reserving AI "for what deterministic code _cannot_ settle".
 **Classification has two legs, and the deterministic one runs first.**
 
 `domain.isSelfTransferPair(a, b)` is a pure rule: two payments are the legs of one self-transfer
-when they are different rows, neither is `ignored`, both carry the same non-null
-`external_reference`, their amounts are equal, their directions are opposite, and their
-timestamps fall inside a 60-second window. A payment with such a counter-leg is written
+when they are different rows, neither is `ignored`, **neither has a counterparty already
+resolved to a merchant or a person**, both carry the same non-null `external_reference`, their
+amounts are equal, their directions are opposite, and their timestamps fall inside a 60-second
+window.
+
+The resolved-counterparty clause is load-bearing and was added while reviewing this phase's own
+diff. Amount, direction and reference alone describe a **merchant refund that echoes its
+original payment's reference** exactly as well as they describe a transfer — and reading that
+pair as a transfer would move both the expense and its refund out of spend, silently, which is
+the precise failure this system exists to catch. A counterparty resolved to a merchant or a
+person is evidence the money went outside the user's own accounts, and it outranks the shape of
+the pair. `internal_account` is deliberately _not_ disqualifying: it is this rule's own
+conclusion, already written on whichever leg was classified first, and disqualifying it would
+stop the second leg reaching the same answer. A payment with such a counter-leg is written
 `counterparty_type = 'internal_account'`, `counterparty_id = null`, and stays at
 `state = 'normalized'` — a valid terminal state for a transfer (`lifecycle.md`,
 `invariants.md` #7, ADR-0011).

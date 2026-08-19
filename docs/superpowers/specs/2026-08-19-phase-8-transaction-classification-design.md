@@ -72,6 +72,10 @@ leg is written `counterparty_type = internal_account` and stays at `NORMALIZED` 
 terminal state (`lifecycle.md`, `invariants.md` #7). No `AIInference` row is created for it,
 because no model proposed anything.
 
+A leg whose counterparty is already a resolved merchant or person disqualifies the pair: a
+merchant refund echoing its original payment's reference has the same shape as a transfer, and
+reading it as one would remove real spend from the ledger.
+
 ### 2. A classification proposal creates a DERIVED `Expense`; a settlement proposal creates nothing (ADR-0026)
 
 `data-flow.md` step 3 draws `services.evaluateForReview ─▶ Expense.state = CLASSIFIED |

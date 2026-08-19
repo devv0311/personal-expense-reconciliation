@@ -35,6 +35,7 @@ function leg(overrides: Partial<TransferLeg> = {}): TransferLeg {
     occurredAt: AT,
     externalReference: 'NEFT/N072026001',
     state: 'normalized',
+    counterpartyType: 'unknown',
     ...overrides,
   };
 }
@@ -132,6 +133,32 @@ describe('isSelfTransferPair', () => {
     const credit = leg({ paymentId: 'in', direction: 'credit', amount: paise(1_500_001n) });
 
     expect(isSelfTransferPair(leg(), credit)).toBe(false);
+  });
+
+  it('refuses a pair where either leg names someone outside the user’s accounts', () => {
+    // A merchant refund that echoes its original payment's reference has this exact shape:
+    // same amount, opposite direction, one reference. Reading it as a transfer would remove
+    // both the expense and its refund from spend, silently.
+    const refund = leg({
+      paymentId: 'in',
+      direction: 'credit',
+      counterpartyType: 'merchant',
+      externalReference: 'ACH/REF9981',
+    });
+    const original = leg({ externalReference: 'ACH/REF9981' });
+
+    expect(isSelfTransferPair(original, refund)).toBe(false);
+    expect(isSelfTransferPair(original, { ...refund, counterpartyType: 'person' })).toBe(false);
+    expect(isSelfTransferPair({ ...original, counterpartyType: 'person' }, refund)).toBe(false);
+  });
+
+  it('still pairs the second leg after the first was classified', () => {
+    // `internal_account` is this rule's own conclusion, written on whichever leg went first —
+    // it must not stop the other leg from reaching the same one.
+    const first = leg({ paymentId: 'out', counterpartyType: 'internal_account' });
+    const second = leg({ paymentId: 'in', direction: 'credit' });
+
+    expect(isSelfTransferPair(second, first)).toBe(true);
   });
 
   it('ignores a leg the ledger has already discarded', () => {
