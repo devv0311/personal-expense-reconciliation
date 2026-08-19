@@ -1,16 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { merchantAliasKey } from '../../src/domain/index.js';
-import type { AccountId, MerchantId } from '../../src/domain/index.js';
+import { asId, merchantAliasKey } from '../../src/domain/index.js';
+import type { AccountId, MerchantId, PaymentId } from '../../src/domain/index.js';
 import {
   findMerchantByAliasKey,
+  listAuditEvents,
   listPaymentsAwaitingNormalization,
   schema,
 } from '../../src/db/index.js';
-import { importBankStatementCsv } from '../../src/services/index.js';
+import { importBankStatementCsv, normalizePayments } from '../../src/services/index.js';
 import { createTestDatabase } from '../support/database.js';
 import type { TestDatabase } from '../support/database.js';
 import { AS_USER, seedCast, seedMerchants } from '../support/ledger.js';
@@ -46,6 +48,23 @@ function importFixture(content: string = FIXTURE) {
     fileReference: 'fixtures/bank-statement.csv',
     audit: AS_USER,
   });
+}
+
+/**
+ * One payment's id, by its external reference.
+ *
+ * Keyed on the reference rather than the description because two statement rows share the
+ * Blinkit description — they are distinct transactions, and only the reference tells them
+ * apart. `NEFT/N072026001` is shared by the two legs of one transfer, so callers wanting a
+ * specific leg must not use it; the tests below use it only where either leg would do.
+ */
+async function paymentIdByReference(externalReference: string): Promise<PaymentId> {
+  const [row] = await database.db
+    .select({ id: schema.payments.id })
+    .from(schema.payments)
+    .where(eq(schema.payments.externalReference, externalReference))
+    .orderBy(asc(schema.payments.direction));
+  return asId<'payment'>(row!.id);
 }
 
 describe('listPaymentsAwaitingNormalization', () => {
@@ -140,5 +159,170 @@ describe('findMerchantByAliasKey', () => {
     // Exact equality only. A prefix match would let "UPI-BLINKIT" claim every Blinkit-like
     // description, which is a guess, not a deterministic resolution.
     expect(await findMerchantByAliasKey(database.db, merchantAliasKey('UPI-BLINKIT'))).toBeNull();
+  });
+});
+
+describe('normalizePayments — channel, state, and audit', () => {
+  it('moves every imported payment to normalized', async () => {
+    await importFixture();
+
+    const result = await normalizePayments(database.db, { audit: AS_USER });
+
+    expect(result.normalizedPaymentIds).toHaveLength(8);
+    const rows = await database.db
+      .select({ state: schema.payments.state })
+      .from(schema.payments)
+      .orderBy(asc(schema.payments.occurredAt));
+    expect(rows.every((row) => row.state === 'normalized')).toBe(true);
+  });
+
+  it('refines only the channels a reference proves, leaving the rest as imported', async () => {
+    await importFixture();
+
+    const result = await normalizePayments(database.db, { audit: AS_USER });
+
+    const rows = await database.db
+      .select({ channel: schema.payments.channel, referenceType: schema.payments.referenceType })
+      .from(schema.payments);
+    expect(rows.filter((row) => row.channel === 'upi')).toHaveLength(4);
+    expect(rows.filter((row) => row.channel === 'bank_transfer')).toHaveLength(4);
+    expect(rows.every((row) => (row.referenceType === 'upi_utr') === (row.channel === 'upi'))).toBe(
+      true,
+    );
+    expect(result.channelRefinedCount).toBe(4);
+  });
+
+  it('never touches a SOURCE column', async () => {
+    await importFixture();
+    const before = await database.db
+      .select({
+        id: schema.payments.id,
+        amount: schema.payments.amount,
+        occurredAt: schema.payments.occurredAt,
+        rawDescription: schema.payments.rawDescription,
+        accountId: schema.payments.accountId,
+      })
+      .from(schema.payments)
+      .orderBy(asc(schema.payments.id));
+
+    await normalizePayments(database.db, { audit: AS_USER });
+
+    const after = await database.db
+      .select({
+        id: schema.payments.id,
+        amount: schema.payments.amount,
+        occurredAt: schema.payments.occurredAt,
+        rawDescription: schema.payments.rawDescription,
+        accountId: schema.payments.accountId,
+      })
+      .from(schema.payments)
+      .orderBy(asc(schema.payments.id));
+
+    expect(after).toEqual(before);
+  });
+
+  it('records one update event per payment, carrying old and new values', async () => {
+    const imported = await importFixture();
+    if (imported.outcome !== 'imported') throw new Error('expected an import');
+
+    await normalizePayments(database.db, { audit: AS_USER });
+
+    // listAuditEvents is per-entity: (exec, entityType, entityId). Each payment should
+    // now carry exactly two events — the importer's `create`, then this `update`.
+    for (const paymentId of imported.paymentIds) {
+      const events = await listAuditEvents(database.db, 'payment', paymentId);
+      expect(events.map((event) => event.action)).toEqual(['create', 'update']);
+    }
+
+    // The Blinkit row is one whose channel actually changed, so both sides are visible.
+    const blinkit = await paymentIdByReference('UPI/2607011234/BLINKIT');
+    const [, update] = await listAuditEvents(database.db, 'payment', blinkit);
+    expect(update?.oldValue).toMatchObject({ state: 'imported', channel: 'bank_transfer' });
+    expect(update?.newValue).toMatchObject({ state: 'normalized', channel: 'upi' });
+
+    // A row whose channel is not refined still records the state change, with channel equal
+    // on both sides — the event says what happened, not only what differed.
+    const utility = await paymentIdByReference('BBPS/EB220711');
+    const [, utilityUpdate] = await listAuditEvents(database.db, 'payment', utility);
+    expect(utilityUpdate?.oldValue).toMatchObject({ state: 'imported', channel: 'bank_transfer' });
+    expect(utilityUpdate?.newValue).toMatchObject({
+      state: 'normalized',
+      channel: 'bank_transfer',
+    });
+  });
+
+  it('is a no-op on a second run, rewriting nothing', async () => {
+    await importFixture();
+    await normalizePayments(database.db, { audit: AS_USER });
+    const afterFirst = await database.db
+      .select({ id: schema.payments.id, channel: schema.payments.channel })
+      .from(schema.payments)
+      .orderBy(asc(schema.payments.id));
+    const blinkit = await paymentIdByReference('UPI/2607011234/BLINKIT');
+    const eventsAfterFirst = (await listAuditEvents(database.db, 'payment', blinkit)).length;
+
+    const second = await normalizePayments(database.db, { audit: AS_USER });
+
+    // No eligible payments: returns empty rather than throwing AUDIT_EVENT_MISSING,
+    // and writes no second audit event.
+    expect(second.normalizedPaymentIds).toEqual([]);
+    expect(second.channelRefinedCount).toBe(0);
+    expect(await listAuditEvents(database.db, 'payment', blinkit)).toHaveLength(eventsAfterFirst);
+    expect(
+      await database.db
+        .select({ id: schema.payments.id, channel: schema.payments.channel })
+        .from(schema.payments)
+        .orderBy(asc(schema.payments.id)),
+    ).toEqual(afterFirst);
+  });
+
+  it('leaves a duplicate ignored at import untouched', async () => {
+    await importFixture();
+    const overlapping = [
+      'date,description,amount_inr,type,reference',
+      '2026-07-10,ELECTRICITY BOARD BBPS BILLPAY,2100.00,DEBIT,BBPS/EB220711',
+    ].join('\n');
+    const repeat = await importBankStatementCsv(database.db, {
+      accountId,
+      sourceSystem: 'synthetic_bank_csv',
+      fileContent: overlapping,
+      audit: AS_USER,
+    });
+    if (repeat.outcome !== 'imported') throw new Error('expected an import');
+    const ignoredId = repeat.duplicates[0]!.paymentId;
+
+    await normalizePayments(database.db, { audit: AS_USER });
+
+    const [ignored] = await database.db
+      .select({ state: schema.payments.state, ignoredReason: schema.payments.ignoredReason })
+      .from(schema.payments)
+      .where(eq(schema.payments.id, ignoredId));
+    expect(ignored?.state).toBe('ignored');
+    expect(ignored?.ignoredReason).toMatch(/^duplicate_of:/);
+  });
+
+  it('normalizes only the batch it was scoped to', async () => {
+    const first = await importFixture();
+    if (first.outcome !== 'imported') throw new Error('expected an import');
+    const second = await importBankStatementCsv(database.db, {
+      accountId,
+      sourceSystem: 'synthetic_bank_csv',
+      fileContent: [
+        'date,description,amount_inr,type,reference',
+        '2026-07-20,UPI-NEWMERCHANT-SAMPLE,300.00,DEBIT,UPI/2607201234/NEW',
+      ].join('\n'),
+      audit: AS_USER,
+    });
+    if (second.outcome !== 'imported') throw new Error('expected an import');
+
+    const result = await normalizePayments(database.db, {
+      importBatchId: second.importBatchId,
+      audit: AS_USER,
+    });
+
+    expect(result.normalizedPaymentIds).toHaveLength(1);
+    expect(await listPaymentsAwaitingNormalization(database.db, first.importBatchId)).toHaveLength(
+      8,
+    );
   });
 });

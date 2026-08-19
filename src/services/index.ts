@@ -14,6 +14,7 @@ export * from './audit.js';
 export * from './errors.js';
 export * from './loaders.js';
 export * from './import-service.js';
+export * from './normalization-service.js';
 export * from './expense-service.js';
 export * from './allocation-service.js';
 export * from './settlement-service.js';
