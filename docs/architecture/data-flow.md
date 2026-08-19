@@ -39,6 +39,19 @@ services.normalizePayments ─▶ db (deterministic match + reference extraction
                             └─▶ ai.normalizeMerchant ─▶ AIInference (pending) ─▶ db (stored, unapplied)
 ```
 
+> **As of phase 7 (2026-08-19), only the deterministic leg exists.** `services.normalizePayments`
+> refines `channel` from `reference_type` (ADR-0020) and resolves a merchant by exact match on a
+> canonical alias key, then stops. **The `ai.normalizeMerchant()` leg is not built** — `src/ai/`
+> holds only a `README.md`, and `ai_inferences` has no writer, so the table stays empty until
+> phase 8 (ADR-0022). A counterparty the deterministic leg cannot resolve ends at
+> `state = normalized`, `counterparty_type = unknown`, with **no `AIInference` row** — a recorded
+> outcome, not a gap. The two-leg description above is the target state and is deliberately kept.
+>
+> Reference extraction moved earlier than this diagram shows: `external_reference`,
+> `reference_type`, and `source_system` are populated by the adapter **at import** (phase 6,
+> ADR-0010), not during normalization. Normalization reads `reference_type`; it does not derive
+> it.
+
 ## 3. Classification
 
 `services.classifyPayment()` calls `ai.classifyTransaction()`, which returns a proposed

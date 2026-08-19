@@ -27,6 +27,7 @@ belongs in `src/services` instead.
 | `adjustment.ts`      | Adjustment distribution, including the full-refund zero-line shape (ADR-0013)              |
 | `balance.ts`         | Pairwise obligations and `NetBalance` in both directions; `obligationEvidenceStatus`       |
 | `payment.ts`         | Payment-explanation budget, non-spend guard #7, duplicate detection #10                    |
+| `normalization.ts`   | `refineChannel` (ADR-0020) and `merchantAliasKey` — the deterministic normalization rules  |
 | `lifecycle.ts`       | Explicit transition tables for every lifecycle in `lifecycle.md`                           |
 | `immutability.ts`    | SOURCE and approved-amount write guards (#4, #6)                                           |
 | `reconciliation.ts`  | `computeUnexplained` (#20) — see ADR-0016 for its outflow scoping                          |

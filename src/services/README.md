@@ -35,6 +35,13 @@ import (phase 6):
 - `import-service.ts` — `importBankStatementCsv`: parse, then `ImportBatch` + immutable
   `Payment` rows, with deterministic duplicate handling at both the file and the row level
   (ADR-0019). Classifies nothing.
+- `normalization-service.ts` — `normalizePayments`: refines `channel` from `reference_type`
+  (ADR-0020), resolves a catalogued merchant by exact alias-key match, and moves payments
+  `imported → normalized` in one audited transaction. Acts **only** on `imported` payments, so a
+  re-run is a no-op rather than a silent rewrite (ADR-0021) — which is also why it reads
+  eligibility _before_ opening the transaction, since `runAudited` rolls back a unit of work that
+  records no event. Deterministic leg only: no `ai.normalizeMerchant()` call and no `AIInference`
+  row (ADR-0022). Classifies nothing.
 
-Not yet implemented: normalization, classification, review-queue, `decideInference`, and
-Splitwise sync orchestration — see `docs/roadmap.md` phases 7–11 and 14.
+Not yet implemented: classification, review-queue, `decideInference`, and Splitwise sync
+orchestration — see `docs/roadmap.md` phases 8–11 and 14.
