@@ -1,0 +1,54 @@
+{
+  "note": "Synthetic model responses for ai.classifyTransaction (phase 8). Each entry is a verbatim model response as the scripted test transport returns it — the shape src/ai validates, not the shape it produces. Keyed by the REDACTED description the transport actually receives (docs/security/security-model.md), which is why account fragments and merchant-embedded numbers appear as [redacted-number]. No real model produced any of these, and nothing here is a proposal about real money.",
+  "model": { "provider": "synthetic", "model": "scripted-classifier-v1" },
+  "placeholders": "{{person_*}} is substituted with the seeded Person id at test time — fixture ids are stable, database ids are not.",
+  "responses": [
+    {
+      "redacted_description": "UPI-BLINKIT[redacted-number]PAYTM-BLINKIT INDIA PVT LTD",
+      "why": "A catalogued grocery merchant, unambiguous: the high-confidence, immaterial path that ends at CLASSIFIED.",
+      "response": {
+        "confidence": "high",
+        "proposedOutput": {
+          "proposedKind": "expense",
+          "relationshipType": "personal",
+          "category": "groceries"
+        }
+      }
+    },
+    {
+      "redacted_description": "UPI-ZOMATO[redacted-number]-SAMPLE RESTAURANT PVT LTD",
+      "why": "A restaurant bill may or may not have been split; the model says so rather than guessing, and REVIEW_REQUIRED follows.",
+      "response": {
+        "confidence": "medium",
+        "proposedOutput": {
+          "proposedKind": "expense",
+          "relationshipType": "shared",
+          "category": "dining"
+        }
+      }
+    },
+    {
+      "redacted_description": "ELECTRICITY BOARD BBPS BILLPAY",
+      "why": "A recurring flat utility bill — the household case, high confidence.",
+      "response": {
+        "confidence": "high",
+        "proposedOutput": {
+          "proposedKind": "expense",
+          "relationshipType": "household_shared_flat",
+          "category": "utilities"
+        }
+      }
+    },
+    {
+      "redacted_description": "UPI-FRIENDA-TRANSFER",
+      "why": "A round-number transfer to a known person: the settlement discriminator ADR-0007 added. Always reviewed, whatever the confidence.",
+      "response": {
+        "confidence": "medium",
+        "proposedOutput": {
+          "proposedKind": "settlement",
+          "counterpartyPersonHint": { "type": "person", "id": "{{person_friend_a}}" }
+        }
+      }
+    }
+  ]
+}

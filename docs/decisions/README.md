@@ -49,3 +49,5 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0023](0023-self-transfer-recognition-is-deterministic.md)   | Recognising a self-transfer is deterministic, not an AI proposal            | Accepted                                                     |
 | [0024](0024-confidence-routes-review-never-approves.md)      | Confidence routes a proposal to review; nothing in phase 8 auto-approves    | Accepted                                                     |
 | [0025](0025-injected-model-transport.md)                     | The model transport is injected; phase 8 wires no provider                  | Accepted                                                     |
+| [0026](0026-classification-writes-a-derived-expense.md)      | A classification proposal writes a DERIVED Expense; a settlement waits      | Accepted                                                     |
+| [0027](0027-classification-covers-debits-only.md)            | Phase 8 classifies debits; a credit is deliberately left unclassified       | Accepted                                                     |

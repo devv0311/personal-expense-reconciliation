@@ -35,6 +35,7 @@ parentheses) and to a supported source/expense type from `docs/product/overview.
 | `bank-statement.csv`                 | A synthetic bank statement export (multiple channels, incl. a transfer and a refund)                                     |
 | `upi-transactions.json`              | A synthetic UPI transaction export                                                                                       |
 | `merchants.json`                     | Synthetic merchant catalog — canonical names and the exact raw descriptions that resolve to them (phase 7 normalization) |
+| `ai-classification-proposals.json`   | Synthetic `ai.classifyTransaction` model responses, keyed by redacted description (phase 8 classification)               |
 | `restaurant-bill-unequal-split.json` | Restaurant bill, three people, unequal consumption (§2, §3)                                                              |
 | `restaurant-no-receipt.json`         | Restaurant bill with no receipt, manual explanation only (§4)                                                            |
 | `blinkit-order-mixed.json`           | Blinkit order with personal and flat items in one basket (§1, §21)                                                       |

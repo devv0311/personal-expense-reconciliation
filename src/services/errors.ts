@@ -16,6 +16,15 @@ export type ServiceErrorCode =
   /** A source file could not be read; every rejected row is reported (Phase 6). */
   | 'IMPORT_SOURCE_INVALID'
   /**
+   * A well-formed AI proposal that the ledger contradicts (gate 2, `ai-boundary.md`).
+   *
+   * Distinct from `AiContractError`, which means the response was not a proposal at all. This
+   * one means it was a proposal about something that does not exist, or about a payment that
+   * proves otherwise — an expense funded by a credit, a payer who is not the account owner, a
+   * counterparty nobody has heard of.
+   */
+  | 'AI_PROPOSAL_INVALID'
+  /**
    * A mutating transaction completed without recording an `AuditEvent`.
    *
    * This is the structural half of invariant #21: rather than trusting every call site to

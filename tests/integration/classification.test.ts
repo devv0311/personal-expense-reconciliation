@@ -19,17 +19,26 @@ import {
   insertExpense,
   insertPaymentExpenseLink,
   listPaymentExpenseLinksByPayment,
+  listAuditEvents,
   listPaymentsAwaitingClassification,
   listPeople,
   recordAiInferenceDecision,
   schema,
   updateExpenseClassification,
 } from '../../src/db/index.js';
-import { importBankStatementCsv, normalizePayments } from '../../src/services/index.js';
+import { createAiService } from '../../src/ai/index.js';
+import {
+  classifyPayment,
+  classifyPayments,
+  importBankStatementCsv,
+  normalizePayments,
+} from '../../src/services/index.js';
+import type { ClassificationOutcome } from '../../src/services/index.js';
 import { createTestDatabase } from '../support/database.js';
 import type { TestDatabase } from '../support/database.js';
 import { AS_USER, seedCast, seedMerchants } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
+import { scriptedClassificationTransport } from '../support/ai.js';
 
 const FIXTURE = readFileSync(join(process.cwd(), 'fixtures', 'bank-statement.csv'), 'utf8');
 
@@ -423,5 +432,491 @@ describe('the references a proposal is checked against', () => {
     expect(
       await getPersonById(database.db, asId<'person'>('00000000-0000-4000-8000-000000000000')),
     ).toBeNull();
+  });
+});
+
+/* ==================================================================== classification */
+
+/** Classification is a system act; deciding one is not (invariants.md #15, #17). */
+const AS_SYSTEM = { actor: 'system', source: 'services.classifyPayments' } as const;
+
+/** The state phase 8 works on, with a model scripted from the fixture. */
+async function classifyFixture(
+  options: { overrides?: Record<string, unknown>; materialityThreshold?: bigint } = {},
+) {
+  await importedAndNormalized();
+  const transport = scriptedClassificationTransport({
+    people: cast.person,
+    ...(options.overrides === undefined ? {} : { overrides: options.overrides }),
+  });
+  const result = await classifyPayments(database.db, {
+    ai: createAiService(transport),
+    audit: AS_SYSTEM,
+    ...(options.materialityThreshold === undefined
+      ? {}
+      : { materialityThreshold: paise(options.materialityThreshold) }),
+  });
+  return { transport, result };
+}
+
+function outcomesByDescription(
+  outcomes: readonly ClassificationOutcome[],
+  rows: Array<{ id: string; rawDescription: string }>,
+): Map<string, ClassificationOutcome[]> {
+  const description = new Map(rows.map((row) => [row.id, row.rawDescription]));
+  const grouped = new Map<string, ClassificationOutcome[]>();
+  for (const outcome of outcomes) {
+    const key = description.get(outcome.paymentId) ?? 'unknown';
+    grouped.set(key, [...(grouped.get(key) ?? []), outcome]);
+  }
+  return grouped;
+}
+
+async function paymentRows(): Promise<Array<{ id: string; rawDescription: string }>> {
+  return database.db
+    .select({ id: schema.payments.id, rawDescription: schema.payments.rawDescription })
+    .from(schema.payments);
+}
+
+describe('classifyPayments — the whole normalized statement', () => {
+  it('reaches a recorded outcome for every payment, and never two for one', async () => {
+    const { result } = await classifyFixture();
+
+    expect(result.outcomes).toHaveLength(8);
+    expect(new Set(result.outcomes.map((outcome) => outcome.paymentId)).size).toBe(8);
+    const counted = result.outcomes.reduce<Record<string, number>>((totals, outcome) => {
+      totals[outcome.outcome] = (totals[outcome.outcome] ?? 0) + 1;
+      return totals;
+    }, {});
+    expect(counted).toEqual({ proposed: 5, internal_transfer: 2, skipped: 1 });
+  });
+
+  it('classifies a merchant debit as an expense and stops at CLASSIFIED when confident', async () => {
+    const { result } = await classifyFixture();
+    const grouped = outcomesByDescription(result.outcomes, await paymentRows());
+
+    const blinkit = grouped.get('UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD') ?? [];
+    // Two statement rows share this description; each is its own payment and its own proposal.
+    expect(blinkit).toHaveLength(2);
+    for (const outcome of blinkit) {
+      expect(outcome).toMatchObject({
+        outcome: 'proposed',
+        proposedKind: 'expense',
+        confidence: 'high',
+        expenseState: 'classified',
+        review: { requiresReview: false, reasons: [] },
+      });
+    }
+    expect(
+      new Set(blinkit.map((outcome) => (outcome as { expenseId: string }).expenseId)).size,
+    ).toBe(2);
+  });
+
+  it('routes a medium-confidence proposal to REVIEW_REQUIRED', async () => {
+    const { result } = await classifyFixture();
+    const grouped = outcomesByDescription(result.outcomes, await paymentRows());
+
+    expect(grouped.get('UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD')?.[0]).toMatchObject({
+      outcome: 'proposed',
+      proposedKind: 'expense',
+      confidence: 'medium',
+      expenseState: 'review_required',
+      review: { requiresReview: true, reasons: ['low_confidence'] },
+    });
+  });
+
+  it('proposes a settlement without creating anything authoritative', async () => {
+    const { result } = await classifyFixture();
+    const grouped = outcomesByDescription(result.outcomes, await paymentRows());
+
+    const p2p = grouped.get('UPI-FRIENDA-TRANSFER')?.[0];
+    expect(p2p).toMatchObject({
+      outcome: 'proposed',
+      proposedKind: 'settlement',
+      // A Settlement is created directly as APPROVED, so nothing exists until it is accepted.
+      expenseId: null,
+      expenseState: null,
+      review: { requiresReview: true },
+    });
+    if (p2p?.outcome !== 'proposed') throw new Error('expected a proposal');
+    expect(p2p.review.reasons).toContain('settlement_kind');
+    expect(await database.db.select().from(schema.settlements)).toEqual([]);
+    // The payment is untouched too: its counterparty is resolved when the proposal is accepted.
+    const [payment] = await database.db
+      .select({ state: schema.payments.state, counterpartyType: schema.payments.counterpartyType })
+      .from(schema.payments)
+      .where(eq(schema.payments.rawDescription, 'UPI-FRIENDA-TRANSFER'));
+    expect(payment).toMatchObject({ state: 'normalized', counterpartyType: 'unknown' });
+  });
+
+  it('recognises both legs of the self-transfer deterministically, with no inference', async () => {
+    const { result, transport } = await classifyFixture();
+
+    const transfers = result.outcomes.filter((outcome) => outcome.outcome === 'internal_transfer');
+    expect(transfers).toHaveLength(2);
+    // Each leg names the other as its evidence.
+    const ids = transfers.map((outcome) => outcome.paymentId);
+    const counterLegs = transfers.map(
+      (outcome) => (outcome as { counterLegPaymentId: string }).counterLegPaymentId,
+    );
+    expect([...counterLegs].sort()).toEqual([...ids].sort());
+
+    const rows = await database.db
+      .select({
+        counterpartyType: schema.payments.counterpartyType,
+        counterpartyId: schema.payments.counterpartyId,
+        state: schema.payments.state,
+      })
+      .from(schema.payments)
+      .where(eq(schema.payments.externalReference, 'NEFT/N072026001'));
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row).toMatchObject({
+        counterpartyType: 'internal_account',
+        counterpartyId: null,
+        // A valid terminal state: a transfer is excluded from spend by its type alone.
+        state: 'normalized',
+      });
+    }
+    // The model was never asked about either leg.
+    expect(transport.asked.some((description) => description.includes('SELF A/C'))).toBe(false);
+  });
+
+  it('leaves the refund credit alone, with a reason rather than a silence', async () => {
+    const { result, transport } = await classifyFixture();
+    const grouped = outcomesByDescription(result.outcomes, await paymentRows());
+
+    expect(grouped.get('ACH REFUND SAMPLE ELECTRONICS STORE')?.[0]).toMatchObject({
+      outcome: 'skipped',
+      reason: 'credit_out_of_scope',
+    });
+    // Not asked, not stored: V1 does not classify inflow (ADR-0015, ADR-0027).
+    expect(transport.asked.some((description) => description.includes('ACH REFUND'))).toBe(false);
+    const [payment] = await database.db
+      .select({
+        state: schema.payments.state,
+        counterpartyType: schema.payments.counterpartyType,
+        counterpartyId: schema.payments.counterpartyId,
+      })
+      .from(schema.payments)
+      .where(eq(schema.payments.rawDescription, 'ACH REFUND SAMPLE ELECTRONICS STORE'));
+    // Still exactly as normalization left it — merchant resolved, nothing classified.
+    expect(payment).toMatchObject({
+      state: 'normalized',
+      counterpartyType: 'merchant',
+      counterpartyId: merchant['merchant_sample_electronics'],
+    });
+  });
+
+  it('stores one pending inference per proposal, naming what produced it', async () => {
+    await classifyFixture();
+
+    const inferences = await database.db
+      .select({
+        inferenceType: schema.aiInferences.inferenceType,
+        status: schema.aiInferences.status,
+        confidence: schema.aiInferences.confidence,
+        modelProvider: schema.aiInferences.modelProvider,
+        modelName: schema.aiInferences.modelName,
+        promptVersion: schema.aiInferences.promptVersion,
+        proposedOutput: schema.aiInferences.proposedOutput,
+        resultingRecordType: schema.aiInferences.resultingRecordType,
+      })
+      .from(schema.aiInferences);
+
+    expect(inferences).toHaveLength(5);
+    expect(inferences.every((row) => row.status === 'pending')).toBe(true);
+    expect(inferences.every((row) => row.inferenceType === 'classify_transaction')).toBe(true);
+    expect(inferences.every((row) => row.modelProvider === 'synthetic')).toBe(true);
+    expect(inferences.every((row) => row.promptVersion === 'classify_transaction/v1')).toBe(true);
+    // The expense path points at its DERIVED expense; the settlement path has nothing to point at.
+    expect(inferences.filter((row) => row.resultingRecordType === 'expense')).toHaveLength(4);
+    expect(inferences.filter((row) => row.resultingRecordType === null)).toHaveLength(1);
+  });
+
+  it('sends the model a redacted description and never a reference', async () => {
+    const { transport } = await classifyFixture();
+
+    expect(transport.asked).toHaveLength(5);
+    expect(transport.asked).toContain('UPI-BLINKIT[redacted-number]PAYTM-BLINKIT INDIA PVT LTD');
+    expect(transport.asked.join('|')).not.toContain('UPI/2607011234/BLINKIT');
+    expect(transport.asked.join('|')).not.toContain('9821');
+  });
+
+  it('is a no-op on a second run', async () => {
+    const { result: first } = await classifyFixture();
+    const transport = scriptedClassificationTransport({ people: cast.person });
+
+    const second = await classifyPayments(database.db, {
+      ai: createAiService(transport),
+      audit: AS_SYSTEM,
+    });
+
+    expect(first.outcomes.filter((outcome) => outcome.outcome === 'proposed')).toHaveLength(5);
+    // Nothing to do: proposals already exist, and the transfers are already classified.
+    expect(second.outcomes.every((outcome) => outcome.outcome === 'skipped')).toBe(true);
+    expect(second.outcomes.map((outcome) => (outcome as { reason: string }).reason).sort()).toEqual(
+      [
+        'already_classified',
+        'already_classified',
+        'already_classified',
+        'already_classified',
+        'already_classified',
+        'credit_out_of_scope',
+        'non_spend_counterparty',
+        'non_spend_counterparty',
+      ],
+    );
+    expect(transport.asked).toEqual([]);
+    expect(await database.db.select().from(schema.aiInferences)).toHaveLength(5);
+    expect(await database.db.select().from(schema.expenses)).toHaveLength(4);
+  });
+
+  it('scopes to one import batch when asked', async () => {
+    await importedAndNormalized();
+    const second = await importBankStatementCsv(database.db, {
+      accountId,
+      sourceSystem: 'synthetic_bank_csv',
+      fileContent: [
+        'date,description,amount_inr,type,reference',
+        '2026-07-20,ELECTRICITY BOARD BBPS BILLPAY,2100.00,DEBIT,BBPS/EB220720',
+      ].join('\n'),
+      audit: AS_USER,
+    });
+    if (second.outcome !== 'imported') throw new Error('expected an import');
+    await normalizePayments(database.db, { audit: AS_USER });
+
+    const result = await classifyPayments(database.db, {
+      importBatchId: second.importBatchId,
+      ai: createAiService(scriptedClassificationTransport({ people: cast.person })),
+      audit: AS_SYSTEM,
+    });
+
+    expect(result.outcomes).toHaveLength(1);
+    expect(await database.db.select().from(schema.aiInferences)).toHaveLength(1);
+  });
+});
+
+describe('classifyPayments — routing and thresholds', () => {
+  it('reviews a high-confidence proposal once it is material', async () => {
+    // ₹1,000 threshold: the ₹1,240 Blinkit rows cross it, the model's confidence unchanged.
+    const { result } = await classifyFixture({ materialityThreshold: 100_000n });
+    const grouped = outcomesByDescription(result.outcomes, await paymentRows());
+
+    for (const outcome of grouped.get('UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD') ?? []) {
+      expect(outcome).toMatchObject({
+        confidence: 'high',
+        expenseState: 'review_required',
+        review: { requiresReview: true, reasons: ['material_amount'] },
+      });
+    }
+  });
+
+  it('never approves anything, however confident the model is', async () => {
+    await classifyFixture();
+
+    const states = await database.db.select({ state: schema.expenses.state }).from(schema.expenses);
+    expect(
+      states.every((row) => row.state === 'classified' || row.state === 'review_required'),
+    ).toBe(true);
+    // No links, no settlements, no approved expenses: classification explains nothing yet.
+    expect(await database.db.select().from(schema.paymentExpenseLinks)).toEqual([]);
+    expect(await database.db.select().from(schema.settlements)).toEqual([]);
+  });
+});
+
+describe('classifyPayments — what it refuses to store', () => {
+  it('records a malformed response as a rejection, writing nothing, and carries on', async () => {
+    const { result } = await classifyFixture({
+      overrides: {
+        'ELECTRICITY BOARD BBPS BILLPAY': {
+          confidence: 'high',
+          proposedOutput: { proposedKind: 'household_bill' },
+        },
+      },
+    });
+    const grouped = outcomesByDescription(result.outcomes, await paymentRows());
+
+    expect(grouped.get('ELECTRICITY BOARD BBPS BILLPAY')?.[0]).toMatchObject({
+      outcome: 'rejected',
+      code: 'FIELD_INVALID',
+    });
+    // Rejected before it becomes an AIInference at all (ai-boundary.md), and the other four
+    // proposals are unaffected — one bad answer is not a bad run.
+    expect(await database.db.select().from(schema.aiInferences)).toHaveLength(4);
+    expect(await database.db.select().from(schema.expenses)).toHaveLength(3);
+    expect(result.outcomes.filter((outcome) => outcome.outcome === 'proposed')).toHaveLength(4);
+  });
+
+  it('refuses a settlement naming somebody who does not exist', async () => {
+    const { result } = await classifyFixture({
+      overrides: {
+        'UPI-FRIENDA-TRANSFER': {
+          confidence: 'high',
+          proposedOutput: {
+            proposedKind: 'settlement',
+            counterpartyPersonHint: {
+              type: 'person',
+              id: '00000000-0000-4000-8000-000000000000',
+            },
+          },
+        },
+      },
+    });
+    const grouped = outcomesByDescription(result.outcomes, await paymentRows());
+
+    expect(grouped.get('UPI-FRIENDA-TRANSFER')?.[0]).toMatchObject({
+      outcome: 'rejected',
+      code: 'AI_PROPOSAL_INVALID',
+    });
+    expect(await database.db.select().from(schema.aiInferences)).toHaveLength(4);
+  });
+
+  it('refuses an expense whose proposed payer is not the account owner', async () => {
+    const { result } = await classifyFixture({
+      overrides: {
+        'UPI-ZOMATO[redacted-number]-SAMPLE RESTAURANT PVT LTD': {
+          confidence: 'high',
+          proposedOutput: {
+            proposedKind: 'expense',
+            relationshipType: 'shared',
+            category: 'dining',
+            paidByPersonHint: { type: 'person', id: cast.person['person_friend_a'] },
+          },
+        },
+      },
+    });
+    const grouped = outcomesByDescription(result.outcomes, await paymentRows());
+
+    // An expense someone else paid for has no Payment in this ledger at all (ADR-0006), so a
+    // payment-driven proposal saying otherwise contradicts its own evidence.
+    expect(grouped.get('UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD')?.[0]).toMatchObject({
+      outcome: 'rejected',
+      code: 'AI_PROPOSAL_INVALID',
+    });
+  });
+
+  it('refuses a settlement the user proposes with themselves', async () => {
+    const { result } = await classifyFixture({
+      overrides: {
+        'UPI-FRIENDA-TRANSFER': {
+          confidence: 'high',
+          proposedOutput: {
+            proposedKind: 'settlement',
+            counterpartyPersonHint: { type: 'person', id: cast.userPersonId },
+          },
+        },
+      },
+    });
+    const grouped = outcomesByDescription(result.outcomes, await paymentRows());
+
+    expect(grouped.get('UPI-FRIENDA-TRANSFER')?.[0]).toMatchObject({
+      outcome: 'rejected',
+      code: 'AI_PROPOSAL_INVALID',
+    });
+  });
+
+  it('aborts the run when the provider itself fails, rather than calling it a rejection', async () => {
+    await importedAndNormalized();
+    const failing = {
+      modelInfo: { provider: 'synthetic', model: 'unreachable' },
+      complete: () => Promise.reject(new Error('provider unavailable')),
+    };
+
+    await expect(
+      classifyPayments(database.db, { ai: createAiService(failing), audit: AS_SYSTEM }),
+    ).rejects.toThrow('provider unavailable');
+    // The run stops at the first payment it cannot get an answer for, rather than working
+    // through eight of them collecting the same failure eight times.
+    expect(await database.db.select().from(schema.aiInferences)).toEqual([]);
+  });
+});
+
+describe('classifyPayment — one payment', () => {
+  it('refuses to classify a payment normalization has not reached', async () => {
+    await importFixture();
+    const paymentId = await paymentIdByDescription('ELECTRICITY BOARD BBPS BILLPAY');
+
+    const outcome = await classifyPayment(database.db, {
+      paymentId,
+      ai: createAiService(scriptedClassificationTransport({ people: cast.person })),
+      audit: AS_SYSTEM,
+    });
+
+    expect(outcome).toEqual({ outcome: 'skipped', paymentId, reason: 'not_normalized' });
+    expect(await database.db.select().from(schema.aiInferences)).toEqual([]);
+  });
+
+  it('audits the proposal, the expense and each transition it walked', async () => {
+    await importedAndNormalized();
+    const paymentId = await paymentIdByDescription('UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD');
+
+    const outcome = await classifyPayment(database.db, {
+      paymentId,
+      ai: createAiService(scriptedClassificationTransport({ people: cast.person })),
+      audit: AS_SYSTEM,
+    });
+
+    if (outcome.outcome !== 'proposed') throw new Error('expected a proposal');
+    const inferenceEvents = await listAuditEvents(database.db, 'ai_inference', outcome.inferenceId);
+    expect(inferenceEvents.map((event) => event.action)).toEqual(['create']);
+    expect(inferenceEvents[0]?.newValue).toMatchObject({
+      status: 'pending',
+      proposedKind: 'expense',
+      confidence: 'medium',
+    });
+    // Never the model: an AuditEvent's actor is a person, a rule, or the system that ran the
+    // job — the proposal is evidence of what a model said, not an act it performed.
+    expect(inferenceEvents[0]?.actor).toBe('system');
+
+    const expenseEvents = await listAuditEvents(database.db, 'expense', outcome.expenseId!);
+    expect(expenseEvents.map((event) => event.action)).toEqual(['create', 'update', 'update']);
+    expect(expenseEvents[0]?.newValue).toMatchObject({ state: 'proposed' });
+    expect(expenseEvents[1]).toMatchObject({
+      oldValue: { state: 'proposed' },
+      newValue: { state: 'classified' },
+    });
+    expect(expenseEvents[2]).toMatchObject({
+      oldValue: { state: 'classified' },
+      newValue: { state: 'review_required' },
+    });
+    expect(expenseEvents[2]?.reason).toContain('low_confidence');
+  });
+
+  it('copies the payment onto the expense, and the merchant onto its description', async () => {
+    await importedAndNormalized();
+    const paymentId = await paymentIdByDescription('ELECTRICITY BOARD BBPS BILLPAY');
+
+    const outcome = await classifyPayment(database.db, {
+      paymentId,
+      ai: createAiService(scriptedClassificationTransport({ people: cast.person })),
+      audit: AS_SYSTEM,
+    });
+
+    if (outcome.outcome !== 'proposed' || outcome.expenseId === null) {
+      throw new Error('expected an expense proposal');
+    }
+    const [expense] = await database.db
+      .select({
+        description: schema.expenses.description,
+        amount: schema.expenses.amount,
+        currency: schema.expenses.currency,
+        occurredAt: schema.expenses.occurredAt,
+        relationshipType: schema.expenses.relationshipType,
+        category: schema.expenses.category,
+        paidByPersonId: schema.expenses.paidByPersonId,
+      })
+      .from(schema.expenses)
+      .where(eq(schema.expenses.id, outcome.expenseId));
+    expect(expense).toMatchObject({
+      description: 'Electricity Board',
+      amount: 210_000n,
+      currency: 'INR',
+      occurredAt: new Date('2026-07-10T00:00:00.000Z'),
+      relationshipType: 'household_shared_flat',
+      category: 'utilities',
+      // The payer of a payment-funded expense is the account owner, always (ADR-0006).
+      paidByPersonId: cast.userPersonId,
+    });
   });
 });
