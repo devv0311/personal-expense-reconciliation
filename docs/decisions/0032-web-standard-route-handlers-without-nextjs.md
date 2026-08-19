@@ -44,8 +44,11 @@ never Next.js-specific in the first place.
 
 **The layer stays thin, structurally.** Handlers validate (UUID shape, required fields, enum
 membership), call exactly one service, and serialize. No ordering, no state transitions, no
-database access, no AI call — `src/api` imports `src/services`, `src/domain`'s types and
-`src/ai`'s validator error, and nothing else. Status mapping is a translation of typed error
+database access, no AI call. `src/api` imports `src/services` (including the `Database` and
+`AiService` handles it merely passes through, re-exported there so this layer does not reach
+past it), `src/domain`'s types and value sets, and one thing from `src/ai`: the
+`isAiContractError` guard, because mapping an error to a status code means recognising which
+family it came from. Status mapping is a translation of typed error
 codes the lower layers already raise, which is why it can live here without becoming logic:
 `DECISION_ACTOR_INVALID → 403`, `INVALID_STATE_TRANSITION → 409`, `PRECONDITION_FAILED → 409`,
 `ENTITY_NOT_FOUND → 404`, an `AiContractError` → 422, anything unrecognised → a bare 500 with no

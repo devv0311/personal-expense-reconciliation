@@ -24,3 +24,11 @@ export * from './allocation-service.js';
 export * from './settlement-service.js';
 export * from './adjustment-service.js';
 export * from './balance-service.js';
+
+/**
+ * The two handles every service call needs, re-exported so a caller — `src/api`, a future
+ * server — depends on this layer alone rather than reaching past it into `src/db` and
+ * `src/ai` for a type (`system-architecture.md`, "dependency direction is inward").
+ */
+export type { Database } from '../db/index.js';
+export type { AiService } from '../ai/index.js';

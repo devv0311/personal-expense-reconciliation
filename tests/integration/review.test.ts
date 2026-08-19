@@ -19,6 +19,7 @@ import {
   updateExpenseState,
 } from '../../src/db/index.js';
 import {
+  approveExpense,
   classifyPayments,
   decideInference,
   importBankStatementCsv,
@@ -27,6 +28,7 @@ import {
   dismissPossibleDuplicate,
   normalizePayments,
   reclassifyPayment,
+  runReconciliation,
 } from '../../src/services/index.js';
 import type { ProposedClassification } from '../../src/services/index.js';
 import { createTestDatabase } from '../support/database.js';
@@ -1219,5 +1221,56 @@ describe('dismissPossibleDuplicate', () => {
       }),
     ).rejects.toMatchObject({ code: 'DECISION_ACTOR_INVALID' });
     expect(await listDismissedDuplicatePairs(database.db)).toEqual([]);
+  });
+});
+
+describe('a rejected proposal reaches no total', () => {
+  it('leaves reconciliation exactly where it was before the proposal existed', async () => {
+    const proposals = await classifiedFixture();
+    const period = {
+      periodStart: new Date('2026-07-01T00:00:00.000Z'),
+      periodEnd: new Date('2026-08-01T00:00:00.000Z'),
+    };
+    const before = await runReconciliation(database.db, {
+      userPersonId: cast.userPersonId,
+      ...period,
+      audit: AS_USER,
+    });
+
+    for (const proposal of proposals) {
+      await decideInference(database.db, {
+        inferenceId: proposal.inferenceId,
+        decision: 'reject',
+        audit: AS_REVIEWER,
+      });
+    }
+
+    const after = await runReconciliation(database.db, {
+      userPersonId: cast.userPersonId,
+      ...period,
+      audit: AS_USER,
+    });
+    // Five rejected expenses now exist. None of them is spending, and none of them moved a
+    // single paisa of any bucket: every ledger_* total enumerates the states it counts,
+    // starting at `approved` (invariants.md #20, ADR-0028).
+    expect(after.totals).toEqual(before.totals);
+    expect(after.totals.ledgerExplainedTotal).toBe(0n);
+    expect(await database.db.select().from(schema.expenses)).toHaveLength(4);
+  });
+
+  it('does not let a rejected expense be approved afterwards', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals.find((proposal) => proposal.expenseId !== null)!;
+    await decideInference(database.db, {
+      inferenceId: target.inferenceId,
+      decision: 'reject',
+      audit: AS_REVIEWER,
+    });
+
+    // The state machine draws no edge out of `rejected`, so even the service that approves
+    // expenses cannot revive one.
+    await expect(
+      approveExpense(database.db, { expenseId: target.expenseId!, audit: AS_REVIEWER }),
+    ).rejects.toMatchObject({ code: 'INVALID_STATE_TRANSITION' });
   });
 });

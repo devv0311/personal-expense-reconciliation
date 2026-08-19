@@ -6,7 +6,10 @@ Thin HTTP/API layer (Next.js route handlers / server actions, per
 **Owns:** request validation, calling the appropriate `src/services` function, response
 serialization. Nothing else.
 
-**Depends on:** `src/services`.
+**Depends on:** `src/services` — including the `Database` and `AiService` handles it merely
+passes through, which are re-exported there so this layer never reaches past it into `src/db`.
+The one exception is `isAiContractError`, imported from `src/ai` because mapping an error to a
+status code means recognising which family it came from.
 
 **Rule:** no business logic, no direct database access, no direct AI calls. If a route handler
 needs an `if` statement more complex than routing/validation, that logic belongs in

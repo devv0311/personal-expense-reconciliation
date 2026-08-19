@@ -12,8 +12,7 @@
  * features is a way for two routes to disagree about who owns a path.
  */
 
-import type { AiService } from '../ai/index.js';
-import type { Database } from '../db/index.js';
+import type { AiService, Database } from '../services/index.js';
 
 import { jsonResponse, toErrorResponse } from './http.js';
 import {
