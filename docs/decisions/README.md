@@ -55,3 +55,4 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0029](0029-review-queue-ordering.md)                         | The review queue is ordered by a pure function, and carries every reason    | Accepted                                                     |
 | [0030](0030-reclassification-is-an-explicit-review-action.md) | Re-classification is an explicit review action; a re-run stays a no-op      | Accepted                                                     |
 | [0031](0031-possible-duplicate-review.md)                     | A possible duplicate is confirmed or dismissed by a human, both recorded    | Accepted                                                     |
+| [0032](0032-web-standard-route-handlers-without-nextjs.md)    | The API ships as Web-standard route handlers, without installing Next.js    | Accepted                                                     |
