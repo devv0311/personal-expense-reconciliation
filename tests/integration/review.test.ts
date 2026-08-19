@@ -21,6 +21,7 @@ import {
   classifyPayments,
   decideInference,
   importBankStatementCsv,
+  listReviewQueue,
   normalizePayments,
 } from '../../src/services/index.js';
 import type { ProposedClassification } from '../../src/services/index.js';
@@ -353,5 +354,263 @@ describe('the rejected expense state, through the repository', () => {
     expect(expense?.state).toBe('rejected');
     // Still there, still exactly what it was: nothing deletes financial records.
     expect(expense?.amount).toBe(124_000n);
+  });
+});
+
+/* ======================================================================= listReviewQueue */
+
+/** Two live payments a day apart, alike enough to be offered as a possible duplicate. */
+async function addLookalikePair(): Promise<{ earlier: string; later: string }> {
+  const earlier = await addPayment(database.db, cast, {
+    accountId,
+    amount: paise(45_000n),
+    direction: 'debit',
+    occurredAt: new Date('2026-07-14T00:00:00Z'),
+    rawDescription: 'UPI-COFFEE-SHOP',
+    channel: 'upi',
+    state: 'normalized',
+  });
+  const later = await addPayment(database.db, cast, {
+    accountId,
+    amount: paise(45_000n),
+    direction: 'debit',
+    occurredAt: new Date('2026-07-14T00:00:30Z'),
+    rawDescription: 'UPI-COFFEE-SHOP',
+    channel: 'upi',
+    state: 'normalized',
+  });
+  return { earlier, later };
+}
+
+describe('listReviewQueue — what is waiting', () => {
+  it('is empty on an empty ledger', async () => {
+    const queue = await listReviewQueue(database.db);
+
+    expect(queue).toEqual({
+      items: [],
+      counts: {
+        classification_decision: 0,
+        possible_duplicate: 0,
+        rejected_classification: 0,
+      },
+      total: 0,
+      truncated: false,
+    });
+  });
+
+  it('surfaces every pending decision the classifier produced', async () => {
+    await classifiedFixture();
+
+    const queue = await listReviewQueue(database.db);
+
+    expect(queue.total).toBe(5);
+    expect(queue.counts).toEqual({
+      classification_decision: 5,
+      possible_duplicate: 0,
+      rejected_classification: 0,
+    });
+    expect(queue.items.every((item) => item.kind === 'classification_decision')).toBe(true);
+  });
+
+  it('orders by what is at stake, not by what the database returned first', async () => {
+    await classifiedFixture();
+
+    const queue = await listReviewQueue(database.db);
+
+    // Flagged before routine; inside each, biggest first, then oldest, then id.
+    expect(queue.items.map((item) => item.payment.description)).toEqual([
+      'UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD', // medium confidence, ₹2,840
+      'UPI-FRIENDA-TRANSFER', // settlement, always flagged, ₹1,000
+      'ELECTRICITY BOARD BBPS BILLPAY', // routine, ₹2,100
+      'UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD', // routine, ₹1,240, 1 July
+      'UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD', // routine, ₹1,240, 12 July
+    ]);
+    const [zomato, settlement] = queue.items;
+    expect(zomato?.reasons).toEqual(['low_confidence']);
+    expect(settlement?.reasons).toEqual(['low_confidence', 'settlement_kind']);
+  });
+
+  it('tells a surface why a routine proposal is still here', async () => {
+    await classifiedFixture();
+
+    const queue = await listReviewQueue(database.db);
+
+    const blinkit = queue.items.find(
+      (item) => item.kind === 'classification_decision' && item.confidence === 'high',
+    );
+    // Nothing auto-approves: a high-confidence, immaterial proposal is still a decision
+    // nobody has made (invariants.md #16).
+    expect(blinkit?.reasons).toEqual(['decision_required']);
+  });
+
+  it('carries the proposal itself, so a reviewer can see what they are agreeing to', async () => {
+    await classifiedFixture();
+
+    const queue = await listReviewQueue(database.db);
+
+    const electricity = queue.items.find(
+      (item) => item.payment.description === 'ELECTRICITY BOARD BBPS BILLPAY',
+    );
+    if (electricity?.kind !== 'classification_decision') throw new Error('expected a decision');
+    expect(electricity.proposal).toEqual({
+      proposedKind: 'expense',
+      relationshipType: 'household_shared_flat',
+      category: 'utilities',
+      paidByPersonHint: null,
+    });
+    expect(electricity.model).toEqual({
+      provider: 'synthetic',
+      name: 'scripted-classifier-v1',
+      promptVersion: 'classify_transaction/v1',
+    });
+    expect(electricity.expense).toMatchObject({
+      state: 'classified',
+      relationshipType: 'household_shared_flat',
+    });
+  });
+
+  it('makes a settlement proposal reviewable with no expense behind it', async () => {
+    await classifiedFixture();
+
+    const queue = await listReviewQueue(database.db);
+
+    const settlement = queue.items.find(
+      (item) => item.kind === 'classification_decision' && item.proposedKind === 'settlement',
+    );
+    if (settlement?.kind !== 'classification_decision') throw new Error('expected a decision');
+    expect(settlement.expense).toBeNull();
+    expect(settlement.proposal).toMatchObject({
+      proposedKind: 'settlement',
+      counterpartyPersonHint: { type: 'person', id: cast.person['person_friend_a'] },
+    });
+    // The reviewer has everything needed to resolve the ambiguity: the payment, the proposed
+    // counterparty, and the inference id that decideInference takes.
+    expect(settlement.payment).toMatchObject({ amount: 100_000n, direction: 'debit' });
+    expect(settlement.inferenceId).toBe(settlement.id);
+  });
+
+  it('returns the same answer twice, including the order', async () => {
+    await classifiedFixture();
+    await addLookalikePair();
+
+    const first = await listReviewQueue(database.db);
+    const second = await listReviewQueue(database.db);
+
+    expect(second.items.map((item) => item.id)).toEqual(first.items.map((item) => item.id));
+    expect(second.counts).toEqual(first.counts);
+  });
+
+  it('limits after ordering, and says so, without lying about the counts', async () => {
+    await classifiedFixture();
+
+    const queue = await listReviewQueue(database.db, { limit: 2 });
+
+    expect(queue.items).toHaveLength(2);
+    expect(queue.truncated).toBe(true);
+    expect(queue.total).toBe(5);
+    // The badge count is the whole queue, not the page.
+    expect(queue.counts.classification_decision).toBe(5);
+    expect(queue.items[0]?.payment.description).toBe('UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD');
+  });
+
+  it('filters to the kinds a caller asked for', async () => {
+    await classifiedFixture();
+    await addLookalikePair();
+
+    const duplicatesOnly = await listReviewQueue(database.db, { kinds: ['possible_duplicate'] });
+
+    expect(duplicatesOnly.items.every((item) => item.kind === 'possible_duplicate')).toBe(true);
+    expect(duplicatesOnly.counts.classification_decision).toBe(0);
+  });
+
+  it('honours a caller-supplied materiality threshold when explaining an item', async () => {
+    await classifiedFixture();
+
+    const queue = await listReviewQueue(database.db, { materialityThreshold: paise(100_000n) });
+
+    // Everything is material now, so nothing is routine any more.
+    expect(queue.items.every((item) => item.reasons.includes('material_amount'))).toBe(true);
+  });
+});
+
+describe('listReviewQueue — possible duplicates', () => {
+  it('offers a lookalike pair once, ranked ahead of every proposal', async () => {
+    await classifiedFixture();
+    const { earlier, later } = await addLookalikePair();
+
+    const queue = await listReviewQueue(database.db);
+
+    expect(queue.counts.possible_duplicate).toBe(1);
+    const [first] = queue.items;
+    if (first?.kind !== 'possible_duplicate') throw new Error('expected a duplicate first');
+    // Ranked first even at ₹450 against a ₹2,840 proposal: the ledger may be counting one
+    // transaction twice, and every downstream number derives from those rows.
+    expect(first.payment.paymentId).toBe(later);
+    expect(first.candidate.paymentId).toBe(earlier);
+    expect(first.reasons).toEqual(['possible_duplicate']);
+    expect(first.id).toBe(possibleDuplicateKey(earlier, later));
+  });
+
+  it('never offers the deterministic duplicate the importer already discarded', async () => {
+    await classifiedFixture();
+    const repeat = await importBankStatementCsv(database.db, {
+      accountId,
+      sourceSystem: 'synthetic_bank_csv',
+      fileContent: [
+        'date,description,amount_inr,type,reference',
+        '2026-07-10,ELECTRICITY BOARD BBPS BILLPAY,2100.00,DEBIT,BBPS/EB220711',
+      ].join('\n'),
+      audit: AS_USER,
+    });
+    if (repeat.outcome !== 'imported') throw new Error('expected an import');
+
+    const queue = await listReviewQueue(database.db);
+
+    // A confirmed duplicate is `ignored`, and an ignored payment is not a candidate: the
+    // deterministic path already answered this question (ADR-0019).
+    expect(queue.counts.possible_duplicate).toBe(0);
+  });
+
+  it('does not pair two payments a fortnight apart', async () => {
+    await classifiedFixture();
+
+    // The fixture's two Blinkit rows share an amount and a direction but sit 11 days apart.
+    const queue = await listReviewQueue(database.db);
+    expect(queue.counts.possible_duplicate).toBe(0);
+  });
+
+  it('pairs them once the window is widened, which is a caller’s choice', async () => {
+    await classifiedFixture();
+
+    const queue = await listReviewQueue(database.db, {
+      duplicateWindowSeconds: 30 * 24 * 60 * 60,
+    });
+
+    expect(queue.counts.possible_duplicate).toBe(1);
+  });
+});
+
+describe('listReviewQueue — a proposal that no longer parses', () => {
+  it('surfaces it for a human instead of taking the queue down', async () => {
+    await classifiedFixture();
+    // Only a manual edit or a future bug can produce this — gate 1 validates before an
+    // AIInference exists. The queue still has to survive it.
+    await database.db
+      .update(schema.aiInferences)
+      .set({ proposedOutput: { proposedKind: 'something_else' } })
+      .where(eq(schema.aiInferences.confidence, 'high'));
+
+    const queue = await listReviewQueue(database.db);
+
+    const malformed = queue.items.filter((item) => item.reasons.includes('malformed_proposal'));
+    expect(malformed).toHaveLength(3);
+    expect(queue.total).toBe(5);
+    for (const item of malformed) {
+      if (item.kind !== 'classification_decision') throw new Error('expected a decision');
+      expect(item.proposal).toBeNull();
+      expect(item.proposedKind).toBeNull();
+      // Flagged, not routine: an unreadable proposal is exactly what a human should see.
+      expect(queue.items.indexOf(item)).toBeLessThan(4);
+    }
   });
 });

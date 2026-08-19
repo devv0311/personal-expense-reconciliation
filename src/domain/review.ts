@@ -43,6 +43,14 @@ export type ReviewReason =
   | 'decision_required'
   /** Two live payments that resemble each other without conclusive evidence (#10). */
   | 'possible_duplicate'
+  /**
+   * A stored proposal no longer parses.
+   *
+   * Unreachable through any write path — gate 1 validates before an `AIInference` exists — and
+   * surfaced rather than thrown because one unreadable row must not take the whole queue down,
+   * and rejecting it is exactly the action the queue offers.
+   */
+  | 'malformed_proposal'
   /** The proposal was declined, so this payment is money with no explanation. */
   | 'payment_unexplained';
 
