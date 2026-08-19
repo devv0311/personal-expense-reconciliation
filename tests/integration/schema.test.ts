@@ -489,6 +489,30 @@ describe('evidence.note_kind keeps one shape from carrying two meanings (ADR-001
     expect(error.message).toMatch(/evidence_note_kind_check/);
   });
 
+  it('accepts the rejected expense state, and still refuses an invented one', async () => {
+    const scaffold = await seedScaffold();
+
+    const [row] = await database.db
+      .insert(schema.expenses)
+      .values({
+        amount: 124_000n,
+        occurredAt: new Date('2026-07-01T00:00:00Z'),
+        relationshipType: 'personal',
+        paidByPersonId: scaffold.personId,
+        state: 'rejected',
+      })
+      .returning({ state: schema.expenses.state });
+    expect(row?.state).toBe('rejected');
+
+    const error = await captureError(() =>
+      database.db.execute(
+        sql`insert into expenses (amount, occurred_at, relationship_type, paid_by_person_id, state)
+            values (100, now(), 'personal', ${scaffold.personId}, 'dismissed')`,
+      ),
+    );
+    expect(error.message).toMatch(/expenses_state_check/);
+  });
+
   it('rejects an inference type no ai-boundary.md operation produces', async () => {
     const paymentId = await seedPayment();
     const error = await captureError(() =>

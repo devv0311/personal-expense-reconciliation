@@ -51,3 +51,5 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0025](0025-injected-model-transport.md)                     | The model transport is injected; phase 8 wires no provider                  | Accepted                                                     |
 | [0026](0026-classification-writes-a-derived-expense.md)      | A classification proposal writes a DERIVED Expense; a settlement waits      | Accepted                                                     |
 | [0027](0027-classification-covers-debits-only.md)            | Phase 8 classifies debits; a credit is deliberately left unclassified       | Accepted                                                     |
+| [0028](0028-rejected-proposal-expense-state.md)              | A declined or superseded proposal's Expense becomes `rejected`, terminal    | Accepted                                                     |
+| [0029](0029-review-queue-ordering.md)                        | The review queue is ordered by a pure function, and carries every reason    | Accepted                                                     |

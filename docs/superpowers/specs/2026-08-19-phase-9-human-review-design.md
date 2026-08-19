@@ -63,7 +63,7 @@ any other. The same disposition covers a proposal **superseded** by re-classific
 distinction between "declined" and "asked again" lives in the audit event's `reason`, exactly as
 `ignored_reason` distinguishes `duplicate_of:` from `out_of_scope` on a payment.
 
-### 2. Re-classification is an explicit review action (ADR-0029)
+### 2. Re-classification is an explicit review action (ADR-0030)
 
 `classifyPayments` skips a payment that already carries a classification inference
 (`already_classified`), which is what makes a re-run a no-op (the ADR-0021 pattern). Phase 9 adds
@@ -75,7 +75,7 @@ A `rejected` inference is not superseded — it was resolved, and rejecting is a
 keeps. An `accepted`/`modified` one is refused outright: the payment is already explained by an
 approved `Expense` or a `Settlement`, and unwinding that is not a phase-9 capability.
 
-### 3. A possible duplicate stays a human decision, and dismissal is recorded (ADR-0030)
+### 3. A possible duplicate stays a human decision, and dismissal is recorded (ADR-0031)
 
 `domain.isPossibleDuplicate` — same direction, same amount, close in time, **no** conclusive
 reference match — has existed unused since the foundation pass. Phase 9 surfaces those pairs and
@@ -92,7 +92,7 @@ Import-time deterministic dedup (ADR-0019) is untouched. The three categories st
 the model: a **confirmed** duplicate is `ignored` with a `duplicate_of:` reason, a **possible**
 duplicate is two live payments plus a queue item, and a normal payment is neither.
 
-### 4. Ordering is a pure function, and every reason travels with the item (ADR-0031)
+### 4. Ordering is a pure function, and every reason travels with the item (ADR-0029)
 
 `domain.prioritiseReviewQueue` sorts by rank, then amount descending, then `occurred_at`
 ascending, then id — a total order over stable fields, so two reads of an unchanged ledger return

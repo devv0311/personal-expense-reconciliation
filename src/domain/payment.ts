@@ -64,6 +64,36 @@ export function assertPaymentCanFundExpense(counterpartyType: PaymentCounterpart
   }
 }
 
+/* ------------------------------------------------------------- duplicate_of reasons */
+
+/**
+ * Prefix of the `payments.ignored_reason` written for a confirmed duplicate (`lifecycle.md`).
+ *
+ * Lives here, in `domain`, because two callers now write and read it: the importer, which
+ * confirms a duplicate deterministically at import time (ADR-0019), and the review queue,
+ * which confirms one a human identified (ADR-0030). One format, one place — two copies of a
+ * string rule drifting apart is a defect this project has already shipped once.
+ */
+export const DUPLICATE_OF_REASON_PREFIX = 'duplicate_of:';
+
+/** The `ignored_reason` naming the canonical payment a discarded copy duplicates. */
+export function duplicateOfReason(canonicalPaymentId: string): string {
+  return `${DUPLICATE_OF_REASON_PREFIX}${canonicalPaymentId}`;
+}
+
+/**
+ * The payment id a `duplicate_of:` reason names, or `null` for any other reason.
+ *
+ * A payment ignored as `out_of_scope` returns `null` here and is *not* a chain link — but it
+ * is still the first copy this ledger saw, which is why chain-walking stops at it rather than
+ * skipping it (`invariants.md` #10).
+ */
+export function parseDuplicateOfReason(ignoredReason: string | null): string | null {
+  if (ignoredReason === null || !ignoredReason.startsWith(DUPLICATE_OF_REASON_PREFIX)) return null;
+  const id = ignoredReason.slice(DUPLICATE_OF_REASON_PREFIX.length);
+  return id.length === 0 ? null : id;
+}
+
 /* --------------------------------------------------------------- duplicate detection */
 
 /** The fields duplicate detection compares. */
