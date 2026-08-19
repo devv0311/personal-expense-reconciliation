@@ -48,3 +48,4 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0022](0022-phase-7-deterministic-only-scope.md)             | Phase 7 ships normalization's deterministic leg only; the AI leg is phase 8 | Accepted                                                     |
 | [0023](0023-self-transfer-recognition-is-deterministic.md)   | Recognising a self-transfer is deterministic, not an AI proposal            | Accepted                                                     |
 | [0024](0024-confidence-routes-review-never-approves.md)      | Confidence routes a proposal to review; nothing in phase 8 auto-approves    | Accepted                                                     |
+| [0025](0025-injected-model-transport.md)                     | The model transport is injected; phase 8 wires no provider                  | Accepted                                                     |
