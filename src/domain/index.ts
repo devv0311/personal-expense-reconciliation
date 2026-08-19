@@ -12,6 +12,7 @@
 export * from './allocation.js';
 export * from './adjustment.js';
 export * from './balance.js';
+export * from './classification.js';
 export * from './entities.js';
 export * from './enums.js';
 export * from './errors.js';

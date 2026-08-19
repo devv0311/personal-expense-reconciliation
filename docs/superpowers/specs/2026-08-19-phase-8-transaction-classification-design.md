@@ -44,7 +44,7 @@ payment (normalized)
                                 ▼
                           AIInference (pending) ─┬─ kind=expense    ─▶ DERIVED Expense
                                                  │                     classified | review_required
-                                                 └─ kind=settlement ─▶ nothing yet   (ADR-0024)
+                                                 └─ kind=settlement ─▶ nothing yet   (ADR-0026)
                                 │
                                 ▼
                     services.decideInference(accept | modify | reject)
@@ -72,7 +72,7 @@ leg is written `counterparty_type = internal_account` and stays at `NORMALIZED` 
 terminal state (`lifecycle.md`, `invariants.md` #7). No `AIInference` row is created for it,
 because no model proposed anything.
 
-### 2. A classification proposal creates a DERIVED `Expense`; a settlement proposal creates nothing (ADR-0024)
+### 2. A classification proposal creates a DERIVED `Expense`; a settlement proposal creates nothing (ADR-0026)
 
 `data-flow.md` step 3 draws `services.evaluateForReview ─▶ Expense.state = CLASSIFIED |
 REVIEW_REQUIRED`, and step 5 draws `decideInference ─▶ db.updateExpense (APPROVED)` — an
@@ -88,7 +88,7 @@ exactly what invariant #15 forbids. So a settlement proposal creates **nothing**
 accepted; the pending `AIInference` is its queue entry, which is why roadmap phase 9 describes
 the queue as surfacing "`REVIEW_REQUIRED` expenses **and** pending `AIInference`s".
 
-### 3. Confidence changes friction, never the requirement for approval (ADR-0026)
+### 3. Confidence changes friction, never the requirement for approval (ADR-0024)
 
 Routing is deterministic, computed by `domain.routeClassificationForReview` from three inputs:
 
@@ -104,7 +104,7 @@ allows auto-progression only via a matched `Rule` the user previously approved, 
 phase 16 — so the mechanism that would consume "eligible for auto-progression" does not exist
 yet, and manufacturing one here would be the shortcut the invariant exists to prevent.
 
-### 4. Phase 8 classifies debits; credits are deliberately out of scope (ADR-0025)
+### 4. Phase 8 classifies debits; credits are deliberately out of scope (ADR-0027)
 
 A credit is never new spend, so it can never produce an `Expense`. The two credit meanings the
 model _does_ support both belong elsewhere:
@@ -121,7 +121,7 @@ And ADR-0015 already puts general inflow classification outside V1 entirely. So 
 credits _do_ participate in is the deterministic self-transfer pairing above, which needs both
 legs.
 
-### 5. The model transport is injected; no provider is wired (ADR-0027)
+### 5. The model transport is injected; no provider is wired (ADR-0025)
 
 `src/ai` owns the contract, the redaction, the prompt version and the validation. It does not
 own an HTTP client to a provider: `createAiService(transport)` takes a `ModelTransport`, and

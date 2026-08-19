@@ -49,6 +49,8 @@ export type DomainErrorCode =
   | 'IMMUTABLE_FIELD'
   /** A manual note had no kind, or a non-note claimed one (ADR-0018). */
   | 'EVIDENCE_NOTE_KIND_INVALID'
+  /** An `AIInference` decision named an actor that is neither a person nor a `Rule` (#17). */
+  | 'DECISION_ACTOR_INVALID'
   /** A referenced entity was absent from the input set handed to a pure function. */
   | 'UNKNOWN_REFERENCE';
 

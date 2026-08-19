@@ -21,6 +21,24 @@ beforeEach(async () => {
   await database.truncateAll();
 });
 
+/** One imported payment, for the polymorphic references that name one without a foreign key. */
+async function seedPayment(): Promise<string> {
+  const scaffold = await seedScaffold();
+  const [payment] = await database.db
+    .insert(schema.payments)
+    .values({
+      accountId: scaffold.accountId,
+      importBatchId: scaffold.importBatchId,
+      amount: 124000n,
+      direction: 'debit',
+      occurredAt: new Date('2026-07-01T00:00:00Z'),
+      rawDescription: 'UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD',
+      channel: 'upi',
+    })
+    .returning({ id: schema.payments.id });
+  return payment!.id;
+}
+
 /** Minimal referential scaffolding: one user, their Person, an account, an import batch. */
 async function seedScaffold(): Promise<{
   personId: string;
@@ -469,6 +487,37 @@ describe('evidence.note_kind keeps one shape from carrying two meanings (ADR-001
     );
 
     expect(error.message).toMatch(/evidence_note_kind_check/);
+  });
+
+  it('rejects an inference type no ai-boundary.md operation produces', async () => {
+    const paymentId = await seedPayment();
+    const error = await captureError(() =>
+      database.db.execute(
+        sql`insert into ai_inferences (inference_type, input_ref_type, input_ref_id,
+                                       proposed_output, confidence)
+            values ('guess_the_amount', 'payment', ${paymentId}, '{}'::jsonb, 'high')`,
+      ),
+    );
+
+    expect(error.message).toMatch(/ai_inferences_inference_type_check/);
+  });
+
+  it('accepts the classification inference type phase 8 produces', async () => {
+    const paymentId = await seedPayment();
+
+    const [row] = await database.db
+      .insert(schema.aiInferences)
+      .values({
+        inferenceType: 'classify_transaction',
+        inputRefType: 'payment',
+        inputRefId: paymentId,
+        proposedOutput: { proposedKind: 'expense' },
+        confidence: 'high',
+      })
+      .returning({ status: schema.aiInferences.status });
+
+    // `pending` by default: an inference is a proposal until decideInference says otherwise.
+    expect(row?.status).toBe('pending');
   });
 
   it('accepts every other evidence type with no kind', async () => {

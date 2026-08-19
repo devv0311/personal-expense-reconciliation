@@ -39,6 +39,7 @@ import {
 import {
   ACCOUNT_TYPES,
   AI_INFERENCE_STATUSES,
+  AI_INFERENCE_TYPES,
   ALLOCATION_METHODS,
   AUDITABLE_ENTITY_TYPES,
   AUDIT_ACTIONS,
@@ -616,6 +617,9 @@ export const aiInferences = pgTable(
   },
   (table) => [
     index('ai_inferences_input_idx').on(table.inputRefType, table.inputRefId, table.status),
+    // The nine operations `ai-boundary.md` defines, and nothing else: an inference type no
+    // operation produces cannot enter the table even if a caller invents one.
+    check('ai_inferences_inference_type_check', oneOf('inference_type', AI_INFERENCE_TYPES)),
     check('ai_inferences_confidence_check', oneOf('confidence', CONFIDENCE_LEVELS)),
     check('ai_inferences_status_check', oneOf('status', AI_INFERENCE_STATUSES)),
   ],

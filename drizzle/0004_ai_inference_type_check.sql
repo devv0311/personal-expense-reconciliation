@@ -1,0 +1,1 @@
+ALTER TABLE "ai_inferences" ADD CONSTRAINT "ai_inferences_inference_type_check" CHECK (inference_type in ('classify_transaction', 'normalize_merchant', 'parse_receipt', 'extract_receipt_items', 'suggest_beneficiaries', 'suggest_allocation', 'group_into_occasion', 'explain_anomaly', 'propose_rule'));
