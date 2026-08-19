@@ -87,3 +87,13 @@ export interface MerchantsFixture {
 export function loadMerchants(): MerchantsFixture {
   return loadFixture<MerchantsFixture>('merchants.json');
 }
+
+/** The shape of `fixtures/ai-classification-proposals.json`. */
+export interface ClassificationProposalsFixture {
+  model: { provider: string; model: string };
+  responses: Array<{ redacted_description: string; why: string; response: unknown }>;
+}
+
+export function loadClassificationProposals(): ClassificationProposalsFixture {
+  return loadFixture<ClassificationProposalsFixture>('ai-classification-proposals.json');
+}

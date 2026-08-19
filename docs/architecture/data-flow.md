@@ -69,6 +69,26 @@ services.classifyPayment ─▶ ai.classifyTransaction ─▶ AIInference (pendi
                                                           └─▶ (settlement path) Settlement review queue
 ```
 
+> **As of phase 8 (2026-08-19), this step is built.** Two things it turned out to need, both
+> recorded as decisions rather than left implicit:
+>
+> - **A deterministic leg runs first.** A payment paired with an opposite-direction leg sharing
+>   one reference, amount and instant is a transfer between the user's own accounts. That is
+>   arithmetic over two rows, not semantics, so it is `domain.isSelfTransferPair` and it writes
+>   `counterparty_type = internal_account` with **no `AIInference` at all** (ADR-0023).
+>   `proposedKind` keeps its two members; there is no `transfer` to propose.
+> - **Only debits reach the model.** A credit is never new spend, and V1 does not classify
+>   inflow (ADR-0015); the fixture's refund credit ends the phase `normalized`, merchant
+>   resolved, with the outcome `skipped: credit_out_of_scope` recorded (ADR-0027). A credit
+>   still goes through the deterministic leg, because a transfer needs both its legs.
+>
+> `services.evaluateForReview` in the diagram is `domain.routeClassificationForReview` plus the
+> `Expense` writes in `services.classifyPayment` — the routing rule is pure and lives in
+> `domain`, since it decides nothing but where a validated proposal stops (ADR-0024). The
+> expense path writes a DERIVED `Expense` (`proposed → classified → review_required`, each
+> transition asserted and audited); the settlement path writes **nothing** until the proposal is
+> accepted, because a `Settlement` has no pre-approval state to sit in (ADR-0026).
+
 ## 4. Evidence
 
 Independently of the above, `Evidence` (receipts, screenshots, manual notes) can arrive before,
@@ -89,6 +109,19 @@ which is itself an approved act) by which an `AIInference.status` leaves `pendin
 api (review UI) ─▶ services.decideInference(accept|modify|reject) ─▶ db.updateExpense (APPROVED)
                                                                    ─▶ db.insertAuditEvent
 ```
+
+> **`services.decideInference` exists as of phase 8**, and is the only path by which an
+> `AIInference` leaves `pending`. What it does beyond the diagram: it parses the actor first
+> (a person or a `Rule`, never the model and never `system` — `invariants.md` #17), re-validates
+> the stored proposal through the same `ai.parseTransactionClassification` a modified one goes
+> through, and then produces **either** an approved `Expense` with its `PaymentExpenseLink` and
+> the payment moving `normalized → linked`, **or** a `Settlement` with the payment's
+> counterparty resolved to that person. A `modify` may change the `proposedKind` — that is what
+> the review queue's settlement-vs-expense disambiguation _is_. A `reject` produces nothing and
+> deletes nothing.
+>
+> The **review queue itself is phase 9**: this phase writes the `REVIEW_REQUIRED` expenses and
+> the pending inferences it will read, and provides the decision function it will call.
 
 ## 6. Allocation
 

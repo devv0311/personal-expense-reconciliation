@@ -171,6 +171,38 @@ export const AI_INFERENCE_STATUSES = [
 ] as const;
 export type AiInferenceStatus = (typeof AI_INFERENCE_STATUSES)[number];
 
+/**
+ * The nine operations `docs/architecture/ai-boundary.md` defines, as the closed set of
+ * `ai_inferences.inference_type` values.
+ *
+ * All nine are listed because the interface they name is the contract, not because all nine
+ * are implemented — phase 8 produces `classify_transaction` only. Listing them is what lets
+ * the `CHECK` constraint reject a typo'd or invented inference type at the database, so a
+ * proposal cannot enter the table under a name no operation produces.
+ */
+export const AI_INFERENCE_TYPES = [
+  'classify_transaction',
+  'normalize_merchant',
+  'parse_receipt',
+  'extract_receipt_items',
+  'suggest_beneficiaries',
+  'suggest_allocation',
+  'group_into_occasion',
+  'explain_anomaly',
+  'propose_rule',
+] as const;
+export type AiInferenceType = (typeof AI_INFERENCE_TYPES)[number];
+
+/**
+ * What `ai.classifyTransaction` may propose a payment *is* (ADR-0007).
+ *
+ * Exactly two members. A self-transfer is deliberately absent: recognising one is
+ * deterministic evidence over two payment rows, not a semantic judgement, so it never
+ * becomes a proposal at all (ADR-0023).
+ */
+export const AI_PROPOSED_KINDS = ['expense', 'settlement'] as const;
+export type ProposedKind = (typeof AI_PROPOSED_KINDS)[number];
+
 export const RULE_ORIGINS = ['manual', 'promoted_from_repeated_ai_suggestion'] as const;
 export type RuleOrigin = (typeof RULE_ORIGINS)[number];
 

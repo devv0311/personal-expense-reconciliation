@@ -14,5 +14,27 @@ The AI inference boundary. See `docs/architecture/ai-boundary.md` for the full c
 response to an APPROVED-classified field. Every function here returns data; `src/services`
 decides what happens to it.
 
-Not yet implemented — see `docs/roadmap.md` phases 7–8 (classification), 11 (receipt
-extraction), 12 (allocation suggestions), 16 (rule proposals).
+**Partly implemented (phase 8).**
+
+- `contract.ts` — `Inference<T>`, `TransactionClassification`, and the strict validator.
+  A model response is untrusted input: unknown keys, missing keys, wrong types and
+  out-of-range values are all rejected, naming the offending field. This is gate 1 of
+  `ai-boundary.md`'s validation contract, and it fires **before** an `AIInference` row
+  exists — a malformed response is not stored as a bad proposal, it is not stored at all.
+  `parseTransactionClassification` is exported so `services.decideInference`'s `modify` path
+  runs a human's correction through exactly the same gate.
+- `redaction.ts` — `redactPaymentForInference` / `redactDescription`. Account fragments, card
+  numbers and UPI handles are masked; `external_reference` and `account_id` have no field on
+  the outgoing payload at all, so omitting them is not a step a caller can forget.
+- `classify-transaction.ts` — `createAiService(transport)`, the typed service interface, and
+  `CLASSIFY_TRANSACTION_PROMPT_VERSION`. The model itself sits behind an injected
+  `ModelTransport`; **no provider is wired** (ADR-0025), and the integration suite injects a
+  transport scripted from `fixtures/ai-classification-proposals.json`.
+
+`AiContractError` (`errors.ts`) means the model breached the contract. A transport that
+rejects — network, timeout, rate limit — surfaces unchanged, because "the model answered
+nonsense" and "the model never answered" call for different responses.
+
+**Not implemented:** the other eight operations, and any production `ModelTransport`. The
+interface declares only what exists — see `docs/roadmap.md` phases 11 (receipt extraction),
+12 (allocation suggestions) and 16 (rule proposals), and ADR-0022 for `normalizeMerchant`.
