@@ -44,3 +44,4 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0018](0018-manual-note-signal-ambiguity.md)                 | `evidence.note_kind` distinguishes documentation from a settlement claim   | Accepted                                                     |
 | [0019](0019-import-time-duplicate-handling.md)               | Dedup matches on direction; a confirmed duplicate ignores from `imported`  | Accepted                                                     |
 | [0020](0020-reference-type-as-channel-evidence.md)           | `reference_type`, not the description, is the evidence for `channel`       | Accepted                                                     |
+| [0021](0021-normalization-acts-only-on-imported-payments.md) | Normalization acts only on `imported` payments, so a re-run is a no-op     | Accepted                                                     |
