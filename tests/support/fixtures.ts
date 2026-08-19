@@ -73,3 +73,17 @@ export interface PeopleAndGroupsFixture {
 export function loadPeopleAndGroups(): PeopleAndGroupsFixture {
   return loadFixture<PeopleAndGroupsFixture>('people-and-groups.json');
 }
+
+/** The shape of `fixtures/merchants.json`. */
+export interface MerchantsFixture {
+  merchants: Array<{
+    id: string;
+    canonical_name: string;
+    default_category?: string;
+    aliases: string[];
+  }>;
+}
+
+export function loadMerchants(): MerchantsFixture {
+  return loadFixture<MerchantsFixture>('merchants.json');
+}

@@ -14,7 +14,7 @@
 
 import { and, asc, eq, isNull } from 'drizzle-orm';
 
-import { asId, validateEvidenceNoteKind } from '../../src/domain/index.js';
+import { asId, merchantAliasKey, validateEvidenceNoteKind } from '../../src/domain/index.js';
 import type {
   AccountId,
   EvidenceNoteKind,
@@ -25,6 +25,7 @@ import type {
   ExpenseState,
   GroupId,
   ImportBatchId,
+  MerchantId,
   Paise,
   PaymentChannel,
   PaymentCounterpartyType,
@@ -37,7 +38,7 @@ import type {
 import { schema } from '../../src/db/index.js';
 import type { Database } from '../../src/db/index.js';
 
-import { loadPeopleAndGroups } from './fixtures.js';
+import { loadMerchants, loadPeopleAndGroups } from './fixtures.js';
 
 /** The seeded synthetic cast, keyed by the ids the fixtures use. */
 export interface Cast {
@@ -331,3 +332,36 @@ export async function allocationVersions(
 
 /** Standard audit metadata for a scenario acting as the user. */
 export const AS_USER = { actor: 'user', source: 'tests/scenarios' } as const;
+
+/**
+ * Inserts the synthetic merchant catalog, returning fixture id → database id.
+ *
+ * Alias patterns are stored as canonical keys, produced by the same `merchantAliasKey` the
+ * normalization service matches with — the stored value *is* the key, so seeding and
+ * matching cannot drift apart.
+ */
+export async function seedMerchants(db: Database): Promise<Record<string, MerchantId>> {
+  const fixture = loadMerchants();
+  const merchant: Record<string, MerchantId> = {};
+
+  for (const entry of fixture.merchants) {
+    const [row] = await db
+      .insert(schema.merchants)
+      .values({
+        canonicalName: entry.canonical_name,
+        defaultCategory: entry.default_category ?? null,
+      })
+      .returning({ id: schema.merchants.id });
+    const merchantId = asId<'merchant'>(row!.id);
+    merchant[entry.id] = merchantId;
+
+    for (const alias of entry.aliases) {
+      await db.insert(schema.merchantAliases).values({
+        merchantId,
+        rawPattern: merchantAliasKey(alias),
+      });
+    }
+  }
+
+  return merchant;
+}

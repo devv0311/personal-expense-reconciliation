@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { fixturePaise, loadFixture, loadPeopleAndGroups } from './fixtures.js';
+import { merchantAliasKey } from '../../src/domain/index.js';
+
+import { fixturePaise, loadFixture, loadMerchants, loadPeopleAndGroups } from './fixtures.js';
 
 describe('the fixture loader keeps rupee amounts exact', () => {
   it('loads every *_inr value as a string, never a number', () => {
@@ -85,5 +87,37 @@ describe('the synthetic cast is loadable and internally consistent', () => {
     for (const account of cast.accounts) {
       expect(account.last4 === undefined || /^[0-9]{1,4}$/.test(account.last4)).toBe(true);
     }
+  });
+});
+
+describe('fixtures/merchants.json', () => {
+  it('covers every merchant description in the bank-statement fixture', () => {
+    const fixture = loadMerchants();
+    const aliasKeys = new Set(
+      fixture.merchants.flatMap((merchant) => merchant.aliases.map(merchantAliasKey)),
+    );
+
+    // The five statement rows that name a merchant. The two self-transfers and the
+    // person-to-person UPI row are deliberately absent: neither is a merchant, and
+    // resolving them is not this phase's job.
+    expect(aliasKeys).toContain(merchantAliasKey('UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD'));
+    expect(aliasKeys).toContain(merchantAliasKey('UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD'));
+    expect(aliasKeys).toContain(merchantAliasKey('ACH REFUND SAMPLE ELECTRONICS STORE'));
+    expect(aliasKeys).toContain(merchantAliasKey('ELECTRICITY BOARD BBPS BILLPAY'));
+    expect(aliasKeys).not.toContain(merchantAliasKey('NEFT TRANSFER TO SELF A/C X4821'));
+    expect(aliasKeys).not.toContain(merchantAliasKey('UPI-FRIENDA-TRANSFER'));
+  });
+
+  it('gives every merchant a distinct id and every alias a distinct key', () => {
+    const fixture = loadMerchants();
+    const ids = fixture.merchants.map((merchant) => merchant.id);
+    const aliasKeys = fixture.merchants.flatMap((merchant) =>
+      merchant.aliases.map(merchantAliasKey),
+    );
+
+    // merchant_aliases.raw_pattern is UNIQUE — a duplicate here would fail at insert,
+    // and would mean two merchants claiming one description.
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(new Set(aliasKeys).size).toBe(aliasKeys.length);
   });
 });
