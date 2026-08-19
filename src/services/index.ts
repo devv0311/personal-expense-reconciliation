@@ -18,6 +18,7 @@ export * from './normalization-service.js';
 export * from './classification-service.js';
 export * from './inference-decision-service.js';
 export * from './review-service.js';
+export * from './review-action-service.js';
 export * from './expense-service.js';
 export * from './allocation-service.js';
 export * from './settlement-service.js';

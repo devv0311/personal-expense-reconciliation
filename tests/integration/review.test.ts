@@ -5,10 +5,11 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createAiService } from '../../src/ai/index.js';
-import { paise, possibleDuplicateKey } from '../../src/domain/index.js';
-import type { AccountId } from '../../src/domain/index.js';
+import { asId, paise, possibleDuplicateKey } from '../../src/domain/index.js';
+import type { AccountId, PaymentId } from '../../src/domain/index.js';
 import {
   insertAuditEvent,
+  listAuditEvents,
   listDismissedDuplicatePairs,
   listPendingClassificationInferences,
   listPossibleDuplicateCandidates,
@@ -22,7 +23,10 @@ import {
   decideInference,
   importBankStatementCsv,
   listReviewQueue,
+  confirmPossibleDuplicate,
+  dismissPossibleDuplicate,
   normalizePayments,
+  reclassifyPayment,
 } from '../../src/services/index.js';
 import type { ProposedClassification } from '../../src/services/index.js';
 import { createTestDatabase } from '../support/database.js';
@@ -54,6 +58,26 @@ beforeEach(async () => {
   accountId = cast.account['account_hdfc_savings']!;
   await seedMerchants(database.db);
 });
+
+/** Import and normalize only — the state before anything has been proposed. */
+async function importedAndNormalizedOnly(): Promise<void> {
+  await importBankStatementCsv(database.db, {
+    accountId,
+    sourceSystem: 'synthetic_bank_csv',
+    fileContent: FIXTURE,
+    fileReference: 'fixtures/bank-statement.csv',
+    audit: AS_USER,
+  });
+  await normalizePayments(database.db, { audit: AS_USER });
+}
+
+async function paymentIdByDescription(rawDescription: string): Promise<PaymentId> {
+  const [row] = await database.db
+    .select({ id: schema.payments.id })
+    .from(schema.payments)
+    .where(eq(schema.payments.rawDescription, rawDescription));
+  return asId<'payment'>(row!.id);
+}
 
 /** Import → normalize → classify: the state phase 9 reviews. */
 async function classifiedFixture(): Promise<readonly ProposedClassification[]> {
@@ -360,7 +384,7 @@ describe('the rejected expense state, through the repository', () => {
 /* ======================================================================= listReviewQueue */
 
 /** Two live payments a day apart, alike enough to be offered as a possible duplicate. */
-async function addLookalikePair(): Promise<{ earlier: string; later: string }> {
+async function addLookalikePair(): Promise<{ earlier: PaymentId; later: PaymentId }> {
   const earlier = await addPayment(database.db, cast, {
     accountId,
     amount: paise(45_000n),
@@ -612,5 +636,588 @@ describe('listReviewQueue — a proposal that no longer parses', () => {
       // Flagged, not routine: an unreadable proposal is exactly what a human should see.
       expect(queue.items.indexOf(item)).toBeLessThan(4);
     }
+  });
+});
+
+/* ==================================================================== review actions */
+
+const AS_AI = { actor: 'ai', source: 'services.reclassifyPayment' } as const;
+
+function aiService(overrides?: Record<string, unknown>) {
+  return createAiService(
+    scriptedClassificationTransport({
+      people: cast.person,
+      ...(overrides === undefined ? {} : { overrides }),
+    }),
+  );
+}
+
+async function expenseState(expenseId: string): Promise<string | undefined> {
+  const [row] = await database.db
+    .select({ state: schema.expenses.state })
+    .from(schema.expenses)
+    .where(eq(schema.expenses.id, expenseId));
+  return row?.state;
+}
+
+async function inferenceRow(inferenceId: string) {
+  const [row] = await database.db
+    .select({
+      status: schema.aiInferences.status,
+      decidedBy: schema.aiInferences.decidedBy,
+      resultingRecordId: schema.aiInferences.resultingRecordId,
+    })
+    .from(schema.aiInferences)
+    .where(eq(schema.aiInferences.id, inferenceId));
+  return row;
+}
+
+describe('rejecting a proposal closes out the expense it created', () => {
+  it('moves the DERIVED expense to rejected, in the same transaction', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals.find((proposal) => proposal.expenseId !== null)!;
+
+    await decideInference(database.db, {
+      inferenceId: target.inferenceId,
+      decision: 'reject',
+      audit: AS_REVIEWER,
+    });
+
+    expect(await expenseState(target.expenseId!)).toBe('rejected');
+    expect(await inferenceRow(target.inferenceId)).toMatchObject({ status: 'rejected' });
+  });
+
+  it('keeps the expense and its amount — nothing is deleted', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals.find((proposal) => proposal.expenseId !== null)!;
+
+    await decideInference(database.db, {
+      inferenceId: target.inferenceId,
+      decision: 'reject',
+      audit: AS_REVIEWER,
+    });
+
+    const [expense] = await database.db
+      .select({ amount: schema.expenses.amount, description: schema.expenses.description })
+      .from(schema.expenses)
+      .where(eq(schema.expenses.id, target.expenseId!));
+    expect(expense).toMatchObject({ amount: 124_000n });
+  });
+
+  it('audits the closure with a reason a reader can act on', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals.find((proposal) => proposal.expenseId !== null)!;
+
+    await decideInference(database.db, {
+      inferenceId: target.inferenceId,
+      decision: 'reject',
+      audit: AS_REVIEWER,
+    });
+
+    const events = await listAuditEvents(database.db, 'expense', target.expenseId!);
+    expect(events.at(-1)).toMatchObject({
+      action: 'update',
+      oldValue: { state: 'classified' },
+      newValue: { state: 'rejected' },
+      actor: 'user',
+    });
+    expect(events.at(-1)?.reason).toContain('declined');
+  });
+
+  it('leaves the rejected expense out of the queue’s pending work', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals.find((proposal) => proposal.expenseId !== null)!;
+
+    await decideInference(database.db, {
+      inferenceId: target.inferenceId,
+      decision: 'reject',
+      audit: AS_REVIEWER,
+    });
+
+    const queue = await listReviewQueue(database.db);
+    expect(queue.counts.classification_decision).toBe(4);
+    // It reappears as an unexplained payment instead — ranked last, because nothing is at risk.
+    expect(queue.counts.rejected_classification).toBe(1);
+    expect(queue.items.at(-1)).toMatchObject({
+      kind: 'rejected_classification',
+      reasons: ['payment_unexplained'],
+      expenseState: 'rejected',
+    });
+  });
+});
+
+describe('reclassifyPayment', () => {
+  it('supersedes the pending proposal and records a new one, in one transaction', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals.find((proposal) => proposal.expenseId !== null)!;
+
+    const result = await reclassifyPayment(database.db, {
+      paymentId: target.paymentId,
+      ai: aiService(),
+      audit: AS_REVIEWER,
+    });
+
+    expect(result.supersededInferenceId).toBe(target.inferenceId);
+    expect(result.outcome.outcome).toBe('proposed');
+    expect(await inferenceRow(target.inferenceId)).toMatchObject({
+      status: 'superseded',
+      decidedBy: 'user',
+    });
+    // The old proposal's expense goes with it; the new proposal has its own.
+    expect(await expenseState(target.expenseId!)).toBe('rejected');
+    if (result.outcome.outcome !== 'proposed') throw new Error('expected a proposal');
+    expect(result.outcome.expenseId).not.toBe(target.expenseId);
+    expect(await expenseState(result.outcome.expenseId!)).toBe('classified');
+  });
+
+  it('puts exactly one pending decision back in the queue', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals.find((proposal) => proposal.expenseId !== null)!;
+
+    await reclassifyPayment(database.db, {
+      paymentId: target.paymentId,
+      ai: aiService(),
+      audit: AS_REVIEWER,
+    });
+
+    const queue = await listReviewQueue(database.db);
+    // Still five decisions: the superseded one left, the new one arrived.
+    expect(queue.counts.classification_decision).toBe(5);
+    expect(queue.counts.rejected_classification).toBe(0);
+    const forPayment = queue.items.filter(
+      (item) =>
+        item.kind === 'classification_decision' && item.payment.paymentId === target.paymentId,
+    );
+    expect(forPayment).toHaveLength(1);
+    expect(forPayment[0]?.id).not.toBe(target.inferenceId);
+  });
+
+  it('asks again after a rejection, with nothing left to supersede', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals.find((proposal) => proposal.expenseId !== null)!;
+    await decideInference(database.db, {
+      inferenceId: target.inferenceId,
+      decision: 'reject',
+      audit: AS_REVIEWER,
+    });
+
+    const result = await reclassifyPayment(database.db, {
+      paymentId: target.paymentId,
+      ai: aiService(),
+      audit: AS_REVIEWER,
+    });
+
+    // A rejected proposal is a decision the trail keeps — it is not rewritten as superseded.
+    expect(result.supersededInferenceId).toBeNull();
+    expect(await inferenceRow(target.inferenceId)).toMatchObject({ status: 'rejected' });
+    expect(result.outcome.outcome).toBe('proposed');
+    const queue = await listReviewQueue(database.db);
+    expect(queue.counts.rejected_classification).toBe(0);
+    expect(queue.counts.classification_decision).toBe(5);
+  });
+
+  it('carries the model’s new answer, not the old one', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals.find(
+      (proposal) => proposal.expenseId !== null && proposal.confidence === 'high',
+    )!;
+
+    const result = await reclassifyPayment(database.db, {
+      paymentId: target.paymentId,
+      ai: aiService({
+        'UPI-BLINKIT[redacted-number]PAYTM-BLINKIT INDIA PVT LTD': {
+          confidence: 'low',
+          proposedOutput: {
+            proposedKind: 'expense',
+            relationshipType: 'household_shared_flat',
+            category: 'groceries',
+          },
+        },
+      }),
+      audit: AS_REVIEWER,
+    });
+
+    if (result.outcome.outcome !== 'proposed') throw new Error('expected a proposal');
+    expect(result.outcome.confidence).toBe('low');
+    expect(result.outcome.expenseState).toBe('review_required');
+  });
+
+  it('refuses a payment nobody has classified', async () => {
+    await importedAndNormalizedOnly();
+    const paymentId = await paymentIdByDescription('ELECTRICITY BOARD BBPS BILLPAY');
+
+    await expect(
+      reclassifyPayment(database.db, { paymentId, ai: aiService(), audit: AS_REVIEWER }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+  });
+
+  it('refuses a payment already explained by an accepted decision', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals.find((proposal) => proposal.expenseId !== null)!;
+    await decideInference(database.db, {
+      inferenceId: target.inferenceId,
+      decision: 'accept',
+      audit: AS_REVIEWER,
+    });
+
+    // Unwinding an approved Expense and its PaymentExpenseLink is not a review action this
+    // phase offers, and pretending otherwise would leave the payment double-explained.
+    await expect(
+      reclassifyPayment(database.db, {
+        paymentId: target.paymentId,
+        ai: aiService(),
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+  });
+
+  it('refuses an actor nobody is accountable for', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals[0]!;
+
+    await expect(
+      reclassifyPayment(database.db, {
+        paymentId: target.paymentId,
+        ai: aiService(),
+        audit: AS_AI,
+      }),
+    ).rejects.toMatchObject({ code: 'DECISION_ACTOR_INVALID' });
+    expect(await inferenceRow(target.inferenceId)).toMatchObject({ status: 'pending' });
+  });
+
+  it('leaves everything as it was when the model refuses to answer', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals.find((proposal) => proposal.expenseId !== null)!;
+    const failing = {
+      modelInfo: { provider: 'synthetic', model: 'unreachable' },
+      complete: () => Promise.reject(new Error('provider unavailable')),
+    };
+
+    await expect(
+      reclassifyPayment(database.db, {
+        paymentId: target.paymentId,
+        ai: createAiService(failing),
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toThrow('provider unavailable');
+
+    // The old proposal is still the live one: superseding it before knowing there was a
+    // replacement would have left this payment with neither.
+    expect(await inferenceRow(target.inferenceId)).toMatchObject({ status: 'pending' });
+    expect(await expenseState(target.expenseId!)).toBe('classified');
+  });
+
+  it('is not what a plain re-run does', async () => {
+    const proposals = await classifiedFixture();
+
+    const rerun = await classifyPayments(database.db, {
+      ai: aiService(),
+      audit: AS_SYSTEM,
+    });
+
+    expect(rerun.outcomes.every((outcome) => outcome.outcome === 'skipped')).toBe(true);
+    const queue = await listReviewQueue(database.db);
+    expect(queue.counts.classification_decision).toBe(proposals.length);
+  });
+});
+
+describe('confirmPossibleDuplicate', () => {
+  it('discards the copy, naming what it duplicates, and keeps the row', async () => {
+    const { earlier, later } = await addLookalikePair();
+
+    const result = await confirmPossibleDuplicate(database.db, {
+      paymentId: later,
+      duplicateOfPaymentId: earlier,
+      audit: AS_REVIEWER,
+    });
+
+    expect(result).toMatchObject({
+      paymentId: later,
+      canonicalPaymentId: earlier,
+      pairKey: possibleDuplicateKey(earlier, later),
+    });
+    const [discarded] = await database.db
+      .select({
+        state: schema.payments.state,
+        ignoredReason: schema.payments.ignoredReason,
+        amount: schema.payments.amount,
+      })
+      .from(schema.payments)
+      .where(eq(schema.payments.id, later));
+    expect(discarded).toMatchObject({ state: 'ignored', amount: 45_000n });
+    expect(discarded?.ignoredReason).toBe(`duplicate_of:${earlier}`);
+    // The survivor is untouched.
+    const [survivor] = await database.db
+      .select({ state: schema.payments.state })
+      .from(schema.payments)
+      .where(eq(schema.payments.id, earlier));
+    expect(survivor?.state).toBe('normalized');
+  });
+
+  it('takes the pair out of the queue', async () => {
+    const { earlier, later } = await addLookalikePair();
+    expect((await listReviewQueue(database.db)).counts.possible_duplicate).toBe(1);
+
+    await confirmPossibleDuplicate(database.db, {
+      paymentId: later,
+      duplicateOfPaymentId: earlier,
+      audit: AS_REVIEWER,
+    });
+
+    expect((await listReviewQueue(database.db)).counts.possible_duplicate).toBe(0);
+  });
+
+  it('audits the decision as a decision, not as a rule firing', async () => {
+    const { earlier, later } = await addLookalikePair();
+
+    await confirmPossibleDuplicate(database.db, {
+      paymentId: later,
+      duplicateOfPaymentId: earlier,
+      audit: AS_REVIEWER,
+    });
+
+    const events = await listAuditEvents(database.db, 'payment', later);
+    expect(events.at(-1)).toMatchObject({
+      action: 'update',
+      newValue: {
+        state: 'ignored',
+        possibleDuplicateDecision: 'confirmed',
+        duplicateOfPaymentId: earlier,
+      },
+      actor: 'user',
+    });
+    expect(events.at(-1)?.reason).toContain('Confirmed in review');
+  });
+
+  it('names the head of the chain, never another discarded copy', async () => {
+    const occurredAt = new Date('2026-07-14T00:00:00Z');
+    const canonical = await addPayment(database.db, cast, {
+      accountId,
+      amount: paise(45_000n),
+      direction: 'debit',
+      occurredAt,
+      rawDescription: 'UPI-COFFEE-SHOP',
+      channel: 'upi',
+      state: 'normalized',
+    });
+    const second = await addPayment(database.db, cast, {
+      accountId,
+      amount: paise(45_000n),
+      direction: 'debit',
+      occurredAt: new Date('2026-07-14T00:00:30Z'),
+      rawDescription: 'UPI-COFFEE-SHOP',
+      channel: 'upi',
+      state: 'normalized',
+    });
+    const third = await addPayment(database.db, cast, {
+      accountId,
+      amount: paise(45_000n),
+      direction: 'debit',
+      occurredAt: new Date('2026-07-14T00:01:00Z'),
+      rawDescription: 'UPI-COFFEE-SHOP',
+      channel: 'upi',
+      state: 'normalized',
+    });
+    await confirmPossibleDuplicate(database.db, {
+      paymentId: second,
+      duplicateOfPaymentId: canonical,
+      audit: AS_REVIEWER,
+    });
+
+    // The reviewer points the third copy at the second, which is itself already discarded.
+    const result = await confirmPossibleDuplicate(database.db, {
+      paymentId: third,
+      duplicateOfPaymentId: second,
+      audit: AS_REVIEWER,
+    });
+
+    // One hop from any copy reaches the row that counts (invariants.md #10).
+    expect(result.canonicalPaymentId).toBe(canonical);
+    const [row] = await database.db
+      .select({ ignoredReason: schema.payments.ignoredReason })
+      .from(schema.payments)
+      .where(eq(schema.payments.id, third));
+    expect(row?.ignoredReason).toBe(`duplicate_of:${canonical}`);
+  });
+
+  it('refuses two payments that are not even a candidate pair', async () => {
+    await importedAndNormalizedOnly();
+    const blinkit = await paymentIdByDescription('UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD');
+    const electricity = await paymentIdByDescription('ELECTRICITY BOARD BBPS BILLPAY');
+
+    // Different amounts: "the reviewer said so" is not evidence that two unrelated payments
+    // are the same money.
+    await expect(
+      confirmPossibleDuplicate(database.db, {
+        paymentId: electricity,
+        duplicateOfPaymentId: blinkit,
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+  });
+
+  it('refuses a pair the deterministic path already settled', async () => {
+    await importedAndNormalizedOnly();
+    const transfers = await database.db
+      .select({ id: schema.payments.id })
+      .from(schema.payments)
+      .where(eq(schema.payments.externalReference, 'NEFT/N072026001'));
+
+    // Same reference and amount, opposite directions: a transfer's two legs, which ADR-0019
+    // made deterministic precisely so they are never treated as one row seen twice.
+    await expect(
+      confirmPossibleDuplicate(database.db, {
+        paymentId: asId<'payment'>(transfers[0]!.id),
+        duplicateOfPaymentId: asId<'payment'>(transfers[1]!.id),
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+  });
+
+  it('refuses to discard a payment that is already explained', async () => {
+    const proposals = await classifiedFixture();
+    const target = proposals.find((proposal) => proposal.expenseId !== null)!;
+    await decideInference(database.db, {
+      inferenceId: target.inferenceId,
+      decision: 'accept',
+      audit: AS_REVIEWER,
+    });
+    const other = await addPayment(database.db, cast, {
+      accountId,
+      amount: paise(124_000n),
+      direction: 'debit',
+      occurredAt: new Date('2026-07-01T00:00:00Z'),
+      rawDescription: 'UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD',
+      channel: 'upi',
+      state: 'normalized',
+    });
+
+    // `linked → ignored` is not a transition the lifecycle draws: discarding an explained
+    // payment would orphan the expense it funds.
+    await expect(
+      confirmPossibleDuplicate(database.db, {
+        paymentId: target.paymentId,
+        duplicateOfPaymentId: other,
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_STATE_TRANSITION' });
+  });
+
+  it('refuses a payment as a duplicate of itself', async () => {
+    const { earlier } = await addLookalikePair();
+
+    await expect(
+      confirmPossibleDuplicate(database.db, {
+        paymentId: earlier,
+        duplicateOfPaymentId: earlier,
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+  });
+
+  it('refuses an actor nobody is accountable for', async () => {
+    const { earlier, later } = await addLookalikePair();
+
+    await expect(
+      confirmPossibleDuplicate(database.db, {
+        paymentId: later,
+        duplicateOfPaymentId: earlier,
+        audit: { actor: 'system', source: 'cron' },
+      }),
+    ).rejects.toMatchObject({ code: 'DECISION_ACTOR_INVALID' });
+    const [row] = await database.db
+      .select({ state: schema.payments.state })
+      .from(schema.payments)
+      .where(eq(schema.payments.id, later));
+    expect(row?.state).toBe('normalized');
+  });
+});
+
+describe('dismissPossibleDuplicate', () => {
+  it('changes nothing about either payment, and takes the pair out of the queue', async () => {
+    const { earlier, later } = await addLookalikePair();
+
+    const result = await dismissPossibleDuplicate(database.db, {
+      paymentId: later,
+      duplicateOfPaymentId: earlier,
+      audit: AS_REVIEWER,
+    });
+
+    expect(result.pairKey).toBe(possibleDuplicateKey(earlier, later));
+    const rows = await database.db
+      .select({ id: schema.payments.id, state: schema.payments.state })
+      .from(schema.payments);
+    // Both are real, and both still count.
+    expect(rows.every((row) => row.state === 'normalized')).toBe(true);
+    expect((await listReviewQueue(database.db)).counts.possible_duplicate).toBe(0);
+  });
+
+  it('records the decision, which is the only thing that changed', async () => {
+    const { earlier, later } = await addLookalikePair();
+
+    await dismissPossibleDuplicate(database.db, {
+      paymentId: later,
+      duplicateOfPaymentId: earlier,
+      audit: AS_REVIEWER,
+    });
+
+    const events = await listAuditEvents(database.db, 'payment', later);
+    expect(events.at(-1)).toMatchObject({
+      newValue: {
+        state: 'normalized',
+        possibleDuplicateDecision: 'dismissed',
+        otherPaymentId: earlier,
+      },
+      actor: 'user',
+    });
+  });
+
+  it('stays dismissed however the pair is rediscovered', async () => {
+    const { earlier, later } = await addLookalikePair();
+
+    // Dismissed one way round; the queue must not offer it the other way round either.
+    await dismissPossibleDuplicate(database.db, {
+      paymentId: earlier,
+      duplicateOfPaymentId: later,
+      audit: AS_REVIEWER,
+    });
+
+    expect((await listReviewQueue(database.db)).counts.possible_duplicate).toBe(0);
+  });
+
+  it('does not dismiss a different pair', async () => {
+    const { earlier, later } = await addLookalikePair();
+    const third = await addPayment(database.db, cast, {
+      accountId,
+      amount: paise(45_000n),
+      direction: 'debit',
+      occurredAt: new Date('2026-07-14T00:01:00Z'),
+      rawDescription: 'UPI-COFFEE-SHOP',
+      channel: 'upi',
+      state: 'normalized',
+    });
+
+    await dismissPossibleDuplicate(database.db, {
+      paymentId: later,
+      duplicateOfPaymentId: earlier,
+      audit: AS_REVIEWER,
+    });
+
+    // Three lookalikes make three pairs; dismissing one leaves the other two.
+    expect((await listReviewQueue(database.db)).counts.possible_duplicate).toBe(2);
+    expect(third).toBeDefined();
+  });
+
+  it('refuses an actor nobody is accountable for', async () => {
+    const { earlier, later } = await addLookalikePair();
+
+    await expect(
+      dismissPossibleDuplicate(database.db, {
+        paymentId: later,
+        duplicateOfPaymentId: earlier,
+        audit: AS_AI,
+      }),
+    ).rejects.toMatchObject({ code: 'DECISION_ACTOR_INVALID' });
+    expect(await listDismissedDuplicatePairs(database.db)).toEqual([]);
   });
 });

@@ -1165,9 +1165,10 @@ describe('decideInference — rejecting', () => {
       status: 'rejected',
       decidedBy: 'user',
     });
-    // The DERIVED expense stays where it was: nothing here deletes financial records, and an
-    // unapproved expense reaches no total (ADR-0026).
-    expect(await expenseRow(proposal.expenseId!)).toMatchObject({ state: 'review_required' });
+    // The DERIVED expense is closed out rather than left in limbo: `rejected` is terminal,
+    // never approvable, and counted by no total (ADR-0028 — phase 9 resolving what ADR-0026
+    // deliberately left open). Nothing is deleted.
+    expect(await expenseRow(proposal.expenseId!)).toMatchObject({ state: 'rejected' });
     expect(await paymentState(proposal.paymentId)).toMatchObject({ state: 'normalized' });
     expect(await database.db.select().from(schema.paymentExpenseLinks)).toEqual([]);
   });
@@ -1255,14 +1256,16 @@ describe('decideInference — modifying', () => {
     });
 
     expect(result).toMatchObject({ status: 'modified', resultingRecordType: 'settlement' });
-    // The DERIVED expense is not approved and not deleted — and the audit trail says why it is
-    // sitting there, rather than leaving a reader to guess (ADR-0026).
-    expect(await expenseRow(proposal.expenseId!)).toMatchObject({ state: 'review_required' });
+    // The DERIVED expense is closed out, not deleted and not left in limbo: the decision came
+    // out a settlement, so this expense will never be approved (ADR-0028).
+    expect(await expenseRow(proposal.expenseId!)).toMatchObject({ state: 'rejected' });
     const events = await listAuditEvents(database.db, 'expense', proposal.expenseId!);
     expect(events.at(-1)).toMatchObject({
-      action: 'supersede',
-      newValue: { supersededBy: 'settlement' },
+      action: 'update',
+      oldValue: { state: 'review_required' },
+      newValue: { state: 'rejected' },
     });
+    expect(events.at(-1)?.reason).toContain('settlement');
     expect(await database.db.select().from(schema.paymentExpenseLinks)).toEqual([]);
   });
 
