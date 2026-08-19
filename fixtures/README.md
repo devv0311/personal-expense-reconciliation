@@ -30,30 +30,31 @@ not a schema contract — the schema is `docs/architecture/database-design.md`.
 Each file corresponds to a scenario in `docs/domain/scenario-analysis.md` (noted in
 parentheses) and to a supported source/expense type from `docs/product/overview.md`:
 
-| File                                 | Scenario                                                                                                               |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `bank-statement.csv`                 | A synthetic bank statement export (multiple channels, incl. a transfer and a refund)                                   |
-| `upi-transactions.json`              | A synthetic UPI transaction export                                                                                     |
-| `restaurant-bill-unequal-split.json` | Restaurant bill, three people, unequal consumption (§2, §3)                                                            |
-| `restaurant-no-receipt.json`         | Restaurant bill with no receipt, manual explanation only (§4)                                                          |
-| `blinkit-order-mixed.json`           | Blinkit order with personal and flat items in one basket (§1, §21)                                                     |
-| `swiggy-order-personal.json`         | Swiggy order, straightforward personal expense — also the reference fixture for the trivial-allocation base case (§35) |
-| `zepto-order-flat.json`              | Zepto order, household/flat expense (§5)                                                                               |
-| `local-shop-flat-purchase.json`      | Local shop purchase for the flat, no digital receipt (§5, §19)                                                         |
-| `electronics-partly-friend.json`     | Electronics purchase split between user and a friend (§6)                                                              |
-| `paid-on-behalf-friend.json`         | Payment made entirely on behalf of a friend (§7)                                                                       |
-| `gift.json`                          | A gift — no settlement expected, never reaches `READY_TO_SYNC` (§8)                                                    |
-| `taxi-shared-equal.json`             | Taxi shared among three people, equal split (§9)                                                                       |
-| `trip-multiple-payments.json`        | A trip occasion spanning several payments (§10, §22)                                                                   |
-| `refund-full.json`                   | **Rewritten 2026-08.** A full refund against a prior expense, modeled as an `ExpenseAdjustment` (§11)                  |
-| `refund-partial.json`                | **Rewritten 2026-08.** A partial refund, `ExpenseAdjustment` + superseding `Allocation` (§12)                          |
-| `duplicate-transaction.json`         | **Rewritten 2026-08.** Same charge twice, now using the real `external_reference`/`reference_type` fields (§13)        |
-| `internal-transfer.json`             | A transfer between the user's own accounts — not an expense (§14)                                                      |
-| `splitwise-settlement.json`          | **Rewritten 2026-08.** A settlement payment via Splitwise, now a `Settlement` entity, never an `Expense` (§15)         |
-| `utility-bill.json`                  | A recurring utility bill split across the flat, direct person beneficiaries (§16)                                      |
-| `cash-payment.json`                  | A manually entered cash payment (§17)                                                                                  |
-| `unknown-merchant.json`              | A payment with an unresolved counterparty (§18)                                                                        |
-| `receipt-amount-mismatch.json`       | Receipt total differs from the linked payment amount (§20)                                                             |
+| File                                 | Scenario                                                                                                                 |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `bank-statement.csv`                 | A synthetic bank statement export (multiple channels, incl. a transfer and a refund)                                     |
+| `upi-transactions.json`              | A synthetic UPI transaction export                                                                                       |
+| `merchants.json`                     | Synthetic merchant catalog — canonical names and the exact raw descriptions that resolve to them (phase 7 normalization) |
+| `restaurant-bill-unequal-split.json` | Restaurant bill, three people, unequal consumption (§2, §3)                                                              |
+| `restaurant-no-receipt.json`         | Restaurant bill with no receipt, manual explanation only (§4)                                                            |
+| `blinkit-order-mixed.json`           | Blinkit order with personal and flat items in one basket (§1, §21)                                                       |
+| `swiggy-order-personal.json`         | Swiggy order, straightforward personal expense — also the reference fixture for the trivial-allocation base case (§35)   |
+| `zepto-order-flat.json`              | Zepto order, household/flat expense (§5)                                                                                 |
+| `local-shop-flat-purchase.json`      | Local shop purchase for the flat, no digital receipt (§5, §19)                                                           |
+| `electronics-partly-friend.json`     | Electronics purchase split between user and a friend (§6)                                                                |
+| `paid-on-behalf-friend.json`         | Payment made entirely on behalf of a friend (§7)                                                                         |
+| `gift.json`                          | A gift — no settlement expected, never reaches `READY_TO_SYNC` (§8)                                                      |
+| `taxi-shared-equal.json`             | Taxi shared among three people, equal split (§9)                                                                         |
+| `trip-multiple-payments.json`        | A trip occasion spanning several payments (§10, §22)                                                                     |
+| `refund-full.json`                   | **Rewritten 2026-08.** A full refund against a prior expense, modeled as an `ExpenseAdjustment` (§11)                    |
+| `refund-partial.json`                | **Rewritten 2026-08.** A partial refund, `ExpenseAdjustment` + superseding `Allocation` (§12)                            |
+| `duplicate-transaction.json`         | **Rewritten 2026-08.** Same charge twice, now using the real `external_reference`/`reference_type` fields (§13)          |
+| `internal-transfer.json`             | A transfer between the user's own accounts — not an expense (§14)                                                        |
+| `splitwise-settlement.json`          | **Rewritten 2026-08.** A settlement payment via Splitwise, now a `Settlement` entity, never an `Expense` (§15)           |
+| `utility-bill.json`                  | A recurring utility bill split across the flat, direct person beneficiaries (§16)                                        |
+| `cash-payment.json`                  | A manually entered cash payment (§17)                                                                                    |
+| `unknown-merchant.json`              | A payment with an unresolved counterparty (§18)                                                                          |
+| `receipt-amount-mismatch.json`       | Receipt total differs from the linked payment amount (§20)                                                               |
 
 Numbers 21–25 in the scenario doc are covered by combinations of the fixtures above rather than
 dedicated files (e.g. §21 is `blinkit-order-mixed.json`; §24, a correction made after the fact,

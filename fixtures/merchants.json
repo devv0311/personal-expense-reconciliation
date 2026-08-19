@@ -1,0 +1,29 @@
+{
+  "note": "Synthetic merchant catalog for deterministic normalization (phase 7). Every alias is the full raw description a statement row carries, matched exactly after canonicalization — never a prefix or a pattern.",
+  "merchants": [
+    {
+      "id": "merchant_blinkit",
+      "canonical_name": "Blinkit",
+      "default_category": "groceries",
+      "aliases": ["UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD"]
+    },
+    {
+      "id": "merchant_sample_restaurant",
+      "canonical_name": "Sample Restaurant",
+      "default_category": "dining",
+      "aliases": ["UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD"]
+    },
+    {
+      "id": "merchant_sample_electronics",
+      "canonical_name": "Sample Electronics Store",
+      "default_category": "electronics",
+      "aliases": ["ACH REFUND SAMPLE ELECTRONICS STORE"]
+    },
+    {
+      "id": "merchant_electricity_board",
+      "canonical_name": "Electricity Board",
+      "default_category": "utilities",
+      "aliases": ["ELECTRICITY BOARD BBPS BILLPAY"]
+    }
+  ]
+}
