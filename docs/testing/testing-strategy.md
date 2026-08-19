@@ -166,5 +166,20 @@ it covers:
 - **End-to-end scenario tests** — `tests/scenarios/`, covering the 22 required ledger scenarios,
   each asserting the resulting financial state rather than that rows could be inserted.
 
-Not yet covered, because the layers do not exist yet: `src/ai` contract tests,
-`src/integrations` adapter tests, and `src/api` route tests (`docs/roadmap.md` phases 8, 14).
+- **`src/ai` contract tests** (added phase 8) — colocated with each module. They feed stubbed
+  responses, including deliberately malformed ones, into the real validator: an unknown
+  `proposedKind`, a settlement missing its `counterpartyPersonHint`, a field belonging to the
+  other kind, a `relationship_type` ADR-0007/ADR-0008 removed, and a response that is not JSON
+  at all. They assert the `Inference<T>` shape and the confidence handling, never that a
+  proposal was _right_. `redaction.test.ts` covers the security-model rule that no
+  `external_reference`, account fragment or UPI handle leaves the boundary.
+- **Classification integration and pipeline tests** (added phase 8) —
+  `tests/integration/classification.test.ts` covers the queries, the service, routing and
+  `decideInference`; `tests/integration/classification-pipeline.test.ts` runs
+  import → normalize → classify → decide over `fixtures/bank-statement.csv` and closes with
+  `runReconciliation` showing `ledger_unexplained_total = 0`. The model is a transport scripted
+  from `fixtures/ai-classification-proposals.json` (ADR-0025); everything else in the chain is
+  production code against a real engine.
+
+Not yet covered, because the layers do not exist yet: `src/integrations` adapter tests and
+`src/api` route tests (`docs/roadmap.md` phase 14).

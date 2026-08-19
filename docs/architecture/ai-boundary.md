@@ -8,6 +8,11 @@ by convention. See `CLAUDE.md` for the one-paragraph version and
 > **Revision note (2026-08).** `classifyTransaction`'s output shape gained a `proposedKind`
 > field (settlement detection, ADR-0007). No other operation signature changed. See
 > `docs/domain/domain-model.md`'s revision note for full context.
+>
+> **Implementation note (2026-08-19, phase 8).** This document is now partly implemented rather
+> than purely specified — `src/ai` holds the contract, the redaction and the validation, and
+> `services.decideInference` exists. See "What exists" at the foot of this document for exactly
+> which parts, and ADRs 0023–0027 for the five decisions building it required.
 
 ## Service interface
 
@@ -123,3 +128,37 @@ approval:
   existing `Settlement`/`Evidence`/`ReconciliationRun` rows, not an inference — there is no
   `ai/*` operation for it, and no path for an AI proposal to mark a non-user obligation as
   believed-settled on its own initiative.
+
+## What exists (phase 8, 2026-08-19)
+
+`src/ai` was a `README.md` until this phase, and `ai_inferences` had no writer anywhere
+(ADR-0022). Built now:
+
+| Piece                        | Where                                     | Notes                                                                                                                                          |
+| ---------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Inference<T>` envelope      | `src/ai/contract.ts`                      | Returned by every operation; never a bare `T`.                                                                                                 |
+| `classifyTransaction`        | `src/ai/classify-transaction.ts`          | The first of the nine. `createAiService(transport)`.                                                                                           |
+| Gate 1 — schema validation   | `src/ai/contract.ts`                      | Strict, hand-written, no dependency added. Unknown keys, missing keys, wrong types and out-of-range values are all rejected, naming the field. |
+| Gate 2 — semantic validation | `services.validateClassificationProposal` | What a schema cannot see: an expense proposed against a credit, a payer who is not the account owner, a person who does not exist.             |
+| Redaction                    | `src/ai/redaction.ts`                     | One named function, per `security-model.md`. `external_reference` and `account_id` have no field on the outgoing payload at all.               |
+| `decideInference`            | `services/inference-decision-service.ts`  | The only path out of `pending`. Actor must be a person or a `Rule`.                                                                            |
+| Confidence routing           | `domain.routeClassificationForReview`     | Pure. Decides `CLASSIFIED` vs `REVIEW_REQUIRED` — never `APPROVED` (ADR-0024).                                                                 |
+
+**Deliberately not built.** The other eight operations, and any production `ModelTransport`:
+the boundary takes an injected transport and this phase wires no provider (ADR-0025), so the
+integration suite exercises the real validator, service and database against a transport
+scripted from `fixtures/ai-classification-proposals.json`. `ai.normalizeMerchant()` remains
+carried forward from ADR-0022.
+
+**Two clarifications this phase forced**, both worth reading against the confidence table above:
+
+- The table's "eligible for auto-progression … typically via a matched `Rule`" describes a
+  mechanism that does not exist yet — `Rule` is phase 16. So **nothing auto-approves**: a
+  `high`-confidence, immaterial proposal reaches `CLASSIFIED` and waits for a decision exactly
+  as a `low`-confidence one does. Confidence changed the friction, which is all invariant #16
+  ever promised it would (ADR-0024).
+- "Accepting it produces either an `Expense` or a `Settlement`" is true of the **authoritative**
+  record. On the expense path a DERIVED `Expense` already exists by then — classification wrote
+  it, unapproved, so that `REVIEW_REQUIRED` means something and so `data-flow.md` step 5's
+  `db.updateExpense (APPROVED)` has a row to update. On the settlement path nothing exists until
+  acceptance, because `Settlement` has no pre-approval state (ADR-0026).

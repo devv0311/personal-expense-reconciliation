@@ -72,9 +72,14 @@ PROPOSED ──▶ CLASSIFIED ──▶ REVIEW_REQUIRED ──▶ APPROVED ─�
                                                                              SYNCED ──▶ RECONCILED
 ```
 
-- **PROPOSED** — an `Expense` exists (created manually, or as a byproduct of accepting a
+- **PROPOSED** — an `Expense` exists (created manually, or as a byproduct of a
   `classify_transaction` `AIInference`) but its relationship type/category isn't yet
-  confirmed. If the expense is externally-funded (`paid_by_person_id` != the user —
+  confirmed. **Corrected during phase 8's implementation:** this bullet previously said "as a
+  byproduct of _accepting_" the inference. The expense is created when the proposal is
+  **recorded**, not when it is accepted — it has to exist unapproved for `CLASSIFIED` and
+  `REVIEW_REQUIRED` to mean anything, and for step 5 of `data-flow.md` to have a row to update.
+  It is DERIVED until `APPROVED` throughout (ADR-0026). A `settlement`-kind proposal creates
+  nothing until accepted, because `Settlement` has no pre-approval state — see below. If the expense is externally-funded (`paid_by_person_id` != the user —
   `domain-model.md`, ADR-0006), that fact is set here too, from `Evidence` rather than a
   `Payment`.
 - **CLASSIFIED** — `relationship_type` and `category` are set (by AI proposal or manual entry),
@@ -137,7 +142,10 @@ recorded ──▶ distributed   (a new Allocation version exists, summing to th
 `Settlement` has no state machine of its own beyond existing-or-not — it is created directly as
 an `APPROVED` record once the `Payment` it references is confirmed as a settlement (manually, or
 via an accepted `classify_transaction` `AIInference` whose `proposedKind = settlement` —
-`ai-boundary.md`). It never passes through `PROPOSED`/`CLASSIFIED`/etc., because it never becomes
+`ai-boundary.md`). Because there is no pre-approval state to park a proposal in, a pending
+inference **is** the queue entry for a proposed settlement, and accepting it is what creates
+the row — along with resolving the payment's `counterparty_type` to that `person` and moving
+the payment to `LINKED` (phase 8, ADR-0026). It never passes through `PROPOSED`/`CLASSIFIED`/etc., because it never becomes
 an `Expense` (ADR-0007). Its only further lifecycle is optional Splitwise sync
 (`SplitwiseSettlement.sync_status`, same shape as below).
 
@@ -152,7 +160,12 @@ pending ──▶ accepted   (produces/updates an authoritative record)
 
 Only `accepted` and `modified` produce or update an authoritative record, and both do so
 through the normal APPROVED-data write path (invariant #15) — `accepted` is not a shortcut
-that bypasses validation. For `classify_transaction` inferences, the produced record is either
+that bypasses validation. **As of phase 8 that path is `services.decideInference`**, which is
+the only code that writes these transitions: it re-validates the stored proposal through the
+same parser a modified one passes, and refuses an actor that is not a person or a `Rule`.
+`superseded` is defined and reachable in the state machine but nothing produces it yet — a
+payment that already carries a classification inference is not classified again, so a re-run is
+a no-op, and re-classification is a review action (phase 9). For `classify_transaction` inferences, the produced record is either
 an `Expense` (`proposedKind = expense`, the default) or a `Settlement` (`proposedKind =
 settlement`, ADR-0007) — never both, and the choice is part of what `accepted`/`modified`
 confirms, not assumed.

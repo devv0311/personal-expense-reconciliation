@@ -43,5 +43,18 @@ import (phase 6):
   records no event. Deterministic leg only: no `ai.normalizeMerchant()` call and no `AIInference`
   row (ADR-0022). Classifies nothing.
 
-Not yet implemented: classification, review-queue, `decideInference`, and Splitwise sync
-orchestration — see `docs/roadmap.md` phases 8–11 and 14.
+- `classification-service.ts` — `classifyPayment` / `classifyPayments`: the deterministic
+  self-transfer leg first (ADR-0023), then `ai.classifyTransaction` for what it cannot settle,
+  then the semantic gate, the pending `AIInference`, and the DERIVED `Expense` walked
+  `proposed → classified → (review_required)`. Each payment is its own audited transaction, so
+  one nonsensical answer does not roll back the payments classified beside it. Approves
+  nothing, at any confidence.
+- `inference-decision-service.ts` — `decideInference`: the only path by which an `AIInference`
+  leaves `pending`. Parses the actor first (a person or a `Rule`, never the model, never
+  `system`), re-validates the proposal through the same parser a modified one passes, and
+  produces either an approved `Expense` with its `PaymentExpenseLink` or a `Settlement` — never
+  both, in one transaction.
+
+Not yet implemented: the review queue itself (phase 9 reads the `REVIEW_REQUIRED` expenses and
+pending inferences this phase writes), receipt ingestion, and Splitwise sync orchestration —
+see `docs/roadmap.md` phases 9–11 and 14.
