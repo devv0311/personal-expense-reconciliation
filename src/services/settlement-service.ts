@@ -21,7 +21,7 @@ import {
 } from '../db/index.js';
 import type { Database } from '../db/index.js';
 
-import { runAudited, type AuditMeta } from './audit.js';
+import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
 import { requirePayment } from './loaders.js';
 
 export interface RecordSettlementInput {
@@ -51,50 +51,68 @@ export async function recordSettlement(
   db: Database,
   input: RecordSettlementInput,
 ): Promise<RecordSettlementResult> {
-  return runAudited(db, input.audit, async ({ exec, record }) => {
-    const payment = await requirePayment(exec, input.paymentId);
+  return runAudited(db, input.audit, (ctx) => recordSettlementWithin(ctx, input));
+}
 
-    const existingLinks = await listPaymentExpenseLinksByPayment(exec, payment.id);
-    const existingSettlements = await listSettlementsByPayment(exec, payment.id);
-    const explanation = validatePaymentExplanationBudget({
-      paymentAmount: payment.amount,
-      linkAmounts: existingLinks.map((link) => link.amount),
-      settlementAmounts: [...existingSettlements.map((row) => row.amount), input.amount],
-    });
+/** {@link recordSettlement}'s input, minus the audit metadata the caller's unit of work owns. */
+export type RecordSettlementWithinInput = Omit<RecordSettlementInput, 'audit'>;
 
-    const settlementId = await insertSettlement(exec, {
+/**
+ * The same recording, inside a unit of work someone else opened.
+ *
+ * Exists because accepting a `classify_transaction` inference whose `proposedKind` is
+ * `settlement` has to write the `Settlement`, the inference's decision, and the payment's
+ * counterparty in **one** transaction (`services.decideInference`). Re-implementing the
+ * budget validation there would be a second copy of a financial rule; nesting `runAudited`
+ * would open a second transaction and a second "did this audit anything" count.
+ */
+export async function recordSettlementWithin(
+  ctx: AuditContext,
+  input: RecordSettlementWithinInput,
+): Promise<RecordSettlementResult> {
+  const { exec, record } = ctx;
+  const payment = await requirePayment(exec, input.paymentId);
+
+  const existingLinks = await listPaymentExpenseLinksByPayment(exec, payment.id);
+  const existingSettlements = await listSettlementsByPayment(exec, payment.id);
+  const explanation = validatePaymentExplanationBudget({
+    paymentAmount: payment.amount,
+    linkAmounts: existingLinks.map((link) => link.amount),
+    settlementAmounts: [...existingSettlements.map((row) => row.amount), input.amount],
+  });
+
+  const settlementId = await insertSettlement(exec, {
+    paymentId: payment.id,
+    counterpartyPersonId: input.counterpartyPersonId,
+    amount: input.amount,
+    reason: input.reason ?? null,
+  });
+
+  await record({
+    entityType: 'settlement',
+    entityId: settlementId,
+    action: 'create',
+    newValue: {
       paymentId: payment.id,
       counterpartyPersonId: input.counterpartyPersonId,
-      amount: input.amount,
-      reason: input.reason ?? null,
-    });
-
-    await record({
-      entityType: 'settlement',
-      entityId: settlementId,
-      action: 'create',
-      newValue: {
-        paymentId: payment.id,
-        counterpartyPersonId: input.counterpartyPersonId,
-        amount: input.amount.toString(),
-        // Direction is read from the linked payment, never stored again here.
-        direction: payment.direction,
-      },
-    });
-
-    // `linked` now means "explained" in general — by an expense link and/or a settlement.
-    if (payment.state === 'normalized') {
-      assertPaymentTransition('normalized', 'linked');
-      await updatePaymentState(exec, payment.id, 'linked');
-      await record({
-        entityType: 'payment',
-        entityId: payment.id,
-        action: 'update',
-        oldValue: { state: 'normalized' },
-        newValue: { state: 'linked' },
-      });
-    }
-
-    return { settlementId, unexplainedRemainder: explanation.unexplained };
+      amount: input.amount.toString(),
+      // Direction is read from the linked payment, never stored again here.
+      direction: payment.direction,
+    },
   });
+
+  // `linked` now means "explained" in general — by an expense link and/or a settlement.
+  if (payment.state === 'normalized') {
+    assertPaymentTransition('normalized', 'linked');
+    await updatePaymentState(exec, payment.id, 'linked');
+    await record({
+      entityType: 'payment',
+      entityId: payment.id,
+      action: 'update',
+      oldValue: { state: 'normalized' },
+      newValue: { state: 'linked' },
+    });
+  }
+
+  return { settlementId, unexplainedRemainder: explanation.unexplained };
 }

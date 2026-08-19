@@ -266,11 +266,9 @@ export async function classifyPayment(
       };
     }
 
-    const expense = await createDerivedExpense(ctx, {
+    const expense = await createDerivedExpenseFromProposal(ctx, {
       payment,
       proposal: inference.proposedOutput,
-      merchantName: context.merchant?.canonicalName ?? null,
-      merchantCategory: context.merchant?.defaultCategory ?? null,
       paidByPersonId: userPersonId,
       inferenceId,
       review,
@@ -466,6 +464,15 @@ async function recordInternalTransfer(
   });
 }
 
+/** The merchant normalization resolved for this payment, if it resolved one. */
+async function loadPaymentMerchant(
+  exec: Executor,
+  payment: PaymentRow,
+): Promise<{ canonicalName: string; defaultCategory: string | null } | null> {
+  if (payment.counterpartyType !== 'merchant' || payment.counterpartyId === null) return null;
+  return getMerchantById(exec, payment.counterpartyId as MerchantId);
+}
+
 /** The already-resolved references a proposal may refer to, rather than raw statement text. */
 async function buildClassificationContext(
   exec: Executor,
@@ -484,7 +491,7 @@ async function buildClassificationContext(
   };
 }
 
-async function requireUserPersonId(exec: Executor): Promise<PersonId> {
+export async function requireUserPersonId(exec: Executor): Promise<PersonId> {
   const userPerson = await getPrimaryUserPerson(exec);
   if (userPerson === null) {
     throw new ServiceError(
@@ -542,13 +549,12 @@ async function storeInference(
   return inferenceId;
 }
 
-interface DerivedExpenseInput {
+export interface DerivedExpenseInput {
   readonly payment: PaymentRow;
   readonly proposal: Extract<TransactionClassification, { proposedKind: 'expense' }>;
-  readonly merchantName: string | null;
-  readonly merchantCategory: string | null;
   readonly paidByPersonId: PersonId;
   readonly inferenceId: AiInferenceId;
+  /** Where routing says this proposal stops. `requiresReview: false` lands at `classified`. */
   readonly review: ReviewRoute;
 }
 
@@ -560,15 +566,16 @@ interface DerivedExpenseInput {
  * lifecycle draws — and "nothing skips a state silently" is the whole claim `lifecycle.md`
  * makes. The expense is DERIVED throughout: `decideInference` is the only path to `approved`.
  */
-async function createDerivedExpense(
+export async function createDerivedExpenseFromProposal(
   ctx: AuditContext,
   input: DerivedExpenseInput,
 ): Promise<{ readonly expenseId: ExpenseId; readonly state: ExpenseState }> {
   const { payment, proposal, review } = input;
   const relationshipType: ExpenseRelationshipType = proposal.relationshipType;
+  const merchant = await loadPaymentMerchant(ctx.exec, payment);
   // The catalog's category is a deterministic fallback, never an override of the proposal.
-  const category = proposal.category ?? input.merchantCategory;
-  const description = input.merchantName ?? payment.rawDescription;
+  const category = proposal.category ?? merchant?.defaultCategory ?? null;
+  const description = merchant?.canonicalName ?? payment.rawDescription;
 
   const expenseId = await insertExpense(ctx.exec, {
     description,

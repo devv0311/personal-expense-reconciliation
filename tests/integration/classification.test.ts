@@ -30,10 +30,11 @@ import { createAiService } from '../../src/ai/index.js';
 import {
   classifyPayment,
   classifyPayments,
+  decideInference,
   importBankStatementCsv,
   normalizePayments,
 } from '../../src/services/index.js';
-import type { ClassificationOutcome } from '../../src/services/index.js';
+import type { ClassificationOutcome, ProposedClassification } from '../../src/services/index.js';
 import { createTestDatabase } from '../support/database.js';
 import type { TestDatabase } from '../support/database.js';
 import { AS_USER, seedCast, seedMerchants } from '../support/ledger.js';
@@ -918,5 +919,469 @@ describe('classifyPayment — one payment', () => {
       // The payer of a payment-funded expense is the account owner, always (ADR-0006).
       paidByPersonId: cast.userPersonId,
     });
+  });
+});
+
+/* ================================================================= decideInference */
+
+/** Deciding is a person's act, or a Rule's — never the system's (invariants.md #17). */
+const AS_REVIEWER = { actor: 'user', source: 'services.decideInference' } as const;
+
+/** Classifies the fixture and returns the proposal for one payment description. */
+async function proposalFor(
+  rawDescription: string,
+  options: { overrides?: Record<string, unknown> } = {},
+): Promise<ProposedClassification> {
+  const { result } = await classifyFixture(options);
+  const grouped = outcomesByDescription(result.outcomes, await paymentRows());
+  const outcome = grouped.get(rawDescription)?.[0];
+  if (outcome?.outcome !== 'proposed') {
+    throw new Error(`Expected a proposal for ${rawDescription}, got ${outcome?.outcome}.`);
+  }
+  return outcome;
+}
+
+async function expenseRow(expenseId: string) {
+  const [row] = await database.db
+    .select({
+      state: schema.expenses.state,
+      relationshipType: schema.expenses.relationshipType,
+      category: schema.expenses.category,
+      amount: schema.expenses.amount,
+    })
+    .from(schema.expenses)
+    .where(eq(schema.expenses.id, expenseId));
+  return row;
+}
+
+async function paymentState(paymentId: string) {
+  const [row] = await database.db
+    .select({
+      state: schema.payments.state,
+      counterpartyType: schema.payments.counterpartyType,
+      counterpartyId: schema.payments.counterpartyId,
+    })
+    .from(schema.payments)
+    .where(eq(schema.payments.id, paymentId));
+  return row;
+}
+
+describe('decideInference — accepting an expense proposal', () => {
+  it('approves the expense, explains the payment, and records who decided', async () => {
+    const proposal = await proposalFor('ELECTRICITY BOARD BBPS BILLPAY');
+
+    const result = await decideInference(database.db, {
+      inferenceId: proposal.inferenceId,
+      decision: 'accept',
+      audit: AS_REVIEWER,
+    });
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      resultingRecordType: 'expense',
+      expenseId: proposal.expenseId,
+      expenseState: 'approved',
+      paymentState: 'linked',
+      // The whole payment is accounted for: nothing left unexplained.
+      unexplainedRemainder: 0n,
+    });
+    expect(await expenseRow(proposal.expenseId!)).toMatchObject({ state: 'approved' });
+    expect(await paymentState(proposal.paymentId)).toMatchObject({ state: 'linked' });
+    expect(await listPaymentExpenseLinksByPayment(database.db, proposal.paymentId)).toEqual([
+      { amount: 210_000n },
+    ]);
+    expect(await getAiInferenceById(database.db, proposal.inferenceId)).toMatchObject({
+      status: 'accepted',
+      decidedBy: 'user',
+      resultingRecordType: 'expense',
+      resultingRecordId: proposal.expenseId,
+    });
+  });
+
+  it('accepts a proposal a Rule decided, keeping the rule id for traceability', async () => {
+    const proposal = await proposalFor('ELECTRICITY BOARD BBPS BILLPAY');
+
+    await decideInference(database.db, {
+      inferenceId: proposal.inferenceId,
+      decision: 'accept',
+      audit: { actor: 'rule:00000000-0000-4000-8000-000000000abc', source: 'rules' },
+    });
+
+    // A systematically wrong rule is fixable at its source (invariants.md #17).
+    expect(await getAiInferenceById(database.db, proposal.inferenceId)).toMatchObject({
+      status: 'accepted',
+      decidedBy: 'rule:00000000-0000-4000-8000-000000000abc',
+    });
+  });
+
+  it('approves an expense that was sitting in REVIEW_REQUIRED', async () => {
+    const proposal = await proposalFor('UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD');
+    expect(proposal.expenseState).toBe('review_required');
+
+    const result = await decideInference(database.db, {
+      inferenceId: proposal.inferenceId,
+      decision: 'accept',
+      audit: AS_REVIEWER,
+    });
+
+    expect(result).toMatchObject({ status: 'accepted', expenseState: 'approved' });
+  });
+
+  it('audits the approval, the link and the payment together', async () => {
+    const proposal = await proposalFor('ELECTRICITY BOARD BBPS BILLPAY');
+
+    await decideInference(database.db, {
+      inferenceId: proposal.inferenceId,
+      decision: 'accept',
+      audit: AS_REVIEWER,
+    });
+
+    const expenseEvents = await listAuditEvents(database.db, 'expense', proposal.expenseId!);
+    const approval = expenseEvents.at(-1);
+    expect(approval).toMatchObject({
+      action: 'update',
+      oldValue: { state: 'classified' },
+      newValue: { state: 'approved' },
+      actor: 'user',
+    });
+    expect(approval?.reason).toContain('immutable');
+
+    const inferenceEvents = await listAuditEvents(
+      database.db,
+      'ai_inference',
+      proposal.inferenceId,
+    );
+    expect(inferenceEvents.map((event) => event.action)).toEqual(['create', 'update']);
+    expect(inferenceEvents[1]).toMatchObject({
+      oldValue: { status: 'pending' },
+      newValue: { status: 'accepted', decidedBy: 'user' },
+    });
+
+    const paymentEvents = await listAuditEvents(database.db, 'payment', proposal.paymentId);
+    expect(paymentEvents.at(-1)).toMatchObject({
+      oldValue: { state: 'normalized' },
+      newValue: { state: 'linked' },
+    });
+  });
+
+  it('refuses a second expense drawn on a payment already fully explained', async () => {
+    const proposal = await proposalFor('ELECTRICITY BOARD BBPS BILLPAY');
+    await decideInference(database.db, {
+      inferenceId: proposal.inferenceId,
+      decision: 'accept',
+      audit: AS_REVIEWER,
+    });
+    // A second proposal about the same payment, as a re-classification would produce.
+    const second = await anInference(proposal.paymentId);
+
+    await expect(
+      decideInference(database.db, {
+        inferenceId: second,
+        decision: 'accept',
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'PAYMENT_BUDGET_EXCEEDED' });
+    // Rolled back whole: no second expense, no second link.
+    expect(await listPaymentExpenseLinksByPayment(database.db, proposal.paymentId)).toHaveLength(1);
+    expect(await getAiInferenceById(database.db, second)).toMatchObject({ status: 'pending' });
+  });
+});
+
+describe('decideInference — accepting a settlement proposal', () => {
+  it('creates the settlement, resolves the counterparty, and never an allocation', async () => {
+    const proposal = await proposalFor('UPI-FRIENDA-TRANSFER');
+    expect(proposal.expenseId).toBeNull();
+
+    const result = await decideInference(database.db, {
+      inferenceId: proposal.inferenceId,
+      decision: 'accept',
+      audit: AS_REVIEWER,
+    });
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      resultingRecordType: 'settlement',
+      counterpartyPersonId: cast.person['person_friend_a'],
+      paymentState: 'linked',
+      unexplainedRemainder: 0n,
+    });
+    const settlements = await database.db
+      .select({
+        paymentId: schema.settlements.paymentId,
+        counterpartyPersonId: schema.settlements.counterpartyPersonId,
+        amount: schema.settlements.amount,
+      })
+      .from(schema.settlements);
+    expect(settlements).toEqual([
+      {
+        paymentId: proposal.paymentId,
+        counterpartyPersonId: cast.person['person_friend_a'],
+        amount: 100_000n,
+      },
+    ]);
+    // A settlement discharges a debt; it never creates one (invariants.md #9, #9a).
+    expect(await database.db.select().from(schema.allocations)).toEqual([]);
+    expect(await database.db.select().from(schema.paymentExpenseLinks)).toEqual([]);
+    // The person-to-person payment is finally resolved to the person it went to.
+    expect(await paymentState(proposal.paymentId)).toMatchObject({
+      state: 'linked',
+      counterpartyType: 'person',
+      counterpartyId: cast.person['person_friend_a'],
+    });
+  });
+
+  it('records the counterparty resolution as its own audited change', async () => {
+    const proposal = await proposalFor('UPI-FRIENDA-TRANSFER');
+
+    await decideInference(database.db, {
+      inferenceId: proposal.inferenceId,
+      decision: 'accept',
+      audit: AS_REVIEWER,
+    });
+
+    const events = await listAuditEvents(database.db, 'payment', proposal.paymentId);
+    const resolution = events.find(
+      (event) => (event.newValue as { counterpartyType?: string }).counterpartyType === 'person',
+    );
+    expect(resolution).toMatchObject({
+      oldValue: { counterpartyType: 'unknown', counterpartyId: null },
+      newValue: { counterpartyType: 'person', counterpartyId: cast.person['person_friend_a'] },
+    });
+  });
+});
+
+describe('decideInference — rejecting', () => {
+  it('produces no authoritative record and leaves the proposal’s expense unapproved', async () => {
+    const proposal = await proposalFor('UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD');
+
+    const result = await decideInference(database.db, {
+      inferenceId: proposal.inferenceId,
+      decision: 'reject',
+      audit: AS_REVIEWER,
+    });
+
+    expect(result).toEqual({ status: 'rejected', inferenceId: proposal.inferenceId });
+    expect(await getAiInferenceById(database.db, proposal.inferenceId)).toMatchObject({
+      status: 'rejected',
+      decidedBy: 'user',
+    });
+    // The DERIVED expense stays where it was: nothing here deletes financial records, and an
+    // unapproved expense reaches no total (ADR-0026).
+    expect(await expenseRow(proposal.expenseId!)).toMatchObject({ state: 'review_required' });
+    expect(await paymentState(proposal.paymentId)).toMatchObject({ state: 'normalized' });
+    expect(await database.db.select().from(schema.paymentExpenseLinks)).toEqual([]);
+  });
+
+  it('refuses a rejection that carries a corrected proposal', async () => {
+    const proposal = await proposalFor('ELECTRICITY BOARD BBPS BILLPAY');
+
+    await expect(
+      decideInference(database.db, {
+        inferenceId: proposal.inferenceId,
+        decision: 'reject',
+        modifiedOutput: { proposedKind: 'expense', relationshipType: 'personal' },
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+  });
+});
+
+describe('decideInference — modifying', () => {
+  it('applies the correction, then approves what was corrected', async () => {
+    const proposal = await proposalFor('UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD');
+
+    const result = await decideInference(database.db, {
+      inferenceId: proposal.inferenceId,
+      decision: 'modify',
+      modifiedOutput: {
+        proposedKind: 'expense',
+        relationshipType: 'personal',
+        category: 'dining',
+      },
+      audit: AS_REVIEWER,
+    });
+
+    expect(result).toMatchObject({ status: 'modified', expenseState: 'approved' });
+    expect(await expenseRow(proposal.expenseId!)).toMatchObject({
+      state: 'approved',
+      relationshipType: 'personal',
+      category: 'dining',
+      // The amount is the payment's, and no correction path can touch it (invariants.md #6).
+      amount: 284_000n,
+    });
+    expect(await getAiInferenceById(database.db, proposal.inferenceId)).toMatchObject({
+      status: 'modified',
+    });
+  });
+
+  it('turns a settlement proposal into an expense, creating the expense it never had', async () => {
+    const proposal = await proposalFor('UPI-FRIENDA-TRANSFER');
+    expect(proposal.expenseId).toBeNull();
+
+    const result = await decideInference(database.db, {
+      inferenceId: proposal.inferenceId,
+      decision: 'modify',
+      modifiedOutput: {
+        proposedKind: 'expense',
+        relationshipType: 'paid_on_behalf',
+        category: 'lending',
+      },
+      audit: AS_REVIEWER,
+    });
+
+    if (result.status === 'rejected' || result.resultingRecordType !== 'expense') {
+      throw new Error('expected an expense');
+    }
+    expect(await expenseRow(result.expenseId)).toMatchObject({
+      state: 'approved',
+      relationshipType: 'paid_on_behalf',
+      amount: 100_000n,
+    });
+    expect(await database.db.select().from(schema.settlements)).toEqual([]);
+    expect(await paymentState(proposal.paymentId)).toMatchObject({ state: 'linked' });
+  });
+
+  it('turns an expense proposal into a settlement, leaving the expense behind and saying so', async () => {
+    const proposal = await proposalFor('UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD');
+
+    const result = await decideInference(database.db, {
+      inferenceId: proposal.inferenceId,
+      decision: 'modify',
+      modifiedOutput: {
+        proposedKind: 'settlement',
+        counterpartyPersonHint: { type: 'person', id: cast.person['person_friend_a'] },
+      },
+      audit: AS_REVIEWER,
+    });
+
+    expect(result).toMatchObject({ status: 'modified', resultingRecordType: 'settlement' });
+    // The DERIVED expense is not approved and not deleted — and the audit trail says why it is
+    // sitting there, rather than leaving a reader to guess (ADR-0026).
+    expect(await expenseRow(proposal.expenseId!)).toMatchObject({ state: 'review_required' });
+    const events = await listAuditEvents(database.db, 'expense', proposal.expenseId!);
+    expect(events.at(-1)).toMatchObject({
+      action: 'supersede',
+      newValue: { supersededBy: 'settlement' },
+    });
+    expect(await database.db.select().from(schema.paymentExpenseLinks)).toEqual([]);
+  });
+
+  it('refuses a modification that is not a proposal at all', async () => {
+    const proposal = await proposalFor('ELECTRICITY BOARD BBPS BILLPAY');
+
+    await expect(
+      decideInference(database.db, {
+        inferenceId: proposal.inferenceId,
+        decision: 'modify',
+        modifiedOutput: { proposedKind: 'expense', relationshipType: 'settlement' },
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ name: 'AiContractError', code: 'FIELD_INVALID' });
+
+    // A correction gets no easier door than the model's original: still pending, still
+    // unapproved (ai-boundary.md).
+    expect(await getAiInferenceById(database.db, proposal.inferenceId)).toMatchObject({
+      status: 'pending',
+    });
+    expect(await expenseRow(proposal.expenseId!)).toMatchObject({ state: 'classified' });
+  });
+
+  it('refuses a modification the ledger contradicts', async () => {
+    const proposal = await proposalFor('ELECTRICITY BOARD BBPS BILLPAY');
+
+    await expect(
+      decideInference(database.db, {
+        inferenceId: proposal.inferenceId,
+        decision: 'modify',
+        modifiedOutput: {
+          proposedKind: 'settlement',
+          counterpartyPersonHint: {
+            type: 'person',
+            id: '00000000-0000-4000-8000-000000000000',
+          },
+        },
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'AI_PROPOSAL_INVALID' });
+  });
+
+  it('refuses a modification with nothing to modify', async () => {
+    const proposal = await proposalFor('ELECTRICITY BOARD BBPS BILLPAY');
+
+    await expect(
+      decideInference(database.db, {
+        inferenceId: proposal.inferenceId,
+        decision: 'modify',
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+  });
+
+  it('refuses an acceptance that quietly carries a different proposal', async () => {
+    const proposal = await proposalFor('ELECTRICITY BOARD BBPS BILLPAY');
+
+    // The distinction between `accepted` and `modified` is what the audit trail records; an
+    // accept that changed something would make that record a lie.
+    await expect(
+      decideInference(database.db, {
+        inferenceId: proposal.inferenceId,
+        decision: 'accept',
+        modifiedOutput: { proposedKind: 'expense', relationshipType: 'personal' },
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+  });
+});
+
+describe('decideInference — the gate itself', () => {
+  it('refuses a decision nobody is accountable for', async () => {
+    const proposal = await proposalFor('ELECTRICITY BOARD BBPS BILLPAY');
+
+    for (const actor of ['system', 'ai', 'anthropic']) {
+      await expect(
+        decideInference(database.db, {
+          inferenceId: proposal.inferenceId,
+          decision: 'accept',
+          audit: { actor, source: 'services.decideInference' },
+        }),
+      ).rejects.toMatchObject({ code: 'DECISION_ACTOR_INVALID' });
+    }
+
+    // Nothing moved: an AIInference leaves `pending` only through an attributable decision.
+    expect(await getAiInferenceById(database.db, proposal.inferenceId)).toMatchObject({
+      status: 'pending',
+    });
+    expect(await expenseRow(proposal.expenseId!)).toMatchObject({ state: 'classified' });
+  });
+
+  it('refuses to decide the same inference twice', async () => {
+    const proposal = await proposalFor('ELECTRICITY BOARD BBPS BILLPAY');
+    await decideInference(database.db, {
+      inferenceId: proposal.inferenceId,
+      decision: 'accept',
+      audit: AS_REVIEWER,
+    });
+
+    await expect(
+      decideInference(database.db, {
+        inferenceId: proposal.inferenceId,
+        decision: 'reject',
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_STATE_TRANSITION' });
+    // A decided inference is never re-opened; a re-run supersedes it instead (lifecycle.md).
+    expect(await getAiInferenceById(database.db, proposal.inferenceId)).toMatchObject({
+      status: 'accepted',
+    });
+  });
+
+  it('refuses an inference that does not exist', async () => {
+    await expect(
+      decideInference(database.db, {
+        inferenceId: asId<'ai_inference'>('00000000-0000-4000-8000-000000000000'),
+        decision: 'accept',
+        audit: AS_REVIEWER,
+      }),
+    ).rejects.toMatchObject({ code: 'ENTITY_NOT_FOUND' });
   });
 });
