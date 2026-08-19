@@ -17,7 +17,7 @@
  * counterparty simply stays `unknown` — a recorded outcome, not a gap.
  */
 
-import { refineChannel } from '../domain/index.js';
+import { merchantAliasKey, refineChannel } from '../domain/index.js';
 import { assertPaymentTransition } from '../domain/index.js';
 import type {
   ImportBatchId,
@@ -27,7 +27,11 @@ import type {
   PaymentId,
   PaymentReferenceType,
 } from '../domain/index.js';
-import { applyPaymentNormalization, listPaymentsAwaitingNormalization } from '../db/index.js';
+import {
+  applyPaymentNormalization,
+  findMerchantByAliasKey,
+  listPaymentsAwaitingNormalization,
+} from '../db/index.js';
 import type { Database } from '../db/index.js';
 
 import { runAudited, type AuditMeta } from './audit.js';
@@ -69,7 +73,7 @@ export async function normalizePayments(
   return runAudited(db, input.audit, async ({ exec, record }) => {
     const normalizedPaymentIds: PaymentId[] = [];
     let channelRefinedCount = 0;
-    const merchantResolvedCount = 0;
+    let merchantResolvedCount = 0;
 
     for (const payment of awaiting) {
       // PaymentRow types these as plain strings (the columns are `text` with CHECK
@@ -79,8 +83,17 @@ export async function normalizePayments(
         payment.referenceType as PaymentReferenceType | null,
         payment.channel as PaymentChannel,
       );
-      const counterpartyType: PaymentCounterpartyType = 'unknown';
-      const counterpartyId: MerchantId | null = null;
+      // Exact match on the canonical key — never a prefix or a similarity. A miss leaves the
+      // counterparty `unknown`, which is a recorded outcome rather than a failure to retry.
+      const merchantId = await findMerchantByAliasKey(
+        exec,
+        merchantAliasKey(payment.rawDescription),
+      );
+      // `merchant` is the only counterparty type this phase ever writes. A payment that is
+      // plainly a self-transfer stays `unknown`: recognising that is classification (phase 8).
+      const counterpartyType: PaymentCounterpartyType =
+        merchantId === null ? 'unknown' : 'merchant';
+      const counterpartyId: MerchantId | null = merchantId;
 
       assertPaymentTransition('imported', 'normalized');
       await applyPaymentNormalization(exec, payment.id, {
@@ -98,11 +111,12 @@ export async function normalizePayments(
           channel: payment.channel,
           counterpartyType: payment.counterpartyType,
         },
-        newValue: { state: 'normalized', channel, counterpartyType },
+        newValue: { state: 'normalized', channel, counterpartyType, counterpartyId },
       });
 
       normalizedPaymentIds.push(payment.id);
       if (channel !== payment.channel) channelRefinedCount += 1;
+      if (merchantId !== null) merchantResolvedCount += 1;
     }
 
     return { normalizedPaymentIds, channelRefinedCount, merchantResolvedCount };
