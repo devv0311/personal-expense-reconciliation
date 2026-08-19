@@ -326,3 +326,108 @@ describe('normalizePayments — channel, state, and audit', () => {
     );
   });
 });
+
+describe('normalizePayments — merchant resolution', () => {
+  it('resolves every catalogued merchant and leaves the rest unknown', async () => {
+    await importFixture();
+
+    const result = await normalizePayments(database.db, { audit: AS_USER });
+
+    const rows = await database.db
+      .select({
+        rawDescription: schema.payments.rawDescription,
+        counterpartyType: schema.payments.counterpartyType,
+        counterpartyId: schema.payments.counterpartyId,
+      })
+      .from(schema.payments);
+    const byDescription = new Map(rows.map((row) => [row.rawDescription, row]));
+
+    expect(byDescription.get('UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD')).toMatchObject({
+      counterpartyType: 'merchant',
+      counterpartyId: merchant['merchant_blinkit'],
+    });
+    expect(byDescription.get('ELECTRICITY BOARD BBPS BILLPAY')).toMatchObject({
+      counterpartyType: 'merchant',
+      counterpartyId: merchant['merchant_electricity_board'],
+    });
+    // A credit resolves on the same terms as a debit. Whether it is a refund is
+    // classification, not normalization.
+    expect(byDescription.get('ACH REFUND SAMPLE ELECTRONICS STORE')).toMatchObject({
+      counterpartyType: 'merchant',
+      counterpartyId: merchant['merchant_sample_electronics'],
+    });
+
+    expect(result.merchantResolvedCount).toBe(5);
+  });
+
+  it('leaves the obvious self-transfer unknown — recognising it is classification', async () => {
+    await importFixture();
+
+    await normalizePayments(database.db, { audit: AS_USER });
+
+    const transfers = await database.db
+      .select({ counterpartyType: schema.payments.counterpartyType })
+      .from(schema.payments)
+      .where(eq(schema.payments.externalReference, 'NEFT/N072026001'));
+    expect(transfers).toHaveLength(2);
+    expect(transfers.every((row) => row.counterpartyType === 'unknown')).toBe(true);
+  });
+
+  it('leaves a person-to-person payment unknown — a person is not a merchant', async () => {
+    await importFixture();
+
+    await normalizePayments(database.db, { audit: AS_USER });
+
+    const [p2p] = await database.db
+      .select({
+        counterpartyType: schema.payments.counterpartyType,
+        counterpartyId: schema.payments.counterpartyId,
+        state: schema.payments.state,
+      })
+      .from(schema.payments)
+      .where(eq(schema.payments.rawDescription, 'UPI-FRIENDA-TRANSFER'));
+    expect(p2p).toMatchObject({ counterpartyType: 'unknown', counterpartyId: null });
+    // Still normalized: the bar is "resolution attempted", not "resolved".
+    expect(p2p?.state).toBe('normalized');
+  });
+
+  it('writes no counterparty when the catalog is empty', async () => {
+    await database.truncateAll();
+    cast = await seedCast(database.db);
+    accountId = cast.account['account_hdfc_savings']!;
+    await importFixture();
+
+    const result = await normalizePayments(database.db, { audit: AS_USER });
+
+    expect(result.merchantResolvedCount).toBe(0);
+    expect(result.normalizedPaymentIds).toHaveLength(8);
+    const rows = await database.db
+      .select({ counterpartyType: schema.payments.counterpartyType })
+      .from(schema.payments);
+    expect(rows.every((row) => row.counterpartyType === 'unknown')).toBe(true);
+  });
+
+  it('records the resolved merchant in the audit event', async () => {
+    await importFixture();
+
+    await normalizePayments(database.db, { audit: AS_USER });
+
+    const blinkit = await paymentIdByReference('UPI/2607011234/BLINKIT');
+    const [, resolvedUpdate] = await listAuditEvents(database.db, 'payment', blinkit);
+    expect(resolvedUpdate?.oldValue).toMatchObject({ counterpartyType: 'unknown' });
+    expect(resolvedUpdate?.newValue).toMatchObject({
+      counterpartyType: 'merchant',
+      counterpartyId: merchant['merchant_blinkit'],
+    });
+
+    // The self-transfer's event records that resolution was attempted and found nothing —
+    // an unresolved counterparty is an outcome, not a missing event.
+    const transfer = await paymentIdByReference('NEFT/N072026001');
+    const [, transferUpdate] = await listAuditEvents(database.db, 'payment', transfer);
+    expect(transferUpdate?.newValue).toMatchObject({
+      state: 'normalized',
+      counterpartyType: 'unknown',
+      counterpartyId: null,
+    });
+  });
+});
