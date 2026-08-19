@@ -67,9 +67,11 @@ This is where the brief's full chain applies, adapted:
 
 ```
 PROPOSED ──▶ CLASSIFIED ──▶ REVIEW_REQUIRED ──▶ APPROVED ──▶ ALLOCATED ──▶ READY_TO_SYNC
-                  │                                                             │
-                  └───────────────▶ (skips REVIEW_REQUIRED if high-confidence)  ▼
-                                                                             SYNCED ──▶ RECONCILED
+                  │                │                                            │
+                  │                └──────────┐                                 ▼
+                  ├──▶ (skips REVIEW_REQUIRED │ if high-confidence)          SYNCED ──▶ RECONCILED
+                  │                           ▼
+                  └──────────────────────▶ REJECTED   (terminal — added phase 9, ADR-0028)
 ```
 
 - **PROPOSED** — an `Expense` exists (created manually, or as a byproduct of a
@@ -112,6 +114,16 @@ PROPOSED ──▶ CLASSIFIED ──▶ REVIEW_REQUIRED ──▶ APPROVED ─�
   (`personal`, or `gift`) skip `READY_TO_SYNC`/`SYNCED` entirely and go straight to being eligible
   for `RECONCILED`.
 - **SYNCED** — a `SplitwiseExpense` record exists and sync succeeded.
+- **REJECTED (added phase 9, ADR-0028)** — the DERIVED expense a classification proposal
+  created, after a reviewer declined that proposal (`services.decideInference(reject)`),
+  replaced it (`services.reclassifyPayment`), or decided it was a settlement after all
+  (a `modify` that changes `proposedKind`). Terminal: never approved, never revived, counted by
+  no `ledger_*` total — each of those enumerates the states it sums, starting at `approved`.
+  Reachable **only** from `CLASSIFIED`/`REVIEW_REQUIRED`; an expense that was ever `APPROVED`
+  can never reach it, because unwinding an approved financial record is a correction
+  (`ExpenseAdjustment`, ADR-0008), not a state change. The audit event's `reason` says which of
+  the three ways it got here — the same way `payments.ignored_reason` distinguishes
+  `duplicate_of:` from `out_of_scope` without needing two states. Nothing is deleted.
 - **RECONCILED** — this expense's contribution to the ledger has been checked against
   Splitwise (if synced) and against payment linkage (invariant #5) in at least one
   `ReconciliationRun` with no unresolved discrepancy attributed to it.
@@ -163,9 +175,13 @@ through the normal APPROVED-data write path (invariant #15) — `accepted` is no
 that bypasses validation. **As of phase 8 that path is `services.decideInference`**, which is
 the only code that writes these transitions: it re-validates the stored proposal through the
 same parser a modified one passes, and refuses an actor that is not a person or a `Rule`.
-`superseded` is defined and reachable in the state machine but nothing produces it yet — a
-payment that already carries a classification inference is not classified again, so a re-run is
-a no-op, and re-classification is a review action (phase 9). For `classify_transaction` inferences, the produced record is either
+`superseded` is produced by exactly one caller, added in phase 9: `services.reclassifyPayment`,
+the explicit review action that asks the model again (ADR-0030). A plain `classifyPayments`
+re-run still skips a payment that already carries an inference, so it remains a no-op — the two
+behaviours are deliberately different, and there is a test asserting each. The superseded
+proposal's DERIVED expense goes to `REJECTED` with it (ADR-0028), and the old and new proposals
+move in one transaction, so a payment is never left with a superseded proposal and no
+replacement. For `classify_transaction` inferences, the produced record is either
 an `Expense` (`proposedKind = expense`, the default) or a `Settlement` (`proposedKind =
 settlement`, ADR-0007) — never both, and the choice is part of what `accepted`/`modified`
 confirms, not assumed.

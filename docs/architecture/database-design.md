@@ -181,7 +181,10 @@ original 7-value enum; `settlement` removed (ADR-0007, now the `settlements` tab
 fronted the money; not necessarily the user,
 `state text not null default 'proposed' check (state in
 ('proposed','classified','review_required','approved','allocated','ready_to_sync','synced',
-'reconciled'))`,
+'reconciled','rejected'))` — **`rejected` added in phase 9, ADR-0028**, migration
+`0005_expense_rejected_state.sql`: the terminal state of a DERIVED expense whose classification
+proposal was declined or superseded. Excluded from every `ledger_*` total by construction, since
+each enumerates the states it counts starting at `approved`,
 `updated_at timestamptz not null default now()`.
 **`refund_of_expense_id` removed** (was a nullable self-reference; superseded by
 `expense_adjustments`, ADR-0008).
