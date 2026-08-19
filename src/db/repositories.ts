@@ -21,6 +21,8 @@ import type {
   EvidenceNoteKind,
   EvidenceType,
   ExpenseState,
+  PaymentChannel,
+  PaymentCounterpartyType,
   PaymentState,
 } from '../domain/enums.js';
 import type {
@@ -30,6 +32,7 @@ import type {
   ExpenseId,
   ImportBatchId,
   GroupId,
+  MerchantId,
   PaymentId,
   PersonId,
   ReconciliationRunId,
@@ -54,6 +57,7 @@ import {
   expenses,
   groupMemberships,
   importBatches,
+  merchantAliases,
   paymentExpenseLinks,
   payments,
   reconciliationRuns,
@@ -448,6 +452,12 @@ export interface PaymentRow {
   readonly occurredAt: Date;
   readonly externalReference: string | null;
   readonly accountId: string;
+  /** Read by normalization to refine it (`domain.refineChannel`). */
+  readonly channel: string;
+  /** The evidence normalization refines `channel` from (ADR-0020). */
+  readonly referenceType: string | null;
+  /** Matched against `merchant_aliases.raw_pattern`, canonicalized first. */
+  readonly rawDescription: string;
 }
 
 export async function getPaymentById(
@@ -465,6 +475,9 @@ export async function getPaymentById(
       occurredAt: payments.occurredAt,
       externalReference: payments.externalReference,
       accountId: payments.accountId,
+      channel: payments.channel,
+      referenceType: payments.referenceType,
+      rawDescription: payments.rawDescription,
     })
     .from(payments)
     .where(eq(payments.id, paymentId));
@@ -492,11 +505,102 @@ export async function findPaymentsByExternalReference(
       occurredAt: payments.occurredAt,
       externalReference: payments.externalReference,
       accountId: payments.accountId,
+      channel: payments.channel,
+      referenceType: payments.referenceType,
+      rawDescription: payments.rawDescription,
     })
     .from(payments)
     .where(eq(payments.externalReference, externalReference))
     .orderBy(asc(payments.occurredAt), asc(payments.id));
   return rows as PaymentRow[];
+}
+
+/**
+ * Payments eligible for normalization: those still at `imported`.
+ *
+ * The state filter is the idempotency rule (ADR-0021), not an optimisation — a payment that
+ * has already been normalized must not be offered again, or a re-run would silently rewrite
+ * a counterparty someone may have since acted on. `ignored` rows are excluded by the same
+ * filter, which is what keeps a duplicate discarded at import from being resurrected.
+ *
+ * The `(occurred_at, id)` ordering ties for same-day rows and is settled by a random UUID —
+ * the same shape as two defects this project has already fixed. It is harmless *here* and
+ * deliberately left alone: each payment is normalized independently of every other, so
+ * processing order cannot change any stored result. Only the order of `normalizedPaymentIds`
+ * in the return value varies, and nothing depends on it. If a future change ever makes one
+ * payment's normalization depend on another's, this ordering stops being safe.
+ */
+export async function listPaymentsAwaitingNormalization(
+  exec: Executor,
+  importBatchId?: ImportBatchId,
+): Promise<PaymentRow[]> {
+  const rows = await exec
+    .select({
+      id: payments.id,
+      amount: payments.amount,
+      direction: payments.direction,
+      counterpartyType: payments.counterpartyType,
+      state: payments.state,
+      ignoredReason: payments.ignoredReason,
+      occurredAt: payments.occurredAt,
+      externalReference: payments.externalReference,
+      accountId: payments.accountId,
+      channel: payments.channel,
+      referenceType: payments.referenceType,
+      rawDescription: payments.rawDescription,
+    })
+    .from(payments)
+    .where(
+      importBatchId === undefined
+        ? eq(payments.state, 'imported')
+        : and(eq(payments.state, 'imported'), eq(payments.importBatchId, importBatchId)),
+    )
+    .orderBy(asc(payments.occurredAt), asc(payments.id));
+  return rows as PaymentRow[];
+}
+
+/**
+ * The merchant an already-canonical alias key resolves to, if any.
+ *
+ * Exact equality only — never a prefix, substring, or similarity match. `raw_pattern` stores
+ * the canonical key produced by `domain.merchantAliasKey`, so the caller must canonicalize
+ * before calling; passing a raw description here will simply not match.
+ */
+export async function findMerchantByAliasKey(
+  exec: Executor,
+  aliasKey: string,
+): Promise<MerchantId | null> {
+  const [row] = await exec
+    .select({ merchantId: merchantAliases.merchantId })
+    .from(merchantAliases)
+    .where(eq(merchantAliases.rawPattern, aliasKey));
+  return row === undefined ? null : (row.merchantId as MerchantId);
+}
+
+/**
+ * Writes the DERIVED results of normalization and moves the payment to `normalized`.
+ *
+ * Touches no SOURCE column: `amount`, `occurred_at`, `raw_description` and `account_id` are
+ * write-once (`invariants.md` #4) and are deliberately absent from this update.
+ */
+export async function applyPaymentNormalization(
+  exec: Executor,
+  paymentId: PaymentId,
+  next: {
+    readonly channel: PaymentChannel;
+    readonly counterpartyType: PaymentCounterpartyType;
+    readonly counterpartyId: MerchantId | null;
+  },
+): Promise<void> {
+  await exec
+    .update(payments)
+    .set({
+      channel: next.channel,
+      counterpartyType: next.counterpartyType,
+      counterpartyId: next.counterpartyId,
+      state: 'normalized',
+    })
+    .where(eq(payments.id, paymentId));
 }
 
 /* ==================================================================== import batches */
