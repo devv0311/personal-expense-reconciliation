@@ -181,5 +181,18 @@ it covers:
   from `fixtures/ai-classification-proposals.json` (ADR-0025); everything else in the chain is
   production code against a real engine.
 
-Not yet covered, because the layers do not exist yet: `src/integrations` adapter tests and
-`src/api` route tests (`docs/roadmap.md` phase 14).
+- **`src/api` route tests** (added phase 9) — `tests/integration/review-api.test.ts` sends real
+  `Request`s through the real router into the real services against a real database, and asserts
+  the failure paths as carefully as the happy ones: an `ai` actor is `403` rather than `400` (the
+  request is well-formed; the model is not allowed to decide), a second decision on one proposal
+  is `409`, a non-candidate duplicate confirmation is `409`, a malformed id is `400` before any
+  service sees it, and an unexpected failure returns a bare `500` with no detail.
+- **Review queue tests** (added phase 9) — `tests/integration/review.test.ts` covers the queries,
+  the queue's ordering and counts, re-classification/`superseded`, the rejected-expense
+  disposition, and possible-duplicate confirmation and dismissal. Ordering is asserted as an
+  exact sequence and by repetition (two reads of an unchanged ledger return the same order),
+  because a queue that reorders itself under a reviewer is the defect `domain/review.ts` exists
+  to prevent.
+
+Not yet covered, because the layer does not exist yet: `src/integrations` adapter tests
+(`docs/roadmap.md` phase 14).

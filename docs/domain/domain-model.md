@@ -417,7 +417,10 @@ referencing it (`ExpenseAdjustment.original_expense_id`).
 **Lifecycle.** `PROPOSED → CLASSIFIED → REVIEW_REQUIRED → APPROVED → ALLOCATED →
 READY_TO_SYNC → SYNCED → RECONCILED`, adapted from the brief's states — see
 `docs/domain/lifecycle.md` for the full adapted state machine and why some states apply to
-`Expense` rather than `Payment`.
+`Expense` rather than `Payment`. One off-ramp joins it in phase 9: **`REJECTED`** (ADR-0028),
+terminal, reachable only from `CLASSIFIED`/`REVIEW_REQUIRED` — where the DERIVED expense a
+classification proposal created ends up when a reviewer declines that proposal or replaces it.
+An expense that was ever `APPROVED` can never reach it.
 
 **Invariants.**
 

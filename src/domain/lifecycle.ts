@@ -93,16 +93,24 @@ export function isPaymentTerminalWithoutLinking(
  *  - regression to `review_required` from `allocated` onwards, for an expense found to
  *    have drifted from Splitwise or that received a later `ExpenseAdjustment`. Always via
  *    an `AuditEvent`, never silently.
+ *
+ * And one off-ramp, added in phase 9 (ADR-0028): `classified`/`review_required` → `rejected`,
+ * for the DERIVED expense a classification proposal created when that proposal is declined or
+ * superseded. Terminal, and reachable from nowhere else — an expense that was ever `approved`
+ * can never be rejected, because `approved` does not list it. That asymmetry is the point:
+ * declining a *proposal* is cheap, and unwinding an approved financial record is not something
+ * this transition is allowed to pretend to do.
  */
 const EXPENSE_TRANSITIONS: Transitions<ExpenseState> = {
   proposed: ['classified'],
-  classified: ['review_required', 'approved'],
-  review_required: ['approved'],
+  classified: ['review_required', 'approved', 'rejected'],
+  review_required: ['approved', 'rejected'],
   approved: ['allocated', 'review_required'],
   allocated: ['ready_to_sync', 'reconciled', 'review_required'],
   ready_to_sync: ['synced', 'review_required'],
   synced: ['reconciled', 'review_required'],
   reconciled: ['review_required'],
+  rejected: [],
 };
 
 export function canTransitionExpense(from: ExpenseState, to: ExpenseState): boolean {

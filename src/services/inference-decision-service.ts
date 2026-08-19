@@ -61,6 +61,7 @@ import type { AiInferenceRow, Database, PaymentRow } from '../db/index.js';
 import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
 import {
   createDerivedExpenseFromProposal,
+  declineDerivedExpense,
   requireUserPersonId,
   validateClassificationProposal,
 } from './classification-service.js';
@@ -194,24 +195,28 @@ const TARGET_STATUS: Record<InferenceDecision, AiInferenceStatus> = {
 };
 
 /**
- * Rejecting produces nothing.
+ * Rejecting produces nothing, and closes what the proposal opened.
  *
- * A DERIVED `Expense` the proposal created at classification time is deliberately left where
- * it is — unapproved, referenced by the rejected inference, invisible to every total the
- * ledger computes. Nothing here deletes financial records, and what the review queue does with
- * such a row is phase 9's decision (ADR-0026).
+ * The DERIVED `Expense` the proposal created at classification time moves to `rejected` —
+ * terminal, never approvable, counted by no total (ADR-0028, which resolves what ADR-0026 left
+ * to phase 9). Both changes commit together: an inference recorded as rejected while its
+ * expense still sat in `review_required` would put a dead proposal back in the queue.
+ *
+ * Nothing is deleted. The payment goes back to being unexplained, which is what the queue
+ * then surfaces (`rejected_classification`), and re-classifying it is an explicit act
+ * (`services.reclassifyPayment`, ADR-0030) rather than something a re-run does quietly.
  */
 async function rejectInference(
   db: Database,
   input: DecideInferenceInput,
   inference: AiInferenceRow,
 ): Promise<RejectedInferenceResult> {
-  return runAudited(db, input.audit, async ({ exec, record }) => {
-    await recordAiInferenceDecision(exec, inference.id, {
+  return runAudited(db, input.audit, async (ctx) => {
+    await recordAiInferenceDecision(ctx.exec, inference.id, {
       status: 'rejected',
       decidedBy: input.audit.actor,
     });
-    await record({
+    await ctx.record({
       entityType: 'ai_inference',
       entityId: inference.id,
       action: 'update',
@@ -219,6 +224,12 @@ async function rejectInference(
       newValue: { status: 'rejected', decidedBy: input.audit.actor, resultingRecordType: null },
       reason: 'Rejected in review; no authoritative record produced (ai-boundary.md).',
     });
+    await declineDerivedExpense(
+      ctx,
+      inference,
+      `Rejected in review by ${input.audit.actor}: the proposal that created this expense was ` +
+        'declined, so it is terminal and can never be approved (ADR-0028).',
+    );
     return { status: 'rejected' as const, inferenceId: inference.id };
   });
 }
@@ -347,7 +358,15 @@ async function acceptAsSettlement(
   const { inference, payment, proposal, target } = args;
   const counterpartyPersonId = proposal.counterpartyPersonHint.id;
 
-  await supersedeDerivedExpense(ctx, inference);
+  // The proposal came out a settlement, so the expense it created is dead: `rejected`,
+  // terminal, counted by nothing (ADR-0028). Same disposition as a decline, because it is the
+  // same fact — this expense will never be approved.
+  await declineDerivedExpense(
+    ctx,
+    inference,
+    'The proposal this expense came from was decided as a settlement instead, so the expense ' +
+      'creates no obligation and can never be approved (ADR-0026, ADR-0028).',
+  );
 
   const settlement = await recordSettlementWithin(ctx, {
     paymentId: payment.id,
@@ -387,29 +406,6 @@ async function acceptAsSettlement(
     paymentState: 'linked',
     unexplainedRemainder: settlement.unexplainedRemainder,
   };
-}
-
-/**
- * Records that a DERIVED expense was left behind when the decision came out a settlement.
- *
- * The expense is not deleted and not approved. Without this event the inference's pointer
- * moves to the settlement and nothing explains why an unapproved expense is sitting there
- * (ADR-0026).
- */
-async function supersedeDerivedExpense(
-  ctx: AuditContext,
-  inference: AiInferenceRow,
-): Promise<void> {
-  if (inference.resultingRecordType !== 'expense' || inference.resultingRecordId === null) return;
-  await ctx.record({
-    entityType: 'expense',
-    entityId: inference.resultingRecordId,
-    action: 'supersede',
-    newValue: { supersededBy: 'settlement', inferenceId: inference.id },
-    reason:
-      'The proposal this expense came from was decided as a settlement instead, so the ' +
-      'expense stays unapproved and creates no obligation (ADR-0026).',
-  });
 }
 
 /* ------------------------------------------------------------------------ internals */

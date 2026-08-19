@@ -20,7 +20,9 @@ import { createHash } from 'node:crypto';
 
 import {
   assertPaymentTransition,
+  duplicateOfReason,
   isDeterministicDuplicate,
+  parseDuplicateOfReason,
   SUPPORTED_CURRENCY,
 } from '../domain/index.js';
 import type { AccountId, ImportBatchId, Paise, PaymentId } from '../domain/index.js';
@@ -54,15 +56,6 @@ const BANK_STATEMENT_SOURCE_CHANNEL = 'bank_statement_csv';
 
 /** Bumped when a change to the parser would alter how the same file is read. */
 export const BANK_STATEMENT_PARSER_VERSION = 'bank-csv@1';
-
-/**
- * Prefix of the `payments.ignored_reason` written for a confirmed duplicate (`lifecycle.md`).
- *
- * Shared by the writer and the reader on purpose: the reason string *is* the stored edge
- * between a duplicate and its original, so a change to how it is written has to be a change to
- * how it is parsed, in one place.
- */
-const DUPLICATE_OF_REASON_PREFIX = 'duplicate_of:';
 
 /** Raised when the source file cannot be read; carries every bad row, not just the first. */
 export class ImportSourceError extends ServiceError {
@@ -209,7 +202,7 @@ export async function importBankStatementCsv(
         // Never silently dropped from the import: the row is kept as the evidence it is, and
         // the reason it does not count is recorded against it (`lifecycle.md`, IGNORED).
         assertPaymentTransition('imported', 'ignored');
-        const reason = `${DUPLICATE_OF_REASON_PREFIX}${existing}`;
+        const reason = duplicateOfReason(existing);
         await updatePaymentState(exec, paymentId, 'ignored', reason);
         await record({
           entityType: 'payment',
@@ -300,7 +293,7 @@ function resolveCanonical(match: PaymentRow, candidates: readonly PaymentRow[]):
 
   let current = match;
   while (current.state === 'ignored') {
-    const parentId = parseDuplicateOf(current.ignoredReason);
+    const parentId = parseDuplicateOfReason(current.ignoredReason);
     if (parentId === null || seen.has(parentId)) break;
     const parent = byId.get(parentId);
     if (parent === undefined) break;
@@ -308,11 +301,6 @@ function resolveCanonical(match: PaymentRow, candidates: readonly PaymentRow[]):
     current = parent;
   }
   return current.id;
-}
-
-function parseDuplicateOf(ignoredReason: string | null): string | null {
-  if (ignoredReason === null || !ignoredReason.startsWith(DUPLICATE_OF_REASON_PREFIX)) return null;
-  return ignoredReason.slice(DUPLICATE_OF_REASON_PREFIX.length);
 }
 
 function sha256(text: string): string {

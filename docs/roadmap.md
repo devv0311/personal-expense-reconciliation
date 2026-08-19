@@ -31,8 +31,8 @@ before the ones before it are solid; see `CLAUDE.md`, "Development workflow."
 | 6   | Transaction import         | **Done (2026-08-15)** — one synthetic source format end to end: `fixtures/bank-statement.csv` → `integrations/bank-csv` parser → `services.importBankStatementCsv` → `ImportBatch` + immutable `Payment` rows, with `external_reference`/`reference_type`/`source_system` populated at import as planned. Deterministic dedup at two levels (file content hash; per-row external reference). Classification is deliberately **not** performed — every imported payment stays `counterparty_type = unknown` and `state = imported`. Surfaced two corrections, ADR-0019.                                                                                                                                                                                                                                                                       |
 | 7   | Transaction normalization  | **Done (2026-08-19)** — the deterministic leg only. `domain.refineChannel` refines `channel` from `reference_type`, never the description (ADR-0020); `domain.merchantAliasKey` + exact alias match resolves a catalogued merchant; `services.normalizePayments` moves `imported → normalized` in one audited transaction, acting only on `imported` payments so a re-run is a no-op (ADR-0021). The `ai.normalizeMerchant()` leg is deliberately deferred to phase 8 (ADR-0022), so an unresolved counterparty ends `normalized`/`unknown` with no `AIInference` row. 5 of the bank fixture's 8 rows resolve a merchant; the two self-transfer legs and the person-to-person row stay `unknown` because recognising either is classification.                                                                                               |
 | 8   | Transaction classification | **Done (2026-08-19)** — the AI service boundary itself, not merely its first user. `src/ai` holds the `Inference<T>` contract, the strict validator, the redaction step and `classifyTransaction` behind an injected `ModelTransport` (ADR-0025, no provider wired). `services.classifyPayments` runs a deterministic self-transfer leg first (ADR-0023), then the model for what it cannot settle, then a semantic gate, a pending `AIInference` and a DERIVED `Expense` routed to `classified` or `review_required` (ADR-0024, ADR-0026). `services.decideInference` is the sole path out of `pending`, producing an approved `Expense` + `PaymentExpenseLink` or a `Settlement`. Credits are deliberately out of scope (ADR-0027). All 8 bank-fixture rows reach a stated outcome; the pipeline ends with `ledger_unexplained_total = 0`. |
-| 9   | Human review               | **Next.** Review queue surfacing `REVIEW_REQUIRED` expenses and pending `AIInference`s, including the settlement-vs-expense disambiguation. Phase 8 wrote both, and `services.decideInference` is the function the queue calls — what is missing is the listing/prioritisation query and the surface, plus possible-duplicate surfacing and a policy for a DERIVED expense whose proposal was rejected (ADR-0026).                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| 10  | Receipt ingestion          | Not started. `Evidence` upload/storage for receipt-type documents.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 9   | Human review               | **Done (2026-08-20)** — `services.listReviewQueue` over three item kinds (pending classification proposals including settlement ones, possible-duplicate pairs, payments left unexplained by a rejection), ordered by a pure total-order function with every reason carried (ADR-0029). Three review actions beside `decideInference`, none bypassing it: `reclassifyPayment` (supersede and ask again — the only thing that lifts phase 8's no-op rule, ADR-0030), `confirmPossibleDuplicate` and `dismissPossibleDuplicate` (ADR-0031). A declined or superseded proposal's DERIVED expense now ends at the terminal `rejected` state (ADR-0028), resolving what ADR-0026 deferred. Four Web-standard route handlers expose it, with no framework installed (ADR-0032).                                                                    |
+| 10  | Receipt ingestion          | **Next.** `Evidence` upload/storage for receipt-type documents. Nothing in phases 1–9 writes an `Evidence` row outside the test harness, and `Evidence.storage_ref` points outside the database (`security-model.md`), so this phase is the first to need a storage decision (filesystem in dev, object storage later).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 11  | Receipt item extraction    | Not started. `ai.parseReceipt` / `ai.extractReceiptItems` → `Receipt`/`ReceiptItem`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 12  | Beneficiary allocation     | Not started. `Allocation`/`AllocationLine` write path, all six methods, sum-check enforcement against `domain.netAmount` (not gross amount). **Now also includes:** `AllocationLineGroupExpansion` resolution for group-typed lines (ADR-0009), `ExpenseAdjustment` recording and distribution (ADR-0008), and `Settlement` recording (ADR-0007) — these were previously scattered across phases 12–15 under the pre-revision model and are consolidated here since they share the allocation/obligation machinery. This is also where the rounding rule (`invariants.md` #12) gets finalized and documented.                                                                                                                                                                                                                                |
 | 13  | Expense ledger             | Not started. Querying/reporting over approved expenses; pairwise `Balance` computation (ADR-0006).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -131,41 +131,69 @@ before the ones before it are solid; see `CLAUDE.md`, "Development workflow."
 > repository queries, the classification service, `decideInference`, the end-to-end pipeline,
 > and this documentation pass.
 
+> **Phase 9 implementation note (2026-08-20).** Human review turned phase 8's states into a
+> capability: a queue, three actions, and a surface. Five decisions were needed, each an ADR.
+>
+> - **ADR-0028** — a declined or superseded proposal's DERIVED `Expense` moves to a terminal
+>   `rejected` state, resolving the loose end ADR-0026 deliberately left to this phase. A state
+>   rather than a derived query, because "is this expense real?" should be a column in the one
+>   table where getting it wrong means counting money that does not exist. Migration
+>   `0005_expense_rejected_state.sql`.
+> - **ADR-0029** — the queue's order is a pure total-order function (rank, amount desc, oldest
+>   first, id) and its reasons are phase 8's `routeClassificationForReview`, reused rather than
+>   re-derived. Possible duplicates rank first; a proposal routing did not flag still appears,
+>   because nothing auto-approves.
+> - **ADR-0030** — re-classification is an explicit human action that supersedes an undecided
+>   proposal, in one transaction with the new one. A plain `classifyPayments` re-run stays a
+>   no-op; `superseded` now has exactly one producer.
+> - **ADR-0031** — `domain.isPossibleDuplicate`, which had no caller since the foundation pass,
+>   is wired to the queue. Confirming re-checks the pair before discarding a payment; dismissing
+>   changes nothing and records the decision, which is what lets a queue be emptied.
+> - **ADR-0032** — the API ships as Web `Request → Response` handlers, which is a Next.js route
+>   handler's exact signature, without installing Next.js to serve four routes before any UI
+>   exists. Verified against the existing toolchain before deciding it.
+>
+> Two things worth recording beyond the ADRs. The queue re-parses stored proposals on read and
+> surfaces an unreadable one as `malformed_proposal` rather than throwing, so one bad row cannot
+> take the whole queue down. And `classifyPayment`'s recording core was extracted
+> (`proposeClassification`) so re-classification could share it — deliberately not a `force`
+> flag, because a flag that skips the idempotency rule will eventually be passed by something
+> that should not.
+>
+> Delivered as six reviewed slices on one phase branch: spec, domain review model, repository
+> queries, the queue service, the review actions, the API surface, and this documentation pass.
+
 ## Recommended next phase
 
-**Phase 9, Human review.** Phase 8 produces exactly what a review queue needs and nothing that
-reads it: `REVIEW_REQUIRED` expenses, pending `AIInference`s (including settlement proposals,
-which have no expense to show beside them), and `services.decideInference` as the function the
-queue calls. What is missing is the listing side and the policies around it.
+**Phase 10, Receipt ingestion.** Phases 6–9 built the payment side end to end: import,
+normalization, classification, review. `Evidence` is the other half of the pipeline
+(`PAYMENT → PURPOSE → EVIDENCE → EXPENSE`) and nothing writes an `Evidence` row outside the test
+harness yet.
 
-Six things to carry into it:
+Four things to carry into it:
 
-- **There is no listing query yet.** Phase 8 added `findClassificationInferenceByPayment` (one
-  payment's proposal) and `listPaymentsAwaitingClassification`, but nothing that answers "what
-  is waiting for me". Prioritisation is available for free: `domain.routeClassificationForReview`
-  is pure and returns _every_ reason a proposal needs review, so the queue can order and explain
-  itself without storing anything.
-- **A rejected proposal leaves its DERIVED `Expense` unapproved, and nothing cleans it up**
-  (ADR-0026). Deliberate — nothing here deletes financial records, and an unapproved expense
-  reaches no total — but the queue has to decide whether such a row is hidden, re-proposed, or
-  given a state. That decision is phase 9's.
-- **`superseded` is defined and unused.** A payment that already carries a classification
-  inference is not classified again, so a re-run is a no-op. Re-classification (which is what
-  produces a `superseded` inference) is a review action.
-- **Possible-duplicate surfacing is still unbuilt**, and still belongs here — a row that merely
-  _resembles_ another (same amount and date, no matching reference) is left alone by the
-  importer. `domain.isPossibleDuplicate` has existed since the foundation pass with no caller.
-- **`ai.normalizeMerchant()` is still unbuilt** (ADR-0022, carried forward again). The boundary
-  it was waiting for now exists, so it is a small addition rather than a design: it belongs on
-  the miss path where `findMerchantByAliasKey` returns `null`. Which phase ships it is open.
-- **The merchant catalog still has no production seeding path** (carried forward from phase 7).
-  `fixtures/merchants.json` is seeded only by the test harness. Classification never writes a
-  `Merchant`, so phase 8 did not need one — but `ai.normalizeMerchant()` accepted _would_ create
-  one, so that leg and this path arrive together.
+- **`Evidence.storage_ref` points outside the database** (`security-model.md`: filesystem in
+  development, object storage in production). Phase 10 is the first phase that needs that
+  decision made rather than described, and it is a deployment-shaped decision, not a domain one.
+- **`evidence.note_kind` already exists and matters** (ADR-0018): a note documenting an
+  externally-funded expense and a note claiming a debt was cleared are the same shape otherwise,
+  and the discriminator is not optional on a `manual_note`.
+- **Receipt _extraction_ is phase 11, not 10.** Ingestion stores the document; `ai.parseReceipt`
+  and `ai.extractReceiptItems` turn it into a `Receipt`/`ReceiptItem`. The AI boundary they need
+  exists as of phase 8 — they are new operations on it, not new machinery.
+- **The review queue is where an unmatched receipt will surface.** Adding a kind is one entry in
+  `domain.REVIEW_RANKS` with an argument written next to it (ADR-0029), not a new queue.
 
-Two more things phase 8 deliberately did not build, recorded so they are not mistaken for gaps:
-no production `ModelTransport` and no prompt text (ADR-0025), and no allocation — an approved
-expense from this phase has no beneficiaries yet, which is phase 12's.
+Still carried forward, unchanged and still paired: **`ai.normalizeMerchant()`** (ADR-0022) and
+the **merchant catalog's production seeding path**. Phase 9 inspected whether they belonged here
+and they do not — review acts on proposals that already exist, and re-classification calls
+`classifyTransaction`. Neither needs a `Merchant` to be _created_, so building the write path
+here would have been infrastructure without a caller.
+
+Two deliberate absences from phase 9, recorded so they are not mistaken for gaps: **no UI** (a
+usable service and API surface was the bar) and **no auth** — the actor arrives in the request
+body and is validated by `domain.parseDecisionActor`, which refuses `ai` and `system`; when a
+session exists, the actor comes from it and the field goes away (ADR-0032).
 
 ## Open questions carried forward from the 2026-08 revision
 

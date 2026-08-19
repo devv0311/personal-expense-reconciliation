@@ -61,6 +61,11 @@ src/
                    (`recordPayment`) alongside the existing `createExpense`.
   api/               Thin HTTP layer (Next.js route handlers / server actions). Validates
                    input, calls services, serializes output. No business logic here.
+                   Phase 9 landed the first four routes — the review surface — as Web
+                   `Request → Response` functions, which is a Next.js App Router route
+                   handler's exact signature; the framework itself is deliberately not
+                   installed yet, so mounting them under `app/api/` later is a re-export
+                   rather than a rewrite (ADR-0032).
 ```
 
 **Dependency direction is inward:** `api` and `integrations` depend on `services`; `services`

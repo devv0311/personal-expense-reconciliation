@@ -8,6 +8,7 @@ import {
   canTransitionAdjustment,
   canTransitionAiInference,
   canTransitionExpense,
+  isExpenseAmountFrozen,
   canTransitionPayment,
   canTransitionSplitwiseExpenseSync,
   hasObligationCreatingLine,
@@ -111,6 +112,50 @@ describe('expense lifecycle (lifecycle.md, Expense)', () => {
 
   it('lets a personal or gift expense skip sync entirely: allocated → reconciled', () => {
     expect(canTransitionExpense('allocated', 'reconciled')).toBe(true);
+  });
+
+  it('lets a declined or superseded proposal reach the rejected off-ramp', () => {
+    // ADR-0028: the DERIVED expense a classification proposal created has somewhere to go
+    // when that proposal is declined, instead of sitting unapproved forever.
+    expect(canTransitionExpense('classified', 'rejected')).toBe(true);
+    expect(canTransitionExpense('review_required', 'rejected')).toBe(true);
+  });
+
+  it('never rejects an expense that was ever approved', () => {
+    // Declining a *proposal* is cheap. Unwinding an approved financial record is not, and
+    // this transition must not pretend otherwise.
+    for (const from of [
+      'approved',
+      'allocated',
+      'ready_to_sync',
+      'synced',
+      'reconciled',
+    ] as const) {
+      expect(canTransitionExpense(from, 'rejected')).toBe(false);
+    }
+  });
+
+  it('never rejects an expense before it has been classified', () => {
+    expect(canTransitionExpense('proposed', 'rejected')).toBe(false);
+  });
+
+  it('makes rejected terminal — no revival, no approval, no second thoughts', () => {
+    for (const to of [
+      'proposed',
+      'classified',
+      'review_required',
+      'approved',
+      'allocated',
+      'ready_to_sync',
+      'synced',
+      'reconciled',
+    ] as const) {
+      expect(canTransitionExpense('rejected', to)).toBe(false);
+    }
+  });
+
+  it('leaves a rejected expense’s amount unfrozen — it was never approved', () => {
+    expect(isExpenseAmountFrozen('rejected')).toBe(false);
   });
 
   it('refuses to reach approved without being classified first', () => {

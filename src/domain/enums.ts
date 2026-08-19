@@ -117,6 +117,12 @@ export const DEBT_CREATING_RELATIONSHIP_TYPES = [
 ] as const;
 export type DebtCreatingRelationshipType = (typeof DEBT_CREATING_RELATIONSHIP_TYPES)[number];
 
+/**
+ * `rejected` is last because it is an off-ramp, not a step: a proposal a human declined, or
+ * one superseded by re-classification (ADR-0028). It is terminal, it is never `APPROVED`, and
+ * no total counts it — every `ledger_*` bucket enumerates the states it sums, starting at
+ * `approved` (`invariants.md` #20).
+ */
 export const EXPENSE_STATES = [
   'proposed',
   'classified',
@@ -126,6 +132,7 @@ export const EXPENSE_STATES = [
   'ready_to_sync',
   'synced',
   'reconciled',
+  'rejected',
 ] as const;
 export type ExpenseState = (typeof EXPENSE_STATES)[number];
 

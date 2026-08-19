@@ -12,7 +12,8 @@
  * (`invariants.md` #4, #6, #22).
  */
 
-import { and, asc, desc, eq, exists, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, inArray, isNull, not, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 
 import type {
   AiInferenceStatus,
@@ -1424,6 +1425,234 @@ export async function recordAiInferenceDecision(
     .update(aiInferences)
     .set({ status: decision.status, decidedBy: decision.decidedBy, decidedAt: new Date() })
     .where(eq(aiInferences.id, inferenceId));
+}
+
+/* ====================================================================== review queue */
+
+/** One pending classification proposal, with the payment it is about and the expense (if any). */
+export interface PendingClassificationRow {
+  readonly inferenceId: AiInferenceId;
+  readonly proposedOutput: unknown;
+  readonly confidence: string;
+  readonly modelProvider: string | null;
+  readonly modelName: string | null;
+  readonly promptVersion: string | null;
+  readonly proposedAt: Date;
+  readonly paymentId: PaymentId;
+  readonly paymentAmount: Paise;
+  readonly paymentCurrency: string;
+  readonly paymentDirection: 'debit' | 'credit';
+  readonly paymentOccurredAt: Date;
+  readonly paymentDescription: string;
+  readonly paymentState: PaymentState;
+  readonly paymentCounterpartyType: string;
+  /** Null for a settlement proposal — no `Expense` exists until it is accepted (ADR-0026). */
+  readonly expenseId: ExpenseId | null;
+  readonly expenseState: ExpenseState | null;
+  readonly expenseDescription: string | null;
+  readonly expenseRelationshipType: string | null;
+  readonly expenseCategory: string | null;
+}
+
+/**
+ * Every classification proposal still awaiting a decision.
+ *
+ * The spine of the review queue. A `pending` inference is a decision nobody has made — whether
+ * or not routing flagged it, and whether or not it has an `Expense` behind it (a settlement
+ * proposal has none). Ordering here is only for query determinism; the queue's real order is
+ * `domain.prioritiseReviewQueue`, which sorts by what is at stake rather than by age.
+ */
+export async function listPendingClassificationInferences(
+  exec: Executor,
+): Promise<PendingClassificationRow[]> {
+  const rows = await exec
+    .select({
+      inferenceId: aiInferences.id,
+      proposedOutput: aiInferences.proposedOutput,
+      confidence: aiInferences.confidence,
+      modelProvider: aiInferences.modelProvider,
+      modelName: aiInferences.modelName,
+      promptVersion: aiInferences.promptVersion,
+      proposedAt: aiInferences.createdAt,
+      paymentId: payments.id,
+      paymentAmount: payments.amount,
+      paymentCurrency: payments.currency,
+      paymentDirection: payments.direction,
+      paymentOccurredAt: payments.occurredAt,
+      paymentDescription: payments.rawDescription,
+      paymentState: payments.state,
+      paymentCounterpartyType: payments.counterpartyType,
+      expenseId: expenses.id,
+      expenseState: expenses.state,
+      expenseDescription: expenses.description,
+      expenseRelationshipType: expenses.relationshipType,
+      expenseCategory: expenses.category,
+    })
+    .from(aiInferences)
+    .innerJoin(payments, eq(payments.id, aiInferences.inputRefId))
+    // Left, not inner: the settlement path has nothing to join to, and dropping those rows
+    // would hide exactly the proposals phase 9 exists to make reviewable.
+    .leftJoin(
+      expenses,
+      and(
+        eq(aiInferences.resultingRecordType, 'expense'),
+        eq(expenses.id, aiInferences.resultingRecordId),
+      ),
+    )
+    .where(
+      and(
+        eq(aiInferences.inferenceType, 'classify_transaction'),
+        eq(aiInferences.inputRefType, 'payment'),
+        eq(aiInferences.status, 'pending'),
+      ),
+    )
+    .orderBy(asc(aiInferences.createdAt), asc(aiInferences.id));
+  return rows as PendingClassificationRow[];
+}
+
+/** A payment whose classification was declined, leaving the money unexplained. */
+export interface RejectedClassificationRow {
+  readonly paymentId: PaymentId;
+  readonly amount: Paise;
+  readonly currency: string;
+  readonly occurredAt: Date;
+  readonly rawDescription: string;
+  readonly counterpartyType: string;
+  readonly inferenceId: AiInferenceId;
+  readonly decidedAt: Date | null;
+  readonly decidedBy: string | null;
+  /** The DERIVED expense the declined proposal produced, now `rejected` (ADR-0028). */
+  readonly expenseId: ExpenseId | null;
+  readonly expenseState: ExpenseState | null;
+}
+
+/**
+ * Payments left unexplained by a rejected classification.
+ *
+ * The condition is deliberately about the payment, not the inference: a payment with a
+ * `rejected` proposal **and** a newer `pending` one is already back in the queue as a pending
+ * decision, and a payment whose proposal was accepted is explained. Only the ones with nothing
+ * outstanding and nothing settled belong here.
+ */
+export async function listRejectedClassifications(
+  exec: Executor,
+): Promise<RejectedClassificationRow[]> {
+  const undecided = exec
+    .select({ one: sql`1` })
+    .from(aiInferences)
+    .where(
+      and(
+        eq(aiInferences.inferenceType, 'classify_transaction'),
+        eq(aiInferences.inputRefType, 'payment'),
+        eq(aiInferences.inputRefId, payments.id),
+        inArray(aiInferences.status, ['pending', 'accepted', 'modified']),
+      ),
+    );
+
+  const rows = await exec
+    .select({
+      paymentId: payments.id,
+      amount: payments.amount,
+      currency: payments.currency,
+      occurredAt: payments.occurredAt,
+      rawDescription: payments.rawDescription,
+      counterpartyType: payments.counterpartyType,
+      inferenceId: aiInferences.id,
+      decidedAt: aiInferences.decidedAt,
+      decidedBy: aiInferences.decidedBy,
+      expenseId: expenses.id,
+      expenseState: expenses.state,
+    })
+    .from(aiInferences)
+    .innerJoin(payments, eq(payments.id, aiInferences.inputRefId))
+    .leftJoin(
+      expenses,
+      and(
+        eq(aiInferences.resultingRecordType, 'expense'),
+        eq(expenses.id, aiInferences.resultingRecordId),
+      ),
+    )
+    .where(
+      and(
+        eq(aiInferences.inferenceType, 'classify_transaction'),
+        eq(aiInferences.inputRefType, 'payment'),
+        eq(aiInferences.status, 'rejected'),
+        eq(payments.state, 'normalized'),
+        not(exists(undecided)),
+      ),
+    )
+    .orderBy(asc(aiInferences.decidedAt), asc(aiInferences.id));
+  return rows as RejectedClassificationRow[];
+}
+
+/**
+ * Payments that could still be found to duplicate another one.
+ *
+ * A **pre-filter**, exactly as `listPaymentsAwaitingClassification` is: it narrows to payments
+ * sharing an amount and a direction with at least one other live payment, and
+ * `domain.isPossibleDuplicate` decides what actually pairs. The window and the
+ * "no conclusive reference match" rule stay in `domain`, where the deterministic path's rule
+ * already lives.
+ *
+ * `linked` and `ignored` payments are excluded. An `ignored` one is already discarded; a
+ * `linked` one is explained by an expense or a settlement, and the payment lifecycle has no
+ * `linked → ignored` edge to confirm it with — unwinding an explanation is not a review action
+ * this phase offers.
+ */
+export async function listPossibleDuplicateCandidates(exec: Executor): Promise<PaymentRow[]> {
+  const live = ['imported', 'normalized'] as const;
+  const twin = exec
+    .select({ one: sql`1` })
+    .from(alias(payments, 'other'))
+    .where(
+      sql`"other"."amount" = ${payments.amount}
+        and "other"."direction" = ${payments.direction}
+        and "other"."id" <> ${payments.id}
+        and "other"."state" in ('imported', 'normalized')`,
+    );
+
+  const rows = await exec
+    .select({
+      id: payments.id,
+      amount: payments.amount,
+      currency: payments.currency,
+      direction: payments.direction,
+      counterpartyType: payments.counterpartyType,
+      counterpartyId: payments.counterpartyId,
+      state: payments.state,
+      ignoredReason: payments.ignoredReason,
+      occurredAt: payments.occurredAt,
+      externalReference: payments.externalReference,
+      accountId: payments.accountId,
+      channel: payments.channel,
+      referenceType: payments.referenceType,
+      rawDescription: payments.rawDescription,
+    })
+    .from(payments)
+    .where(and(inArray(payments.state, [...live]), exists(twin)))
+    .orderBy(asc(payments.occurredAt), asc(payments.id));
+  return rows as PaymentRow[];
+}
+
+/**
+ * Pair keys a human has already said are not duplicates.
+ *
+ * Read from `audit_events` rather than a table of its own: a dismissal is a *decision*, the
+ * audit log is where decisions are recorded, and giving it a table would mean a second place
+ * that has to agree with the first (ADR-0031). The key is order-independent
+ * (`domain.possibleDuplicateKey`), so a dismissal matches however the pair is rediscovered.
+ */
+export async function listDismissedDuplicatePairs(exec: Executor): Promise<string[]> {
+  const rows = await exec
+    .select({ pairKey: sql<string>`${auditEvents.newValue} ->> 'possibleDuplicatePairKey'` })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.entityType, 'payment'),
+        sql`${auditEvents.newValue} ->> 'possibleDuplicateDecision' = 'dismissed'`,
+      ),
+    );
+  return rows.map((row) => row.pairKey).filter((key): key is string => key !== null);
 }
 
 /* =========================================================================== helpers */

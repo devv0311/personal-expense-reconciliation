@@ -55,6 +55,15 @@ import (phase 6):
   produces either an approved `Expense` with its `PaymentExpenseLink` or a `Settlement` — never
   both, in one transaction.
 
-Not yet implemented: the review queue itself (phase 9 reads the `REVIEW_REQUIRED` expenses and
-pending inferences this phase writes), receipt ingestion, and Splitwise sync orchestration —
-see `docs/roadmap.md` phases 9–11 and 14.
+- `review-service.ts` — `listReviewQueue`: everything waiting for a human, in the order it
+  should be looked at. A read; it holds no ranking of its own (`domain.prioritiseReviewQueue`)
+  and no reasons of its own (`domain.routeClassificationForReview`), so the queue cannot
+  disagree with the states it describes. A stored proposal that no longer parses is surfaced as
+  `malformed_proposal` rather than thrown — one unreadable row must not take the queue down.
+- `review-action-service.ts` — the three review actions that are not a `decideInference` call:
+  `reclassifyPayment` (supersede an undecided proposal and ask again — the only thing that lifts
+  phase 8's "a re-run is a no-op" rule, ADR-0030), `confirmPossibleDuplicate` and
+  `dismissPossibleDuplicate` (ADR-0031). All three require an attributable human actor.
+
+Not yet implemented: receipt ingestion and Splitwise sync orchestration — see
+`docs/roadmap.md` phases 10–11 and 14.

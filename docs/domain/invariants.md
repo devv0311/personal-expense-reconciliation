@@ -170,6 +170,16 @@ never a mutation of `NetBalance` itself, and never treated as equivalent to a re
     timestamp), so "whichever matched first" resolves to a random UUID comparison — the same
     non-determinism that produced the audit-ordering defect fixed in ADR-0018's wake.
 
+    **The _possible_-duplicate half is built as of phase 9 (ADR-0031).** It was the older half
+    of this invariant and the unbuilt one: `domain.isPossibleDuplicate` sat with no caller from
+    the foundation pass until the review queue arrived. A pair that resembles another without a
+    conclusive reference match is now surfaced (`services.listReviewQueue`) and resolved by a
+    human — `services.confirmPossibleDuplicate`, which moves the copy to `ignored` with the same
+    `duplicate_of:<canonical>` reason the deterministic path writes, or
+    `services.dismissPossibleDuplicate`, which changes neither payment and records the decision.
+    Confirming re-checks the pair against the rule first: a reviewer's say-so is not evidence
+    that two unrelated payments are the same money. Import-time behaviour is untouched.
+
     **A candidate that is itself `ignored` is still a match.** It is tempting to exclude
     ignored rows from the candidate set instead; that is wrong. A payment ignored for a
     non-duplicate reason (`out_of_scope`) is still the first copy this ledger saw, and skipping

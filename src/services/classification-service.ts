@@ -20,6 +20,7 @@
  */
 
 import {
+  assertAiInferenceTransition,
   assertExpenseTransition,
   classificationEligibility,
   findSelfTransferCounterLeg,
@@ -49,6 +50,7 @@ import {
   attachAiInferenceRecord,
   findClassificationInferenceByPayment,
   findPaymentsByExternalReference,
+  getExpenseById,
   getMerchantById,
   getPersonById,
   getPrimaryUserPerson,
@@ -56,9 +58,10 @@ import {
   insertExpense,
   listPaymentsAwaitingClassification,
   listPeople,
+  recordAiInferenceDecision,
   updateExpenseState,
 } from '../db/index.js';
-import type { Database, Executor, PaymentRow } from '../db/index.js';
+import type { AiInferenceRow, Database, Executor, PaymentRow } from '../db/index.js';
 
 import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
 import { ServiceError } from './errors.js';
@@ -213,8 +216,49 @@ export async function classifyPayment(
     return { outcome: 'skipped', paymentId: payment.id, reason: eligibility.reason };
   }
 
-  // Leg 2, inference. Gate 1 (the response is a proposal at all) lives in `src/ai` and throws
-  // before anything is returned here.
+  return proposeClassification(db, {
+    payment,
+    ai: input.ai,
+    audit: input.audit,
+    ...(input.materialityThreshold === undefined
+      ? {}
+      : { materialityThreshold: input.materialityThreshold }),
+  });
+}
+
+export interface ProposeClassificationInput {
+  readonly payment: PaymentRow;
+  readonly ai: AiService;
+  readonly materialityThreshold?: Paise;
+  readonly audit: AuditMeta;
+  /**
+   * A pending proposal this one replaces, superseded **inside the same transaction**.
+   *
+   * Only `services.reclassifyPayment` passes it. Doing it here rather than in a preceding
+   * transaction is what stops a payment being left with an old proposal marked `superseded`
+   * and no new one to take its place — a state the review queue would show as nothing at all.
+   */
+  readonly supersede?: AiInferenceRow;
+}
+
+/**
+ * Asks the model, validates the answer, and records the proposal — the classification path
+ * proper, with no eligibility check of its own.
+ *
+ * Shared by `classifyPayment`, which gates it on `domain.classificationEligibility`, and by
+ * `services.reclassifyPayment`, whose gate is different (an explicit human act on a payment
+ * that already carries a decided proposal — ADR-0030). Extracted rather than re-implemented,
+ * and rather than adding a "force" flag to `classifyPayment`: a flag that skips the
+ * idempotency rule is a flag that will eventually be passed by something that should not.
+ */
+export async function proposeClassification(
+  db: Database,
+  input: ProposeClassificationInput,
+): Promise<ClassificationOutcome> {
+  const { payment } = input;
+
+  // Gate 1 (the response is a proposal at all) lives in `src/ai` and throws before anything
+  // is returned here.
   const context = await buildClassificationContext(db, payment);
   const inference = await input.ai.classifyTransaction(
     {
@@ -248,6 +292,9 @@ export async function classifyPayment(
   });
 
   return runAudited(db, input.audit, async (ctx) => {
+    if (input.supersede !== undefined) {
+      await supersedeProposal(ctx, input.supersede, input.audit.actor);
+    }
     const inferenceId = await storeInference(ctx, payment, inference);
 
     if (inference.proposedOutput.proposedKind === 'settlement') {
@@ -502,6 +549,68 @@ export async function requireUserPersonId(exec: Executor): Promise<PersonId> {
     );
   }
   return userPerson.personId;
+}
+
+/**
+ * Marks a pending proposal `superseded`, and takes its DERIVED expense off the table with it.
+ *
+ * A superseded proposal is one nobody decided — the reviewer asked for a different answer
+ * rather than accepting or rejecting this one — so it never produces authoritative state, and
+ * the expense it created must not be left looking like work in progress (ADR-0028).
+ */
+async function supersedeProposal(
+  ctx: AuditContext,
+  inference: AiInferenceRow,
+  actor: string,
+): Promise<void> {
+  assertAiInferenceTransition(inference.status, 'superseded');
+  await recordAiInferenceDecision(ctx.exec, inference.id, {
+    status: 'superseded',
+    decidedBy: actor,
+  });
+  await ctx.record({
+    entityType: 'ai_inference',
+    entityId: inference.id,
+    action: 'supersede',
+    oldValue: { status: inference.status },
+    newValue: { status: 'superseded', decidedBy: actor },
+    reason: 'Superseded by a re-classification requested in review (ADR-0030).',
+  });
+  await declineDerivedExpense(
+    ctx,
+    inference,
+    'The proposal that created this expense was superseded by a re-classification (ADR-0028).',
+  );
+}
+
+/**
+ * Moves the expense a proposal created to `rejected`, terminal.
+ *
+ * Shared by the two ways a proposal can fail to become authoritative: a reviewer declining it
+ * (`services.decideInference`) and a reviewer replacing it (`services.reclassifyPayment`). The
+ * expense is neither deleted nor mutated in any other way; it simply stops being a candidate
+ * for approval, and no total has ever counted it.
+ */
+export async function declineDerivedExpense(
+  ctx: AuditContext,
+  inference: AiInferenceRow,
+  reason: string,
+): Promise<void> {
+  if (inference.resultingRecordType !== 'expense' || inference.resultingRecordId === null) return;
+  const expenseId = inference.resultingRecordId as ExpenseId;
+  const expense = await getExpenseById(ctx.exec, expenseId);
+  if (expense === null) return;
+
+  assertExpenseTransition(expense.state, 'rejected');
+  await updateExpenseState(ctx.exec, expenseId, 'rejected');
+  await ctx.record({
+    entityType: 'expense',
+    entityId: expenseId,
+    action: 'update',
+    oldValue: { state: expense.state },
+    newValue: { state: 'rejected' },
+    reason,
+  });
 }
 
 /** Writes the pending proposal, and the audit event saying a model produced it. */

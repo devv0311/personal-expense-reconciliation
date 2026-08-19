@@ -120,8 +120,34 @@ api (review UI) ─▶ services.decideInference(accept|modify|reject) ─▶ db.
 > the review queue's settlement-vs-expense disambiguation _is_. A `reject` produces nothing and
 > deletes nothing.
 >
-> The **review queue itself is phase 9**: this phase writes the `REVIEW_REQUIRED` expenses and
-> the pending inferences it will read, and provides the decision function it will call.
+> **The review queue itself landed in phase 9 (2026-08-20).** `services.listReviewQueue` answers
+> "what is waiting for a human?" over three kinds of item — pending classification proposals
+> (including settlement ones, which have no `Expense` to show beside them), possible-duplicate
+> payment pairs, and payments left unexplained by a rejection. It is a read: the order comes from
+> `domain.prioritiseReviewQueue` and the reasons from `domain.routeClassificationForReview`, so
+> the queue cannot disagree with the states it describes (ADR-0029).
+>
+> Three review actions sit beside `decideInference`, and none of them bypasses it:
+>
+> - `services.reclassifyPayment` — supersedes an undecided proposal and asks the model again, in
+>   one transaction. The only thing that lifts phase 8's "a re-run is a no-op" rule (ADR-0030).
+> - `services.confirmPossibleDuplicate` — moves the copy to `ignored` with
+>   `duplicate_of:<canonical>`, after re-checking the pair against `domain.isPossibleDuplicate`.
+> - `services.dismissPossibleDuplicate` — records "these two are different" as an `AuditEvent`,
+>   changing neither payment (ADR-0031).
+>
+> Rejecting a proposal now also closes out the DERIVED `Expense` it created, to `rejected`
+> (ADR-0028 — the disposition ADR-0026 deferred to this phase).
+>
+> ```
+> api  GET  /api/review                                    ─▶ services.listReviewQueue
+>      POST /api/review/inferences/:id/decision            ─▶ services.decideInference
+>      POST /api/review/payments/:id/reclassify            ─▶ services.reclassifyPayment
+>      POST /api/review/payments/:id/duplicate             ─▶ services.confirm|dismissPossibleDuplicate
+> ```
+>
+> The handlers are Web `Request → Response` functions — a Next.js route handler's exact
+> signature — with no framework installed to serve four routes before any UI exists (ADR-0032).
 
 ## 6. Allocation
 

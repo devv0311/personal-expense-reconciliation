@@ -98,7 +98,9 @@ describe('state enums match lifecycle.md', () => {
     expect([...PAYMENT_STATES]).toEqual(['imported', 'normalized', 'linked', 'ignored']);
   });
 
-  it('lists the expense states in lifecycle order', () => {
+  it('lists the expense states in lifecycle order, with the off-ramp last', () => {
+    // `rejected` is appended rather than inserted after `review_required`: it is where a
+    // declined or superseded *proposal* ends, not a step on the way to APPROVED (ADR-0028).
     expect([...EXPENSE_STATES]).toEqual([
       'proposed',
       'classified',
@@ -108,6 +110,7 @@ describe('state enums match lifecycle.md', () => {
       'ready_to_sync',
       'synced',
       'reconciled',
+      'rejected',
     ]);
   });
 
