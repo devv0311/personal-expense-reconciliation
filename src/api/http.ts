@@ -100,7 +100,11 @@ export function toErrorResponse(error: unknown): Response {
             ? 422
             : error.code === 'IMPORT_SOURCE_INVALID'
               ? 400
-              : 500;
+              : error.code === 'EVIDENCE_DOCUMENT_TOO_LARGE'
+                ? 413
+                : error.code === 'EVIDENCE_STORE_UNAVAILABLE'
+                  ? 503
+                  : 500;
     return jsonResponse(status, {
       error: { code: error.code, message: error.message },
     } satisfies ApiErrorBody);

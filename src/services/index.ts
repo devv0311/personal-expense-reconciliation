@@ -18,6 +18,7 @@ export * from './normalization-service.js';
 export * from './classification-service.js';
 export * from './inference-decision-service.js';
 export * from './review-service.js';
+export * from './evidence-service.js';
 export * from './review-action-service.js';
 export * from './expense-service.js';
 export * from './allocation-service.js';
@@ -32,3 +33,4 @@ export * from './balance-service.js';
  */
 export type { Database } from '../db/index.js';
 export type { AiService } from '../ai/index.js';
+export type { EvidenceStore } from '../integrations/evidence-store/index.js';
