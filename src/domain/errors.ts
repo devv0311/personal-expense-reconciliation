@@ -49,6 +49,12 @@ export type DomainErrorCode =
   | 'IMMUTABLE_FIELD'
   /** A manual note had no kind, or a non-note claimed one (ADR-0018). */
   | 'EVIDENCE_NOTE_KIND_INVALID'
+  /** An `Evidence` row carried no document and no text, or a document it cannot describe. */
+  | 'EVIDENCE_PAYLOAD_INVALID'
+  /** A document arrived in a format this system does not store (`domain/evidence.ts`). */
+  | 'EVIDENCE_MEDIA_TYPE_UNSUPPORTED'
+  /** A recorded `Evidence` link was re-pointed or cleared rather than superseded. */
+  | 'EVIDENCE_LINK_IMMUTABLE'
   /** An `AIInference` decision named an actor that is neither a person nor a `Rule` (#17). */
   | 'DECISION_ACTOR_INVALID'
   /** A referenced entity was absent from the input set handed to a pure function. */
