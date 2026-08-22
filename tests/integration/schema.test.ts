@@ -469,7 +469,9 @@ describe('evidence.note_kind keeps one shape from carrying two meanings (ADR-001
     const error = await captureError(() =>
       database.db.insert(schema.evidence).values({
         type: 'receipt_image',
-        storageRef: 'evidence/2026/07/receipt-001.jpg',
+        storageRef: `sha256/${'a'.repeat(64)}.jpg`,
+        mediaType: 'image/jpeg',
+        byteSize: 20_481,
         capturedAt: new Date(),
         noteKind: 'settlement_claim',
       }),
@@ -481,8 +483,8 @@ describe('evidence.note_kind keeps one shape from carrying two meanings (ADR-001
   it('rejects an unknown note kind', async () => {
     const error = await captureError(() =>
       database.db.execute(
-        sql`insert into evidence (type, captured_at, note_kind)
-            values ('manual_note', now(), 'probably_settled')`,
+        sql`insert into evidence (type, captured_at, raw_text, note_kind)
+            values ('manual_note', now(), 'they said it was settled', 'probably_settled')`,
       ),
     );
 
@@ -555,6 +557,82 @@ describe('evidence.note_kind keeps one shape from carrying two meanings (ADR-001
       .returning({ noteKind: schema.evidence.noteKind });
 
     expect(row?.noteKind).toBeNull();
+  });
+});
+
+describe('evidence rows must carry the evidence they claim to', () => {
+  const storedReceipt = {
+    type: 'receipt_image' as const,
+    storageRef: `sha256/${'c'.repeat(64)}.jpg`,
+    mediaType: 'image/jpeg',
+    byteSize: 20_481,
+    capturedAt: new Date('2026-07-12T20:00:00Z'),
+  };
+
+  it('accepts a stored document described in full', async () => {
+    const [row] = await database.db
+      .insert(schema.evidence)
+      .values(storedReceipt)
+      .returning({ mediaType: schema.evidence.mediaType, byteSize: schema.evidence.byteSize });
+
+    expect(row).toEqual({ mediaType: 'image/jpeg', byteSize: 20_481 });
+  });
+
+  it.each([
+    ['a document with no media type', { mediaType: null }],
+    ['a document with no byte size', { byteSize: null }],
+    ['a media type describing a file that was never stored', { storageRef: null }],
+  ])('rejects %s', async (_label, override) => {
+    const error = await captureError(() =>
+      database.db.insert(schema.evidence).values({ ...storedReceipt, ...override }),
+    );
+
+    expect(error.message).toMatch(/evidence_stored_document_check|evidence_content_present_check/);
+  });
+
+  it('rejects a media type this system does not store', async () => {
+    const error = await captureError(() =>
+      database.db
+        .insert(schema.evidence)
+        .values({ ...storedReceipt, mediaType: 'application/octet-stream' }),
+    );
+
+    expect(error.message).toMatch(/evidence_media_type_check/);
+  });
+
+  it('rejects an empty file, which is a failed upload rather than evidence', async () => {
+    const error = await captureError(() =>
+      database.db.insert(schema.evidence).values({ ...storedReceipt, byteSize: 0 }),
+    );
+
+    expect(error.message).toMatch(/evidence_byte_size_check/);
+  });
+
+  it('rejects a row with neither a document nor text', async () => {
+    const error = await captureError(() =>
+      database.db.insert(schema.evidence).values({
+        type: 'screenshot',
+        capturedAt: new Date(),
+      }),
+    );
+
+    expect(error.message).toMatch(/evidence_content_present_check/);
+  });
+
+  it('rejects a manual note carrying a file — that is a receipt_image', async () => {
+    const error = await captureError(() =>
+      database.db.insert(schema.evidence).values({
+        type: 'manual_note',
+        noteKind: 'documentation',
+        rawText: 'photo of the bill',
+        storageRef: storedReceipt.storageRef,
+        mediaType: 'image/jpeg',
+        byteSize: 20_481,
+        capturedAt: new Date(),
+      }),
+    );
+
+    expect(error.message).toMatch(/evidence_note_has_no_document_check/);
   });
 });
 

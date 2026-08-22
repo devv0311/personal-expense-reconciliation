@@ -241,6 +241,10 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[number];
  * Entity types that can appear on an `AuditEvent`. Includes `settlement` and
  * `expense_adjustment`, both of which write authoritative state exactly as `allocation`
  * approval does (`invariants.md` #21).
+ *
+ * `evidence` is here because ingestion is a write with an actor and a source, and because
+ * attaching a document to a payment is a decision a human made — one the ledger has to be
+ * able to attribute later, since everything extracted from that document inherits the link.
  */
 export const AUDITABLE_ENTITY_TYPES = [
   'payment',
@@ -253,6 +257,7 @@ export const AUDITABLE_ENTITY_TYPES = [
   'settlement',
   'expense_adjustment',
   'merchant',
+  'evidence',
   'receipt',
   'ai_inference',
   'rule',

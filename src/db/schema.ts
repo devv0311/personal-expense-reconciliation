@@ -45,6 +45,7 @@ import {
   AUDIT_ACTIONS,
   BENEFICIARY_TYPES,
   CONFIDENCE_LEVELS,
+  EVIDENCE_MEDIA_TYPES,
   EVIDENCE_NOTE_KINDS,
   EVIDENCE_TYPES,
   EXPENSE_ADJUSTMENT_KINDS,
@@ -278,6 +279,17 @@ export const evidence = pgTable(
     type: text('type').notNull(),
     /** Null for a manual note, which has no file. */
     storageRef: text('storage_ref'),
+    /**
+     * What the stored document is, and how big it was — present exactly when `storage_ref`
+     * is.
+     *
+     * Facts about the document rather than about the store, which is why they live here and
+     * not only in the object's own metadata: a reader has to know how to render a document
+     * before fetching it, and a ledger that cannot describe its own evidence without calling
+     * out to storage has put the description in the wrong place.
+     */
+    mediaType: text('media_type'),
+    byteSize: integer('byte_size'),
     rawText: text('raw_text'),
     capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
     linkedPaymentId: uuid('linked_payment_id').references(() => payments.id),
@@ -297,7 +309,44 @@ export const evidence = pgTable(
     index('evidence_settlement_claim_idx')
       .on(table.linkedExpenseId)
       .where(sql.raw(`note_kind = '${SETTLEMENT_CLAIM_NOTE_KIND}'`)),
+    // The idempotent-ingest lookup: the same bytes arriving twice resolve to the row that
+    // already holds them rather than to a second copy of it.
+    index('evidence_storage_ref_idx').on(table.storageRef),
+    // Documents with no home, which is what the review queue asks for.
+    index('evidence_unmatched_idx')
+      .on(table.capturedAt)
+      .where(
+        sql.raw(
+          'storage_ref is not null and linked_payment_id is null and linked_expense_id is null',
+        ),
+      ),
     check('evidence_type_check', oneOf('type', EVIDENCE_TYPES)),
+    check(
+      'evidence_media_type_check',
+      sql`${table.mediaType} is null or ${oneOf('media_type', EVIDENCE_MEDIA_TYPES)}`,
+    ),
+    // `media_type` and `byte_size` describe a stored document, so they are present exactly
+    // when one is. A storage_ref with no media type is a document nothing can open; a media
+    // type with no storage_ref describes a file that was never stored.
+    check(
+      'evidence_stored_document_check',
+      sql`(${table.storageRef} is null) = (${table.mediaType} is null)
+          and (${table.storageRef} is null) = (${table.byteSize} is null)`,
+    ),
+    check('evidence_byte_size_check', sql`${table.byteSize} is null or ${table.byteSize} > 0`),
+    // Evidence must contain evidence. A row with neither a document nor text supports no
+    // claim about anything, and would sit in the review queue forever as a receipt with
+    // nothing in it.
+    check(
+      'evidence_content_present_check',
+      sql`${table.storageRef} is not null or ${table.rawText} is not null`,
+    ),
+    // A note is typed text; a photograph of a receipt is `receipt_image`. Storing one as the
+    // other hides it from every reader that looks for a document.
+    check(
+      'evidence_note_has_no_document_check',
+      sql`${table.type} <> 'manual_note' or ${table.storageRef} is null`,
+    ),
     check(
       'evidence_note_kind_check',
       sql`${table.noteKind} is null or ${oneOf('note_kind', EVIDENCE_NOTE_KINDS)}`,
