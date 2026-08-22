@@ -56,3 +56,6 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0030](0030-reclassification-is-an-explicit-review-action.md) | Re-classification is an explicit review action; a re-run stays a no-op      | Accepted                                                     |
 | [0031](0031-possible-duplicate-review.md)                     | A possible duplicate is confirmed or dismissed by a human, both recorded    | Accepted                                                     |
 | [0032](0032-web-standard-route-handlers-without-nextjs.md)    | The API ships as Web-standard route handlers, without installing Next.js    | Accepted                                                     |
+| [0033](0033-content-addressed-evidence-storage.md)            | Evidence documents are content-addressed, behind a port with one adapter    | Accepted                                                     |
+| [0034](0034-evidence-linkage-is-write-once.md)                | Evidence linkage may be filled in once, and never rewritten                 | Accepted                                                     |
+| [0035](0035-unmatched-evidence-is-a-review-kind.md)           | An unmatched document is a review kind ranked last, carrying no proposal    | Accepted                                                     |

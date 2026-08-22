@@ -292,7 +292,8 @@ receipt-type evidence.
 `note_kind` (`documentation | settlement_claim`, ADR-0018 — required on a `manual_note`,
 forbidden on every other type; it is what keeps "this documents the expense" and "this claims
 the debt was cleared" from being the same row),
-`storage_ref` (nullable — manual notes have no file), `raw_text` (OCR/extracted text if
+`storage_ref` (nullable — manual notes have no file), `media_type` and `byte_size` (nullable,
+present exactly when `storage_ref` is — ADR-0033), `raw_text` (OCR/extracted text if
 applicable), `captured_at`, `linked_payment_id` (nullable), `linked_expense_id` (nullable).
 
 **Relationships.** Optionally linked to a `Payment` and/or `Expense`. A `Receipt` references
@@ -301,11 +302,18 @@ Payment/Expense linkage actually flows for receipts, since it is not a direct FK
 itself.
 
 **Lifecycle.** Created on ingestion. Immutable. Superseding evidence (e.g. a clearer photo of
-the same receipt) is a new `Evidence` row, not an edit.
+the same receipt) is a new `Evidence` row, not an edit. **Linkage is the one exception, and only
+in one direction** (ADR-0034): a document that arrives before the payment it belongs to is
+ingested unlinked and attached later, once — `null → id` is permitted, re-pointing or clearing a
+recorded link is not, because anything extracted from the document reaches its payment and
+expense through exactly those columns.
 
 **Invariants.** Never overwritten. Never deleted while referenced by an `Expense` or
 `Allocation`, to preserve traceability. Files are stored outside the primary database (see
-`docs/security/security-model.md`) with only a reference stored here.
+`docs/security/security-model.md`) with only a reference stored here — a **content address**,
+`sha256/<digest>.<ext>`, so the same document is always the same ref and a ref can never come to
+mean different bytes (ADR-0033). A row must carry either a stored document or text: evidence
+with no content supports no claim.
 
 **Classification.** SOURCE.
 

@@ -134,7 +134,8 @@ different import channels, e.g. a bank CSV vs. a UPI export of the same UPI paym
 
 `id`, `type text not null check (type in
 ('bank_line','upi_notification','receipt_image','screenshot','email_receipt','manual_note'))`,
-`storage_ref text` (nullable), `raw_text text` (nullable), `captured_at timestamptz not null`,
+`storage_ref text` (nullable), `media_type text` (nullable), `byte_size integer` (nullable),
+`raw_text text` (nullable), `captured_at timestamptz not null`,
 `linked_payment_id references payments(id)` (nullable),
 `linked_expense_id uuid` (nullable, FK added once `expenses` is defined below). This is the
 **only** place Payment/Expense linkage lives for `Evidence` and, transitively, for `Receipt` —
@@ -145,8 +146,31 @@ see `receipts` below.
 everywhere else. Without it, documenting an externally-funded expense (ADR-0006) and claiming a
 debt was cleared (ADR-0014) are the same row, and the second reading fires on every instance of
 the first.
-Index: `(linked_expense_id)` partial where `note_kind = 'settlement_claim'` — the balance query
-reads only those.
+`media_type`/`byte_size` describe the stored document (**added, ADR-0033**) and are present
+exactly when `storage_ref` is. `storage_ref` is a **content address** —
+`sha256/<64 hex>.<ext>` — not a path: the same bytes always produce the same ref, so a ref can
+never come to point at a different document, and re-storing a document is deterministic rather
+than a second copy. How an adapter lays that out underneath is the adapter's business
+(`src/integrations/evidence-store`).
+
+Four more checks (**added, ADR-0033**):
+`(storage_ref is null) = (media_type is null) and (storage_ref is null) = (byte_size is null)`
+(a document nothing can open, or a format for a file that was never stored, are both refused);
+`media_type` in the accepted-format allowlist; `byte_size is null or byte_size > 0` (an empty
+file is a failed upload); `storage_ref is not null or raw_text is not null` (evidence must
+contain evidence); and `type <> 'manual_note' or storage_ref is null` (a note is typed text; a
+photograph of a receipt is `receipt_image`).
+
+**Linkage is write-once, not frozen** (ADR-0034). `linked_payment_id`/`linked_expense_id` are the
+only columns on this table `src/services` may `UPDATE`, and only from `null` — the grant in
+`drizzle/security/immutable-table-grants.sql` permits the write because the link is DERIVED, and
+`domain.assertEvidenceLinkOnce` is what stops a recorded link being re-pointed or cleared. That
+is what lets a receipt photographed before its statement import be attached later.
+
+Indexes: `(linked_expense_id)` partial where `note_kind = 'settlement_claim'` — the balance query
+reads only those; `(storage_ref)`, for resolving the same bytes arriving twice to the row that
+already holds them; and `(captured_at)` partial where a document has no links at all, which is
+the review queue's unmatched-evidence query (ADR-0035).
 
 ### receipts — DERIVED
 

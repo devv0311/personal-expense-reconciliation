@@ -65,5 +65,12 @@ import (phase 6):
   phase 8's "a re-run is a no-op" rule, ADR-0030), `confirmPossibleDuplicate` and
   `dismissPossibleDuplicate` (ADR-0031). All three require an attributable human actor.
 
-Not yet implemented: receipt ingestion and Splitwise sync orchestration — see
-`docs/roadmap.md` phases 10–11 and 14.
+- `evidence-service.ts` — `ingestEvidenceDocument`, `recordManualNote`, `linkEvidence`,
+  `readEvidenceDocument`: the other half of the pipeline, arriving before, during or after
+  classification. Documents go to an injected `EvidenceStore` (ADR-0033) and the row points at
+  them by content address; re-ingesting the same bytes against the same links resolves to the
+  row that already holds them. Linkage may be filled in once, never rewritten (ADR-0034). No
+  model is called and no document is read — extraction is phase 11.
+
+Not yet implemented: receipt extraction and Splitwise sync orchestration — see
+`docs/roadmap.md` phases 11 and 14.
