@@ -24,6 +24,16 @@ export type ServiceErrorCode =
    * counterparty nobody has heard of.
    */
   | 'AI_PROPOSAL_INVALID'
+  /** A document exceeded `MAX_EVIDENCE_DOCUMENT_BYTES` (`evidence-service.ts`). */
+  | 'EVIDENCE_DOCUMENT_TOO_LARGE'
+  /**
+   * Evidence storage could not be read or written.
+   *
+   * The ledger row and the document it points at live in different systems by design
+   * (`security-model.md`), so the document store failing is a distinct, retryable condition
+   * from anything being wrong with the row.
+   */
+  | 'EVIDENCE_STORE_UNAVAILABLE'
   /**
    * A mutating transaction completed without recording an `AuditEvent`.
    *

@@ -83,6 +83,27 @@ export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
 export const EVIDENCE_NOTE_KINDS = ['documentation', 'settlement_claim'] as const;
 export type EvidenceNoteKind = (typeof EVIDENCE_NOTE_KINDS)[number];
 
+/**
+ * The document formats evidence storage accepts.
+ *
+ * An allowlist rather than "whatever was uploaded", for two reasons. Storing arbitrary bytes
+ * under a caller-supplied content type is a file-upload vulnerability with extra steps — the
+ * type decides how a browser later renders the document back to the user. And phase 11's
+ * extraction can only read formats it knows; accepting a `.docx` here would produce evidence
+ * that is permanently unreadable by everything downstream of it.
+ *
+ * Every entry is something a phone camera, a screenshot, or an emailed receipt actually
+ * produces. Widening the list is a decision, which is why it is a value set and not a regex.
+ */
+export const EVIDENCE_MEDIA_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'application/pdf',
+] as const;
+export type EvidenceMediaType = (typeof EVIDENCE_MEDIA_TYPES)[number];
+
 export const CONFIDENCE_LEVELS = ['high', 'medium', 'low', 'unknown'] as const;
 export type ConfidenceLevel = (typeof CONFIDENCE_LEVELS)[number];
 
@@ -220,6 +241,10 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[number];
  * Entity types that can appear on an `AuditEvent`. Includes `settlement` and
  * `expense_adjustment`, both of which write authoritative state exactly as `allocation`
  * approval does (`invariants.md` #21).
+ *
+ * `evidence` is here because ingestion is a write with an actor and a source, and because
+ * attaching a document to a payment is a decision a human made — one the ledger has to be
+ * able to attribute later, since everything extracted from that document inherits the link.
  */
 export const AUDITABLE_ENTITY_TYPES = [
   'payment',
@@ -232,6 +257,7 @@ export const AUDITABLE_ENTITY_TYPES = [
   'settlement',
   'expense_adjustment',
   'merchant',
+  'evidence',
   'receipt',
   'ai_inference',
   'rule',

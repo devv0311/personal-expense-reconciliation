@@ -21,6 +21,7 @@ import type {
   AuditAction,
   AuditableEntityType,
   ConfidenceLevel,
+  EvidenceMediaType,
   EvidenceNoteKind,
   EvidenceType,
   ExpenseRelationshipType,
@@ -34,6 +35,7 @@ import type {
   AllocationId,
   AllocationLineId,
   AuditEventId,
+  EvidenceId,
   ExpenseId,
   ImportBatchId,
   GroupId,
@@ -1156,6 +1158,136 @@ export async function listSettlementClaimExpenseIds(exec: Executor): Promise<Exp
     )
     .map((row) => row.linkedExpenseId)
     .filter((value): value is string => value !== null) as ExpenseId[];
+}
+
+/* ============================================================================ evidence */
+
+/** An `Evidence` row as written. SOURCE, so every field here is write-once. */
+export interface EvidenceDraft {
+  readonly type: EvidenceType;
+  readonly noteKind: EvidenceNoteKind | null;
+  readonly storageRef: string | null;
+  readonly mediaType: EvidenceMediaType | null;
+  readonly byteSize: number | null;
+  readonly rawText: string | null;
+  readonly capturedAt: Date;
+  readonly linkedPaymentId: PaymentId | null;
+  readonly linkedExpenseId: ExpenseId | null;
+}
+
+export interface EvidenceRow extends EvidenceDraft {
+  readonly id: EvidenceId;
+  readonly createdAt: Date;
+}
+
+export async function insertEvidence(exec: Executor, draft: EvidenceDraft): Promise<EvidenceId> {
+  const [row] = await exec
+    .insert(evidence)
+    .values({
+      type: draft.type,
+      noteKind: draft.noteKind,
+      storageRef: draft.storageRef,
+      mediaType: draft.mediaType,
+      byteSize: draft.byteSize,
+      rawText: draft.rawText,
+      capturedAt: draft.capturedAt,
+      linkedPaymentId: draft.linkedPaymentId,
+      linkedExpenseId: draft.linkedExpenseId,
+    })
+    .returning({ id: evidence.id });
+  return requireRow(row, 'evidence').id as EvidenceId;
+}
+
+export async function getEvidenceById(
+  exec: Executor,
+  evidenceId: EvidenceId,
+): Promise<EvidenceRow | null> {
+  const [row] = await exec.select().from(evidence).where(eq(evidence.id, evidenceId)).limit(1);
+  return row === undefined ? null : toEvidenceRow(row);
+}
+
+/**
+ * Every row already pointing at these exact bytes.
+ *
+ * The idempotency lookup: a content address means the same document re-ingested resolves
+ * here rather than to a second row. Returns all of them and lets the caller decide, because
+ * "the same document attached to a different payment" is a legitimate second row and only
+ * the caller knows which linkage it is proposing.
+ */
+export async function findEvidenceByStorageRef(
+  exec: Executor,
+  storageRef: string,
+): Promise<EvidenceRow[]> {
+  const rows = await exec
+    .select()
+    .from(evidence)
+    .where(eq(evidence.storageRef, storageRef))
+    .orderBy(asc(evidence.createdAt), asc(evidence.id));
+  return rows.map(toEvidenceRow);
+}
+
+/**
+ * Stored documents attached to nothing, oldest capture first.
+ *
+ * Restricted to evidence with a document. A manual note's links were chosen by the human who
+ * typed it, in the same act; a file can arrive from a share sheet with nothing else known
+ * about it, and is the case the review queue exists to surface.
+ */
+export async function listUnmatchedEvidence(
+  exec: Executor,
+  limit?: number,
+): Promise<EvidenceRow[]> {
+  const query = exec
+    .select()
+    .from(evidence)
+    .where(
+      and(
+        sql`${evidence.storageRef} is not null`,
+        isNull(evidence.linkedPaymentId),
+        isNull(evidence.linkedExpenseId),
+      ),
+    )
+    .orderBy(asc(evidence.capturedAt), asc(evidence.id));
+  const rows = limit === undefined ? await query : await query.limit(limit);
+  return rows.map(toEvidenceRow);
+}
+
+/**
+ * Attaches evidence to a payment and/or an expense.
+ *
+ * The one `UPDATE` this table permits, and only on these two columns —
+ * `drizzle/security/immutable-table-grants.sql` grants exactly them back on an otherwise
+ * unwritable table. Whether the write is *allowed* is `domain.assertEvidenceLinkOnce`'s
+ * decision, made before this is called; this issues the statement.
+ */
+export async function updateEvidenceLinks(
+  exec: Executor,
+  evidenceId: EvidenceId,
+  links: { readonly linkedPaymentId: PaymentId | null; readonly linkedExpenseId: ExpenseId | null },
+): Promise<void> {
+  await exec
+    .update(evidence)
+    .set({
+      linkedPaymentId: links.linkedPaymentId,
+      linkedExpenseId: links.linkedExpenseId,
+    })
+    .where(eq(evidence.id, evidenceId));
+}
+
+function toEvidenceRow(row: typeof evidence.$inferSelect): EvidenceRow {
+  return {
+    id: row.id as EvidenceId,
+    type: row.type as EvidenceType,
+    noteKind: row.noteKind as EvidenceNoteKind | null,
+    storageRef: row.storageRef,
+    mediaType: row.mediaType as EvidenceMediaType | null,
+    byteSize: row.byteSize,
+    rawText: row.rawText,
+    capturedAt: row.capturedAt,
+    linkedPaymentId: row.linkedPaymentId as PaymentId | null,
+    linkedExpenseId: row.linkedExpenseId as ExpenseId | null,
+    createdAt: row.createdAt,
+  };
 }
 
 /** The most recent reconciliation run, for the Splitwise-discrepancy status signal. */

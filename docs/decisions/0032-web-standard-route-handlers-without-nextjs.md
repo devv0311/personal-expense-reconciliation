@@ -33,6 +33,12 @@ Plus `createReviewApi({ db, ai })`, which exposes the route table and a ~40-line
 dispatcher (`:name` captures, no wildcards, no precedence rules) so tests — and later a server —
 can send a real `Request` and get a real `Response`.
 
+> **Amended in phase 10 (2026-08-22).** With a second surface on the same table, this is now
+> `createApi({ db, ai, evidenceStore })` — the same function, named for what it builds. The
+> dispatcher also gained one rule: the first pattern that matches a path owns it, so a wrong verb
+> on a known path is a 405 rather than a 400 from whichever capture route swallowed it. That is
+> ordering plus a lookup, not the precedence algorithm this section rejected.
+
 When the UI phase arrives, mounting these is mechanical: `app/api/review/route.ts` becomes
 
 ```ts

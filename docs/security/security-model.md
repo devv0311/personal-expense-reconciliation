@@ -46,6 +46,21 @@ development, S3-compatible object storage in production
 does not automatically include raw financial documents, and access to evidence storage can be
 governed independently of database access.
 
+**Implemented as of phase 10** (ADR-0033), with three properties that matter here:
+
+- **Refs carry no financial context.** A `storage_ref` is `sha256/<digest>.<ext>`, derived from
+  the bytes. No merchant name, no original filename, no date is encoded in a storage path, so
+  the store's contents leak nothing about the user to anyone who can list it but not read it.
+- **A ref never becomes a location unchecked.** `parseEvidenceStorageRef` refuses anything that
+  is not that exact shape, so a value read out of the database — or written into it by any other
+  means — cannot walk out of the storage root.
+- **Only an allowlist of formats is stored** (JPEG, PNG, WebP, HEIC, PDF), because the declared
+  type is what decides how a document is later rendered back to a person. The one route that
+  serves a document sets `X-Content-Type-Options: nosniff` for the same reason.
+
+The development root is `EVIDENCE_STORAGE_PATH` (`.env.example`), which is gitignored: no real
+financial document ever enters the repository.
+
 ## Data sent to external AI services
 
 Before any `Payment`/`Evidence`/`Receipt` data is sent to the AI provider

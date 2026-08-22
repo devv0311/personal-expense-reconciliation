@@ -99,7 +99,11 @@ describe('assertPaymentSourceImmutable — invariant #4', () => {
 
 describe('assertEvidenceImmutable — invariant #4', () => {
   const captured = {
-    storageRef: 'evidence/2026/07/receipt-001.jpg',
+    type: 'receipt_image',
+    noteKind: null,
+    storageRef: 'sha256/ab/cd/abcd.jpg',
+    mediaType: 'image/jpeg',
+    byteSize: 20_481,
     rawText: 'SAMPLE RESTAURANT\nTOTAL 2840.00',
     capturedAt: new Date('2026-07-12T20:00:00Z'),
   };
@@ -118,5 +122,31 @@ describe('assertEvidenceImmutable — invariant #4', () => {
     expect(() =>
       assertEvidenceImmutable(captured, { ...captured, rawText: 'corrected OCR' }),
     ).toThrow(/superseding|new Evidence/i);
+  });
+
+  it('refuses to change what a note asserts (ADR-0018)', () => {
+    const note = {
+      ...captured,
+      type: 'manual_note',
+      storageRef: null,
+      mediaType: null,
+      byteSize: null,
+      noteKind: 'documentation',
+    };
+
+    // A documenting note quietly becoming a settlement claim reports an obligation cleared
+    // that nobody said was cleared — the precise failure ADR-0018 exists to prevent.
+    expect(() => assertEvidenceImmutable(note, { ...note, noteKind: 'settlement_claim' })).toThrow(
+      DomainError,
+    );
+  });
+
+  it('refuses to change the format of the document it points at', () => {
+    expect(() =>
+      assertEvidenceImmutable(captured, { ...captured, mediaType: 'application/pdf' }),
+    ).toThrow(DomainError);
+    expect(() => assertEvidenceImmutable(captured, { ...captured, byteSize: 1 })).toThrow(
+      DomainError,
+    );
   });
 });

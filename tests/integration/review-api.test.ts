@@ -13,8 +13,8 @@ import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { createReviewApi } from '../../src/api/index.js';
-import type { ReviewApi } from '../../src/api/index.js';
+import { createApi } from '../../src/api/index.js';
+import type { Api } from '../../src/api/index.js';
 import { createAiService } from '../../src/ai/index.js';
 import { paise } from '../../src/domain/index.js';
 import type { AccountId, PaymentId } from '../../src/domain/index.js';
@@ -26,6 +26,7 @@ import {
 } from '../../src/services/index.js';
 import type { ProposedClassification } from '../../src/services/index.js';
 import { createTestDatabase } from '../support/database.js';
+import { createMemoryEvidenceStore } from '../support/evidence-store.js';
 import type { TestDatabase } from '../support/database.js';
 import { scriptedClassificationTransport } from '../support/ai.js';
 import { AS_USER, addPayment, seedCast, seedMerchants } from '../support/ledger.js';
@@ -38,7 +39,7 @@ const BASE = 'http://localhost';
 let database: TestDatabase;
 let cast: Cast;
 let accountId: AccountId;
-let api: ReviewApi;
+let api: Api;
 
 beforeAll(async () => {
   database = await createTestDatabase();
@@ -53,9 +54,10 @@ beforeEach(async () => {
   cast = await seedCast(database.db);
   accountId = cast.account['account_hdfc_savings']!;
   await seedMerchants(database.db);
-  api = createReviewApi({
+  api = createApi({
     db: database.db,
     ai: createAiService(scriptedClassificationTransport({ people: cast.person })),
+    evidenceStore: createMemoryEvidenceStore(),
   });
 });
 
@@ -149,6 +151,7 @@ describe('GET /api/review', () => {
       classification_decision: 5,
       possible_duplicate: 0,
       rejected_classification: 0,
+      unmatched_evidence: 0,
     });
   });
 
@@ -480,9 +483,10 @@ describe('the surface itself', () => {
 
   it('never returns an internal error’s detail', async () => {
     // A handler that throws something unexpected must not leak it (security-model.md).
-    const broken = createReviewApi({
+    const broken = createApi({
       db: null as unknown as TestDatabase['db'],
       ai: createAiService(scriptedClassificationTransport({ people: cast.person })),
+      evidenceStore: createMemoryEvidenceStore(),
     });
 
     const response = await broken.handle(new Request(`${BASE}/api/review`));
@@ -501,6 +505,11 @@ describe('the surface itself', () => {
       'POST /api/review/inferences/:inferenceId/decision',
       'POST /api/review/payments/:paymentId/reclassify',
       'POST /api/review/payments/:paymentId/duplicate',
+      'POST /api/evidence/files',
+      'POST /api/evidence/notes',
+      'POST /api/evidence/:evidenceId/link',
+      'GET /api/evidence/:evidenceId',
+      'GET /api/evidence/:evidenceId/content',
     ]);
   });
 });

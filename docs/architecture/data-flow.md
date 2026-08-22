@@ -98,6 +98,23 @@ again as inferences requiring confirmation before they're treated as settled. Fo
 **externally-funded** expense (`paid_by_person_id` != the user, ADR-0006), `Evidence` is the
 _only_ source that will ever exist — there is no `Payment` to eventually match against.
 
+```
+api ─▶ services.ingestEvidenceDocument ─▶ integrations/evidence-store.put ─▶ db.insertEvidence
+       services.recordManualNote                                          ─▶ db.insertEvidence
+       services.linkEvidence          ─▶ domain.assertEvidenceLinkOnce    ─▶ db.updateEvidenceLinks
+```
+
+> **Ingestion landed in phase 10 (2026-08-22); extraction is phase 11.** What ingestion does:
+> stores the bytes at a content address, records the row, and audits it. What it deliberately
+> does not do: call a model, read an amount, identify a merchant, or match the document to a
+> payment. A document that arrives with nothing known about it is stored unlinked and surfaces in
+> the review queue as `unmatched_evidence` (ADR-0035), where a human attaches it — the matching a
+> total would make deterministic is exactly what phase 11 unlocks.
+>
+> Re-ingesting the same bytes against the same links returns the row that already holds them
+> rather than a second one. Evidence carries no money, so this is not `invariants.md` #10; it is
+> so that one receipt shared twice is one thing for a person to look at.
+
 ## 5. Human review
 
 `api` surfaces `Expense`s in `REVIEW_REQUIRED` (and any pending `AIInference`s attached to
@@ -147,7 +164,8 @@ api (review UI) ─▶ services.decideInference(accept|modify|reject) ─▶ db.
 > ```
 >
 > The handlers are Web `Request → Response` functions — a Next.js route handler's exact
-> signature — with no framework installed to serve four routes before any UI exists (ADR-0032).
+> signature — with no framework installed before any UI exists (ADR-0032). Phase 10 added five
+> more under `/api/evidence` (step 4 above) to the same table and the same dispatcher.
 
 ## 6. Allocation
 

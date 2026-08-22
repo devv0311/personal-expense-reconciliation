@@ -30,6 +30,9 @@ belongs in `src/services` instead.
 | `normalization.ts`   | `refineChannel` (ADR-0020) and `merchantAliasKey` — the deterministic normalization rules  |
 | `lifecycle.ts`       | Explicit transition tables for every lifecycle in `lifecycle.md`                           |
 | `immutability.ts`    | SOURCE and approved-amount write guards (#4, #6)                                           |
+| `classification.ts`  | Eligibility, review routing by confidence and materiality, the decision actor (#17)        |
+| `evidence.ts`        | `note_kind` semantics (ADR-0018), accepted document formats, write-once linkage (ADR-0034) |
+| `review.ts`          | The queue's total order and the reasons an item is in it (ADR-0029, ADR-0035)              |
 | `reconciliation.ts`  | `computeUnexplained` (#20) — see ADR-0016 for its outflow scoping                          |
 
 Import from `src/domain/index.js`, the layer's public surface, rather than an individual file.

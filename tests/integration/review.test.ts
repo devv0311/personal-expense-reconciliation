@@ -30,7 +30,7 @@ import {
   reclassifyPayment,
   runReconciliation,
 } from '../../src/services/index.js';
-import type { ProposedClassification } from '../../src/services/index.js';
+import type { ProposedClassification, ReviewQueueItem } from '../../src/services/index.js';
 import { createTestDatabase } from '../support/database.js';
 import type { TestDatabase } from '../support/database.js';
 import { scriptedClassificationTransport } from '../support/ai.js';
@@ -38,6 +38,15 @@ import { AS_USER, addPayment, seedCast, seedMerchants } from '../support/ledger.
 import type { Cast } from '../support/ledger.js';
 
 const FIXTURE = readFileSync(join(process.cwd(), 'fixtures', 'bank-statement.csv'), 'utf8');
+
+/**
+ * The payment description an item is about, or `null` for an item that is not about one.
+ *
+ * `unmatched_evidence` is the second kind — a document with no payment attached is the whole
+ * reason it is in the queue — so the union no longer has `payment` on every member.
+ */
+const describedAs = (item: ReviewQueueItem): string | null =>
+  'payment' in item ? item.payment.description : null;
 
 const AS_SYSTEM = { actor: 'system', source: 'services.classifyPayments' } as const;
 const AS_REVIEWER = { actor: 'user', source: 'services.decideInference' } as const;
@@ -418,6 +427,7 @@ describe('listReviewQueue — what is waiting', () => {
         classification_decision: 0,
         possible_duplicate: 0,
         rejected_classification: 0,
+        unmatched_evidence: 0,
       },
       total: 0,
       truncated: false,
@@ -434,6 +444,7 @@ describe('listReviewQueue — what is waiting', () => {
       classification_decision: 5,
       possible_duplicate: 0,
       rejected_classification: 0,
+      unmatched_evidence: 0,
     });
     expect(queue.items.every((item) => item.kind === 'classification_decision')).toBe(true);
   });
@@ -444,7 +455,7 @@ describe('listReviewQueue — what is waiting', () => {
     const queue = await listReviewQueue(database.db);
 
     // Flagged before routine; inside each, biggest first, then oldest, then id.
-    expect(queue.items.map((item) => item.payment.description)).toEqual([
+    expect(queue.items.map(describedAs)).toEqual([
       'UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD', // medium confidence, ₹2,840
       'UPI-FRIENDA-TRANSFER', // settlement, always flagged, ₹1,000
       'ELECTRICITY BOARD BBPS BILLPAY', // routine, ₹2,100
@@ -475,7 +486,7 @@ describe('listReviewQueue — what is waiting', () => {
     const queue = await listReviewQueue(database.db);
 
     const electricity = queue.items.find(
-      (item) => item.payment.description === 'ELECTRICITY BOARD BBPS BILLPAY',
+      (item) => describedAs(item) === 'ELECTRICITY BOARD BBPS BILLPAY',
     );
     if (electricity?.kind !== 'classification_decision') throw new Error('expected a decision');
     expect(electricity.proposal).toEqual({
@@ -536,7 +547,7 @@ describe('listReviewQueue — what is waiting', () => {
     expect(queue.total).toBe(5);
     // The badge count is the whole queue, not the page.
     expect(queue.counts.classification_decision).toBe(5);
-    expect(queue.items[0]?.payment.description).toBe('UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD');
+    expect(describedAs(queue.items[0]!)).toBe('UPI-ZOMATO0091-SAMPLE RESTAURANT PVT LTD');
   });
 
   it('filters to the kinds a caller asked for', async () => {

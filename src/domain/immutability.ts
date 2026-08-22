@@ -74,9 +74,24 @@ export function assertPaymentSourceImmutable(
   if (changed !== null) throw changed;
 }
 
-/** The `Evidence` columns that are write-once. */
+/**
+ * The `Evidence` columns that are write-once.
+ *
+ * `type` and `note_kind` are here because they are assertions, not description: a note that
+ * changed from `documentation` to `settlement_claim` would report an obligation settled that
+ * nobody said was settled, which is the exact failure ADR-0018 exists to prevent. `media_type`
+ * and `byte_size` describe bytes that `storage_ref` already addresses immutably, so a change
+ * to either is a row disagreeing with the document it points at.
+ *
+ * Linkage is deliberately absent: it is DERIVED metadata that may be filled in once, and
+ * `domain.assertEvidenceLinkOnce` is the rule that governs it.
+ */
 export interface EvidenceSourceFields {
+  readonly type: string;
+  readonly noteKind: string | null;
   readonly storageRef: string | null;
+  readonly mediaType: string | null;
+  readonly byteSize: number | null;
   readonly rawText: string | null;
   readonly capturedAt: Date;
 }
@@ -91,7 +106,11 @@ export function assertEvidenceImmutable(
 ): void {
   const changed = firstChangedField(
     [
+      ['type', current.type, proposed.type],
+      ['noteKind', current.noteKind ?? '', proposed.noteKind ?? ''],
       ['storageRef', current.storageRef ?? '', proposed.storageRef ?? ''],
+      ['mediaType', current.mediaType ?? '', proposed.mediaType ?? ''],
+      ['byteSize', String(current.byteSize ?? ''), String(proposed.byteSize ?? '')],
       ['rawText', current.rawText ?? '', proposed.rawText ?? ''],
       ['capturedAt', current.capturedAt.toISOString(), proposed.capturedAt.toISOString()],
     ],

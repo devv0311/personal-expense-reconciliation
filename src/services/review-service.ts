@@ -28,6 +28,7 @@ import {
 import type {
   AiInferenceId,
   ConfidenceLevel,
+  EvidenceId,
   ExpenseId,
   ExpenseState,
   Paise,
@@ -43,8 +44,9 @@ import {
   listPendingClassificationInferences,
   listPossibleDuplicateCandidates,
   listRejectedClassifications,
+  listUnmatchedEvidence,
 } from '../db/index.js';
-import type { Executor, PaymentRow, PendingClassificationRow } from '../db/index.js';
+import type { EvidenceRow, Executor, PaymentRow, PendingClassificationRow } from '../db/index.js';
 
 /* --------------------------------------------------------------------------- options */
 
@@ -142,8 +144,36 @@ export interface RejectedClassificationItem {
   readonly expenseState: ExpenseState | null;
 }
 
+/**
+ * A stored document attached to nothing.
+ *
+ * Carries no amount of its own — nothing has read the document yet — and no proposal about
+ * where it belongs, because ingestion deliberately does not guess. The action it implies is
+ * `services.linkEvidence`, and the reviewer supplies the answer.
+ */
+export interface UnmatchedEvidenceItem {
+  readonly kind: 'unmatched_evidence';
+  /** The evidence id — one item per document with no home. */
+  readonly id: string;
+  /** Always zero: **unknown**, not free. See `domain.ReviewQueueEntry.amount`. */
+  readonly amount: Paise;
+  /** When the document was captured, which is the only date this item has. */
+  readonly occurredAt: Date;
+  readonly reasons: readonly ReviewReason[];
+  readonly evidenceId: EvidenceId;
+  readonly evidenceType: string;
+  readonly storageRef: string | null;
+  readonly mediaType: string | null;
+  readonly byteSize: number | null;
+  readonly capturedAt: Date;
+  readonly ingestedAt: Date;
+}
+
 export type ReviewQueueItem =
-  ClassificationDecisionItem | PossibleDuplicateItem | RejectedClassificationItem;
+  | ClassificationDecisionItem
+  | PossibleDuplicateItem
+  | RejectedClassificationItem
+  | UnmatchedEvidenceItem;
 
 export interface ReviewQueueResult {
   /** Ordered by `domain.prioritiseReviewQueue`; the limit is applied after ordering. */
@@ -179,12 +209,16 @@ export async function listReviewQueue(
   if (wanted('rejected_classification')) {
     items.push(...(await rejectedClassificationItems(exec)));
   }
+  if (wanted('unmatched_evidence')) {
+    items.push(...(await unmatchedEvidenceItems(exec)));
+  }
 
   const ordered = prioritiseReviewQueue(items);
   const counts: Record<ReviewItemKind, number> = {
     classification_decision: 0,
     possible_duplicate: 0,
     rejected_classification: 0,
+    unmatched_evidence: 0,
   };
   for (const item of ordered) counts[item.kind] += 1;
 
@@ -333,6 +367,35 @@ function asCandidate(payment: PaymentRow) {
     externalReference: payment.externalReference,
     direction: payment.direction,
   };
+}
+
+/**
+ * Stored documents attached to nothing.
+ *
+ * Documents only. A manual note's links were chosen by the person who typed it, in the same
+ * act; a file can arrive from a share sheet with nothing else known about it, and that is the
+ * case worth a reviewer's time.
+ *
+ * No proposal about where each belongs: matching a receipt to a payment needs an amount, and
+ * reading one off the document is extraction (phase 11). Guessing here would put an inference
+ * in the one place with no confidence level to route on.
+ */
+async function unmatchedEvidenceItems(exec: Executor): Promise<UnmatchedEvidenceItem[]> {
+  const rows = await listUnmatchedEvidence(exec);
+  return rows.map((row: EvidenceRow) => ({
+    kind: 'unmatched_evidence' as const,
+    id: row.id,
+    amount: 0n as Paise,
+    occurredAt: row.capturedAt,
+    reasons: ['evidence_unmatched'] as const,
+    evidenceId: row.id,
+    evidenceType: row.type,
+    storageRef: row.storageRef,
+    mediaType: row.mediaType,
+    byteSize: row.byteSize,
+    capturedAt: row.capturedAt,
+    ingestedAt: row.createdAt,
+  }));
 }
 
 async function rejectedClassificationItems(exec: Executor): Promise<RejectedClassificationItem[]> {
