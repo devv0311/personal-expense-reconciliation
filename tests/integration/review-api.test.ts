@@ -149,6 +149,7 @@ describe('GET /api/review', () => {
       classification_decision: 5,
       possible_duplicate: 0,
       rejected_classification: 0,
+      unmatched_evidence: 0,
     });
   });
 

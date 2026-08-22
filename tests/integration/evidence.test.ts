@@ -8,6 +8,7 @@ import {
   getEvidence,
   ingestEvidenceDocument,
   linkEvidence,
+  listReviewQueue,
   readEvidenceDocument,
   recordManualNote,
 } from '../../src/services/index.js';
@@ -335,5 +336,72 @@ describe('linking evidence, once', () => {
     expect(after.mediaType).toBe(before.mediaType);
     expect(after.byteSize).toBe(before.byteSize);
     expect(after.capturedAt).toEqual(before.capturedAt);
+  });
+});
+
+describe('an unmatched document in the review queue', () => {
+  it('surfaces a document that arrived with no home', async () => {
+    const { evidenceId } = await ingest();
+
+    const queue = await listReviewQueue(database.db);
+
+    expect(queue.counts.unmatched_evidence).toBe(1);
+    const item = queue.items.find((entry) => entry.kind === 'unmatched_evidence');
+    expect(item).toMatchObject({
+      id: evidenceId,
+      evidenceType: 'receipt_image',
+      mediaType: 'image/jpeg',
+      reasons: ['evidence_unmatched'],
+    });
+  });
+
+  it('carries no amount, because nothing has read the document yet', async () => {
+    await ingest();
+
+    const [item] = (await listReviewQueue(database.db)).items;
+    expect(item?.amount).toBe(0n);
+  });
+
+  it('proposes nothing about where the document belongs', async () => {
+    await ingest();
+
+    const [item] = (await listReviewQueue(database.db)).items;
+    // Matching needs an amount, and reading one off the document is extraction (phase 11).
+    expect(item).not.toHaveProperty('proposal');
+    expect(item).not.toHaveProperty('payment');
+  });
+
+  it('drops out of the queue once a human attaches it', async () => {
+    const { evidenceId } = await ingest();
+
+    await linkEvidence(database.db, {
+      evidenceId,
+      linkedPaymentId: paymentId,
+      audit: { actor: 'user', source: 'services.linkEvidence' },
+    });
+
+    const queue = await listReviewQueue(database.db);
+    expect(queue.counts.unmatched_evidence).toBe(0);
+    expect(queue.total).toBe(0);
+  });
+
+  it('never surfaces a manual note', async () => {
+    // The person who typed it chose its links in the same act; an unlinked note is a note
+    // about nothing in particular, not a document waiting to be placed.
+    await recordManualNote(database.db, {
+      text: 'Cash lunch, nobody owes anybody',
+      noteKind: 'documentation',
+      capturedAt: CAPTURED_AT,
+      audit: { actor: 'user', source: 'services.recordManualNote' },
+    });
+
+    expect((await listReviewQueue(database.db)).counts.unmatched_evidence).toBe(0);
+  });
+
+  it('is filtered out when a caller asks for other kinds', async () => {
+    await ingest();
+
+    const queue = await listReviewQueue(database.db, { kinds: ['possible_duplicate'] });
+    expect(queue.items).toHaveLength(0);
   });
 });

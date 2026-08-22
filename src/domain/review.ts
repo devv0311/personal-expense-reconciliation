@@ -33,6 +33,7 @@ export const REVIEW_ITEM_KINDS = [
   'classification_decision',
   'possible_duplicate',
   'rejected_classification',
+  'unmatched_evidence',
 ] as const;
 export type ReviewItemKind = (typeof REVIEW_ITEM_KINDS)[number];
 
@@ -52,7 +53,9 @@ export type ReviewReason =
    */
   | 'malformed_proposal'
   /** The proposal was declined, so this payment is money with no explanation. */
-  | 'payment_unexplained';
+  | 'payment_unexplained'
+  /** A stored document attached to nothing — a purchase the ledger may not have seen. */
+  | 'evidence_unmatched';
 
 /* --------------------------------------------------------------------------- ordering */
 
@@ -72,12 +75,21 @@ export type ReviewReason =
  *     of the reviewer's attention, which is exactly what "confidence changes friction" means.
  *  4. **`rejected_classification`** — a payment left unexplained by a decision already made.
  *     Nothing is wrong and nothing is at risk; it is unfinished rather than pending.
+ *  5. **`unmatched_evidence`** — a stored document attached to nothing. Last, on two grounds.
+ *     No ledger number is wrong while it sits there: nothing is double-counted, no payment is
+ *     unexplained, and no obligation is misreported — every item above it is about money the
+ *     ledger has already recorded, and this one is about money it may never have seen. And its
+ *     amount is genuinely unknown until extraction reads a total off the document (phase 11),
+ *     so it cannot compete for attention on materiality with items that have one. It is in the
+ *     queue at all because a receipt with no home is either a purchase nothing recorded or a
+ *     link only a human can make.
  */
 export const REVIEW_RANKS = {
   possible_duplicate: 0,
   classification_flagged: 1,
   classification_routine: 2,
   rejected_classification: 3,
+  unmatched_evidence: 4,
 } as const;
 
 /** The minimum a queue entry must carry to be ordered. Callers may carry much more. */
@@ -85,7 +97,13 @@ export interface ReviewQueueEntry {
   readonly kind: ReviewItemKind;
   /** Stable, unique identity — the inference id, or the two payment ids of a pair. */
   readonly id: string;
-  /** What is at stake. Ordering only; no arithmetic is done on it here. */
+  /**
+   * What is at stake. Ordering only; no arithmetic is done on it here.
+   *
+   * Zero on an `unmatched_evidence` entry means **unknown**, not "no money": nothing has read
+   * the document yet. The effect is that unmatched documents sort last within their own rank,
+   * which is the honest place for an item whose stake nobody has established.
+   */
   readonly amount: Paise;
   readonly occurredAt: Date;
   readonly reasons: readonly ReviewReason[];
@@ -95,6 +113,7 @@ export interface ReviewQueueEntry {
 export function reviewRank(entry: ReviewQueueEntry): number {
   if (entry.kind === 'possible_duplicate') return REVIEW_RANKS.possible_duplicate;
   if (entry.kind === 'rejected_classification') return REVIEW_RANKS.rejected_classification;
+  if (entry.kind === 'unmatched_evidence') return REVIEW_RANKS.unmatched_evidence;
   return entry.reasons.some((reason) => reason !== 'decision_required')
     ? REVIEW_RANKS.classification_flagged
     : REVIEW_RANKS.classification_routine;

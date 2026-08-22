@@ -41,10 +41,52 @@ describe('reviewRank', () => {
     }
   });
 
-  it('puts an unexplained payment last — unfinished, not pending', () => {
+  it('puts an unexplained payment below every pending decision — unfinished, not pending', () => {
     expect(
       reviewRank(entry({ kind: 'rejected_classification', reasons: ['payment_unexplained'] })),
     ).toBe(3);
+  });
+
+  it('puts an unmatched document last of all', () => {
+    // No ledger number is wrong while it sits there, and nothing has read an amount off it.
+    expect(reviewRank(entry({ kind: 'unmatched_evidence', reasons: ['evidence_unmatched'] }))).toBe(
+      4,
+    );
+  });
+});
+
+describe('an unmatched document in the ordering', () => {
+  const unmatched = entry({
+    kind: 'unmatched_evidence',
+    id: 'evidence-1',
+    amount: paise(0n),
+    reasons: ['evidence_unmatched'],
+  });
+
+  it('sorts below every item about money the ledger has already recorded', () => {
+    const unexplained = entry({
+      kind: 'rejected_classification',
+      id: 'payment-1',
+      amount: paise(100n),
+      reasons: ['payment_unexplained'],
+    });
+
+    // Even against the smallest unexplained payment: a ₹1 payment nobody explained is money
+    // this ledger recorded and cannot account for; an unmatched receipt is a document.
+    expect(prioritiseReviewQueue([unmatched, unexplained]).map((item) => item.id)).toEqual([
+      'payment-1',
+      'evidence-1',
+    ]);
+  });
+
+  it('falls back to oldest-first among themselves, since none of them has an amount', () => {
+    const older = { ...unmatched, id: 'evidence-older', occurredAt: new Date('2026-07-01') };
+    const newer = { ...unmatched, id: 'evidence-newer', occurredAt: new Date('2026-07-20') };
+
+    expect(prioritiseReviewQueue([newer, older]).map((item) => item.id)).toEqual([
+      'evidence-older',
+      'evidence-newer',
+    ]);
   });
 });
 
