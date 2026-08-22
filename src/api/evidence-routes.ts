@@ -80,18 +80,19 @@ export async function postEvidenceFile(deps: ApiDependencies, request: Request):
     throw new ApiRequestError('"file" is required and must be an uploaded file part.', 'file');
   }
 
-  const type = requireOneOf(formFields(form), 'type', DOCUMENT_TYPES);
-  const capturedAt = requireTimestamp(formFields(form), 'capturedAt');
-  const actor = requirePersonActor(formFields(form));
-  const rawText = optionalString(formFields(form), 'rawText');
-  const reason = optionalString(formFields(form), 'reason');
+  const fields = formFields(form);
+  const type = requireOneOf(fields, 'type', DOCUMENT_TYPES);
+  const capturedAt = requireTimestamp(fields, 'capturedAt');
+  const actor = requirePersonActor(fields);
+  const rawText = optionalString(fields, 'rawText');
+  const reason = optionalString(fields, 'reason');
 
   const result = await ingestEvidenceDocument(deps.db, {
     type,
     bytes: new Uint8Array(await file.arrayBuffer()),
     mediaType: file.type,
     capturedAt,
-    ...links(formFields(form)),
+    ...links(fields),
     ...(rawText === undefined ? {} : { rawText }),
     store: deps.evidenceStore,
     audit: {

@@ -139,7 +139,7 @@ export async function ingestEvidenceDocument(
   }
 
   const draft = {
-    type: input.type as EvidenceType,
+    type: input.type,
     noteKind: null,
     storageRef: stored.storageRef,
     mediaType: stored.mediaType,
@@ -327,7 +327,8 @@ export async function readEvidenceDocument(
     );
   }
 
-  const document = await withStoreErrorsTranslated(() => input.store.get(evidence.storageRef!));
+  const storageRef = evidence.storageRef;
+  const document = await withStoreErrorsTranslated(() => input.store.get(storageRef));
   return { evidence, bytes: document.bytes, mediaType: document.mediaType };
 }
 
