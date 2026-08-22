@@ -1,19 +1,27 @@
 /**
- * A path dispatcher, so the review surface can be exercised — by tests now, by a server later
- * — without a framework in between.
+ * A path dispatcher, so the API can be exercised — by tests now, by a server later — without a
+ * framework in between.
  *
  * The handlers are the real product here; this is the smallest thing that turns a set of them
  * into something you can send a `Request` to. Next.js does this job from the filesystem when
  * the UI phase arrives, at which point each route becomes a one-line re-export and this file
  * stops being on the path (ADR-0032).
  *
- * Matching is exact-segment with `:name` captures. No wildcards, no regex routes, no
- * precedence rules — a route table this small does not need them, and every one of those
- * features is a way for two routes to disagree about who owns a path.
+ * Matching is exact-segment with `:name` captures, first match wins. No wildcards, no regex
+ * routes, no scoring — a route table this small does not need them, and every one of those
+ * features is a way for two routes to disagree about who owns a path. The one ordering rule it
+ * does have is written down at `API_ROUTES`.
  */
 
-import type { AiService, Database } from '../services/index.js';
+import type { AiService, Database, EvidenceStore } from '../services/index.js';
 
+import {
+  getEvidenceContent,
+  getEvidenceMetadata,
+  postEvidenceFile,
+  postEvidenceLink,
+  postEvidenceNote,
+} from './evidence-routes.js';
 import { jsonResponse, toErrorResponse } from './http.js';
 import {
   getReviewQueue,
@@ -27,6 +35,8 @@ export interface ApiDependencies {
   readonly db: Database;
   /** Used by re-classification only; every other route is a read or a decision. */
   readonly ai: AiService;
+  /** Where documents live, which is deliberately not the database (`security-model.md`). */
+  readonly evidenceStore: EvidenceStore;
 }
 
 export type RouteParams = Readonly<Record<string, string>>;
@@ -63,37 +73,69 @@ export const REVIEW_ROUTES: readonly ApiRoute[] = [
   },
 ];
 
-export interface ReviewApi {
+/** Ingesting a document, placing it, and reading it back (`docs/roadmap.md` phase 10). */
+export const EVIDENCE_ROUTES: readonly ApiRoute[] = [
+  { method: 'POST', path: '/api/evidence/files', handler: postEvidenceFile },
+  { method: 'POST', path: '/api/evidence/notes', handler: postEvidenceNote },
+  { method: 'POST', path: '/api/evidence/:evidenceId/link', handler: postEvidenceLink },
+  { method: 'GET', path: '/api/evidence/:evidenceId', handler: getEvidenceMetadata },
+  { method: 'GET', path: '/api/evidence/:evidenceId/content', handler: getEvidenceContent },
+];
+
+/**
+ * Every route, in match order.
+ *
+ * Order carries one rule: a literal segment is listed before the capture that would swallow
+ * it. `/api/evidence/files` and `/api/evidence/notes` come before `/api/evidence/:evidenceId`,
+ * which would otherwise read both as ids. That is the whole precedence story — one line of
+ * ordering rather than a scoring algorithm — and `handle` below is what makes it hold for
+ * every verb rather than only for the ones that happen to be registered first.
+ */
+export const API_ROUTES: readonly ApiRoute[] = [...REVIEW_ROUTES, ...EVIDENCE_ROUTES];
+
+export interface Api {
   readonly routes: readonly ApiRoute[];
   handle(request: Request): Promise<Response>;
 }
 
 /**
- * Builds the review API over its dependencies.
+ * Builds the API over its dependencies.
  *
  * Errors are caught here rather than in each handler, so every route maps failures the same
  * way and no handler can accidentally return a stack trace (`security-model.md`).
  */
-export function createReviewApi(deps: ApiDependencies): ReviewApi {
+export function createApi(deps: ApiDependencies): Api {
   return {
-    routes: REVIEW_ROUTES,
+    routes: API_ROUTES,
     handle: async (request: Request): Promise<Response> => {
       try {
         const { pathname } = new URL(request.url);
         const segments = splitPath(pathname);
 
-        let pathMatched = false;
-        for (const route of REVIEW_ROUTES) {
-          const params = matchPath(splitPath(route.path), segments);
-          if (params === null) continue;
-          pathMatched = true;
-          if (route.method !== request.method) continue;
-          return await route.handler(deps, request, params);
+        // The first pattern that matches **owns** the path; the routes sharing that pattern
+        // are its methods. Without that, a GET of `/api/evidence/files` would fall past the
+        // POST it belongs to and into `/api/evidence/:evidenceId`, which would then complain
+        // that "files" is not a UUID — a 400 about an id the caller never sent, for what is
+        // plainly a wrong verb on a known path.
+        const matches = API_ROUTES.map((route) => ({
+          route,
+          params: matchPath(splitPath(route.path), segments),
+        })).filter(
+          (match): match is { route: ApiRoute; params: RouteParams } => match.params !== null,
+        );
+
+        const owner = matches[0]?.route.path;
+        const match = matches.find(
+          (candidate) =>
+            candidate.route.path === owner && candidate.route.method === request.method,
+        );
+        if (match !== undefined) {
+          return await match.route.handler(deps, request, match.params);
         }
 
         // A known path with the wrong verb is a different mistake from an unknown path, and
         // saying so is the difference between a usable API and a guessing game.
-        return pathMatched
+        return owner !== undefined
           ? jsonResponse(405, {
               error: {
                 code: 'METHOD_NOT_ALLOWED',

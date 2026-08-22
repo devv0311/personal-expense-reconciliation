@@ -9,6 +9,7 @@
  * `src/api/README.md`.
  */
 
+export * from './evidence-routes.js';
 export * from './http.js';
 export * from './review-routes.js';
 export * from './router.js';
