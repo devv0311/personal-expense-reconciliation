@@ -97,3 +97,18 @@ export interface ClassificationProposalsFixture {
 export function loadClassificationProposals(): ClassificationProposalsFixture {
   return loadFixture<ClassificationProposalsFixture>('ai-classification-proposals.json');
 }
+
+/** The shape of `fixtures/receipt-extraction-proposals.json`. */
+export interface ReceiptExtractionProposalsFixture {
+  model: { provider: string; model: string };
+  responses: Array<{
+    captured_at: string;
+    why: string;
+    parse_receipt: unknown;
+    extract_receipt_items: unknown;
+  }>;
+}
+
+export function loadReceiptExtractionProposals(): ReceiptExtractionProposalsFixture {
+  return loadFixture<ReceiptExtractionProposalsFixture>('receipt-extraction-proposals.json');
+}

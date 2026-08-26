@@ -1,0 +1,101 @@
+{
+  "note": "Synthetic model responses for ai.parseReceipt / ai.extractReceiptItems (phase 11). Each entry is a verbatim model response pair as the scripted test transport returns it, keyed by the evidence's captured_at (ISO-8601) — the one field the redacted receipt-evidence payload always carries, unlike rawText, which a photographed receipt has none of. No real model produced any of these, and nothing here is a proposal about real money.",
+  "model": { "provider": "synthetic", "model": "scripted-receipt-extractor-v1" },
+  "responses": [
+    {
+      "captured_at": "2026-07-16T20:05:00.000Z",
+      "why": "Restaurant bill with a tip added at the table — the receipt total undershoots what was actually charged (scenario-analysis.md #20, fixtures/receipt-amount-mismatch.json).",
+      "parse_receipt": {
+        "confidence": "high",
+        "proposedOutput": {
+          "merchantHint": "Sample Restaurant",
+          "subtotalMinorUnits": "250000",
+          "taxMinorUnits": "20000",
+          "totalMinorUnits": "270000",
+          "currency": "INR"
+        }
+      },
+      "extract_receipt_items": {
+        "confidence": "medium",
+        "proposedOutput": [
+          {
+            "description": "Two mains, one starter",
+            "quantity": "1",
+            "unitPriceMinorUnits": null,
+            "lineTotalMinorUnits": "250000",
+            "suggestedCategory": "dining"
+          }
+        ]
+      }
+    },
+    {
+      "captured_at": "2026-07-01T19:25:00.000Z",
+      "why": "Blinkit mixed basket — five items split personal/flat (scenario-analysis.md #1, fixtures/blinkit-order-mixed.json). Item sum (1190) matches the stated subtotal exactly; total (1240) includes an untracked delivery fee, which this domain has no column for and does not attempt to reconcile.",
+      "parse_receipt": {
+        "confidence": "high",
+        "proposedOutput": {
+          "merchantHint": "Blinkit",
+          "subtotalMinorUnits": "119000",
+          "taxMinorUnits": null,
+          "totalMinorUnits": "124000",
+          "currency": "INR"
+        }
+      },
+      "extract_receipt_items": {
+        "confidence": "high",
+        "proposedOutput": [
+          {
+            "description": "Amul Milk 1L (x2)",
+            "quantity": "2",
+            "unitPriceMinorUnits": "4000",
+            "lineTotalMinorUnits": "8000",
+            "suggestedCategory": "groceries"
+          },
+          {
+            "description": "Chicken Breast 500g",
+            "quantity": "1",
+            "unitPriceMinorUnits": null,
+            "lineTotalMinorUnits": "31000",
+            "suggestedCategory": "groceries"
+          },
+          {
+            "description": "Shampoo 340ml",
+            "quantity": "1",
+            "unitPriceMinorUnits": null,
+            "lineTotalMinorUnits": "26000",
+            "suggestedCategory": "personal_care"
+          },
+          {
+            "description": "Dish Soap",
+            "quantity": "1",
+            "unitPriceMinorUnits": null,
+            "lineTotalMinorUnits": "14000",
+            "suggestedCategory": "groceries"
+          },
+          {
+            "description": "Snacks (assorted)",
+            "quantity": "1",
+            "unitPriceMinorUnits": null,
+            "lineTotalMinorUnits": "40000",
+            "suggestedCategory": "groceries"
+          }
+        ]
+      }
+    },
+    {
+      "captured_at": "2026-07-20T12:00:00.000Z",
+      "why": "A model that could not read any figure off the document at all — gate 2 refuses this draft (domain.assertReceiptDraftInformative) and nothing is written.",
+      "parse_receipt": {
+        "confidence": "unknown",
+        "proposedOutput": {
+          "merchantHint": null,
+          "subtotalMinorUnits": null,
+          "taxMinorUnits": null,
+          "totalMinorUnits": null,
+          "currency": "INR"
+        }
+      },
+      "extract_receipt_items": { "confidence": "unknown", "proposedOutput": [] }
+    }
+  ]
+}

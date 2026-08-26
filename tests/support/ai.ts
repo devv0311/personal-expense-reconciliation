@@ -14,10 +14,15 @@
  * the fixture quietly describing a payload that no longer exists.
  */
 
-import type { ModelRequest, ModelTransport, RedactedPayment } from '../../src/ai/index.js';
+import type {
+  ModelRequest,
+  ModelTransport,
+  RedactedPayment,
+  RedactedReceiptEvidence,
+} from '../../src/ai/index.js';
 import type { PersonId } from '../../src/domain/index.js';
 
-import { loadClassificationProposals } from './fixtures.js';
+import { loadClassificationProposals, loadReceiptExtractionProposals } from './fixtures.js';
 
 export interface ScriptedTransportOptions {
   /** Fixture person id → database id, for substituting `{{person_*}}` placeholders. */
@@ -89,6 +94,47 @@ export function scriptedClassificationTransport(
         );
       }
       return Promise.resolve(scripted.get(description));
+    },
+  };
+}
+
+export interface ScriptedReceiptTransport extends ModelTransport {
+  /** Every captured_at this transport was asked about, per operation, in order. */
+  readonly asked: readonly { readonly operation: string; readonly capturedAt: string }[];
+}
+
+/**
+ * A transport that answers `parseReceipt`/`extractReceiptItems` from
+ * `fixtures/receipt-extraction-proposals.json`, keyed by the evidence's `captured_at` — the one
+ * field the redacted payload always carries, since a photographed receipt routinely has no
+ * `rawText` for a key to hang off of the way a payment's description does.
+ *
+ * An unscripted `captured_at` throws rather than returning a default, exactly as the
+ * classification transport does: a test that forgot to script an evidence row should fail
+ * loudly, not silently extract nothing.
+ */
+export function scriptedReceiptExtractionTransport(): ScriptedReceiptTransport {
+  const fixture = loadReceiptExtractionProposals();
+  const byCapturedAt = new Map(fixture.responses.map((entry) => [entry.captured_at, entry]));
+
+  const asked: Array<{ operation: string; capturedAt: string }> = [];
+  return {
+    asked,
+    modelInfo: { provider: fixture.model.provider, model: fixture.model.model },
+    complete: (request: ModelRequest) => {
+      const capturedAt = (request.input as RedactedReceiptEvidence).capturedAt;
+      asked.push({ operation: request.operation, capturedAt });
+      const entry = byCapturedAt.get(capturedAt);
+      if (entry === undefined) {
+        return Promise.reject(
+          new Error(`No scripted receipt-extraction response for captured_at "${capturedAt}".`),
+        );
+      }
+      if (request.operation === 'parse_receipt') return Promise.resolve(entry.parse_receipt);
+      if (request.operation === 'extract_receipt_items') {
+        return Promise.resolve(entry.extract_receipt_items);
+      }
+      return Promise.reject(new Error(`Unexpected operation "${request.operation}".`));
     },
   };
 }
