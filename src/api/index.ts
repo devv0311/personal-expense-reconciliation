@@ -11,5 +11,6 @@
 
 export * from './evidence-routes.js';
 export * from './http.js';
+export * from './receipt-routes.js';
 export * from './review-routes.js';
 export * from './router.js';

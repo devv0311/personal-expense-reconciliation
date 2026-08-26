@@ -24,6 +24,12 @@ import {
 } from './evidence-routes.js';
 import { jsonResponse, toErrorResponse } from './http.js';
 import {
+  getReceiptRoute,
+  postReceiptConfirmation,
+  postReceiptCorrection,
+  postReceiptExtraction,
+} from './receipt-routes.js';
+import {
   getReviewQueue,
   postInferenceDecision,
   postPaymentDuplicateDecision,
@@ -78,8 +84,16 @@ export const EVIDENCE_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/evidence/files', handler: postEvidenceFile },
   { method: 'POST', path: '/api/evidence/notes', handler: postEvidenceNote },
   { method: 'POST', path: '/api/evidence/:evidenceId/link', handler: postEvidenceLink },
+  { method: 'POST', path: '/api/evidence/:evidenceId/receipt', handler: postReceiptExtraction },
   { method: 'GET', path: '/api/evidence/:evidenceId', handler: getEvidenceMetadata },
   { method: 'GET', path: '/api/evidence/:evidenceId/content', handler: getEvidenceContent },
+];
+
+/** Confirming, correcting and reading the `Receipt` extraction produced (`docs/roadmap.md` phase 11). */
+export const RECEIPT_ROUTES: readonly ApiRoute[] = [
+  { method: 'POST', path: '/api/receipts/:receiptId/confirm', handler: postReceiptConfirmation },
+  { method: 'POST', path: '/api/receipts/:receiptId/correct', handler: postReceiptCorrection },
+  { method: 'GET', path: '/api/receipts/:receiptId', handler: getReceiptRoute },
 ];
 
 /**
@@ -91,7 +105,11 @@ export const EVIDENCE_ROUTES: readonly ApiRoute[] = [
  * ordering rather than a scoring algorithm — and `handle` below is what makes it hold for
  * every verb rather than only for the ones that happen to be registered first.
  */
-export const API_ROUTES: readonly ApiRoute[] = [...REVIEW_ROUTES, ...EVIDENCE_ROUTES];
+export const API_ROUTES: readonly ApiRoute[] = [
+  ...REVIEW_ROUTES,
+  ...EVIDENCE_ROUTES,
+  ...RECEIPT_ROUTES,
+];
 
 export interface Api {
   readonly routes: readonly ApiRoute[];

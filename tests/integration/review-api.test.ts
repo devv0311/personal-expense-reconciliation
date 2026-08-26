@@ -508,8 +508,12 @@ describe('the surface itself', () => {
       'POST /api/evidence/files',
       'POST /api/evidence/notes',
       'POST /api/evidence/:evidenceId/link',
+      'POST /api/evidence/:evidenceId/receipt',
       'GET /api/evidence/:evidenceId',
       'GET /api/evidence/:evidenceId/content',
+      'POST /api/receipts/:receiptId/confirm',
+      'POST /api/receipts/:receiptId/correct',
+      'GET /api/receipts/:receiptId',
     ]);
   });
 });

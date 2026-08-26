@@ -42,6 +42,7 @@ import {
   readJsonObject,
   requireOneOf,
   requireString,
+  requireParam,
   requireUuid,
 } from './http.js';
 import type { ApiDependencies, RouteParams } from './router.js';
@@ -213,14 +214,6 @@ function optionalWindowSeconds(body: Record<string, unknown>): number | undefine
       '"windowSeconds", when present, must be a non-negative integer.',
       'windowSeconds',
     );
-  }
-  return value;
-}
-
-function requireParam(params: RouteParams, name: string): string {
-  const value = params[name];
-  if (value === undefined) {
-    throw new ApiRequestError(`Missing path parameter "${name}".`, name);
   }
   return value;
 }

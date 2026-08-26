@@ -201,3 +201,32 @@ export function optionalMinorUnits(params: URLSearchParams, field: string): bigi
   }
   return BigInt(raw);
 }
+
+/**
+ * A JSON body field carrying minor units, distinguishing "absent" from "explicitly null" —
+ * `services.correctReceipt`'s way of telling "leave this field alone" from "clear it".
+ * `undefined` means the key was not sent at all; `null` means it was sent as `null`.
+ */
+export function optionalMinorUnitsField(
+  body: Record<string, unknown>,
+  field: string,
+): bigint | null | undefined {
+  if (!(field in body)) return undefined;
+  const value = body[field];
+  if (value === null) return null;
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    throw new ApiRequestError(
+      `"${field}" must be a non-negative integer count of minor units as a decimal string, or ` +
+        'null.',
+      field,
+    );
+  }
+  return BigInt(value);
+}
+
+/** The path segment `params` should have carried, refused as a 400 rather than a cast failure. */
+export function requireParam(params: Readonly<Record<string, string>>, name: string): string {
+  const value = params[name];
+  if (value === undefined) throw new ApiRequestError(`"${name}" is missing from the path.`, name);
+  return value;
+}
