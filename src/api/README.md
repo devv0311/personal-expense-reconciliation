@@ -40,6 +40,20 @@ The upload is `multipart/form-data` read through `Request.formData()`, which is 
 is the one response here that is not JSON; it sets `nosniff`, because the body is a file
 somebody uploaded.
 
+**Implemented (phase 11): receipt extraction.**
+
+| Route                                    | Service          |
+| ---------------------------------------- | ---------------- |
+| `POST /api/evidence/:evidenceId/receipt` | `extractReceipt` |
+| `POST /api/receipts/:receiptId/confirm`  | `confirmReceipt` |
+| `POST /api/receipts/:receiptId/correct`  | `correctReceipt` |
+| `GET /api/receipts/:receiptId`           | `getReceipt`     |
+
+A rejected extraction (the model's answer was not usable) is a 422 naming its `code`; an
+ineligible or already-extracted evidence row is a `ServiceError`, mapped the same way every
+other precondition failure is. `optionalMinorUnitsField` (`http.ts`) distinguishes a
+correction field left out of the body (unchanged) from one sent as `null` (cleared).
+
 Handlers are Web `Request → Response` functions — precisely a Next.js App Router route
 handler's signature — so mounting them under `app/api/<route>/route.ts` later is a re-export, not a
 rewrite. **No framework is installed** to serve nine routes before any UI exists (ADR-0032).
@@ -69,4 +83,4 @@ decision, so `parseDecisionActor` does not apply to it, but an upload arriving o
 still a person's act and `system` would be an answer nobody can check.
 
 **Not implemented:** any UI, any server process (nothing listens on a port yet), auth, and any
-route outside the review and evidence surfaces.
+route outside the review, evidence and receipt surfaces.

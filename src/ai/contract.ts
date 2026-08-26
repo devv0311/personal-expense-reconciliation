@@ -18,11 +18,14 @@ import {
   AI_PROPOSED_KINDS,
   CONFIDENCE_LEVELS,
   EXPENSE_RELATIONSHIP_TYPES,
+  paise,
+  SUPPORTED_CURRENCY,
 } from '../domain/index.js';
 import type {
   AiInferenceType,
   ConfidenceLevel,
   ExpenseRelationshipType,
+  Paise,
   PersonId,
   ProposedKind,
 } from '../domain/index.js';
@@ -144,6 +147,132 @@ export function parseTransactionClassification(raw: unknown): TransactionClassif
   };
 }
 
+/* ---------------------------------------------------------------------- receipt extraction */
+
+/**
+ * `ai.parseReceipt`'s proposal (`ai-boundary.md`, ADR-0036).
+ *
+ * `merchantHint` is free text off the receipt's header, resolved to a catalogued `Merchant`
+ * deterministically in `src/services` (phase-7's alias match) — never written here, and never
+ * by a second gated AI operation this phase does not build (this phase's scope decisions).
+ * `subtotal`/`tax`/`total` are independently nullable: a model may read a total off a receipt
+ * with no itemized tax line, or vice versa, and `assertReceiptDraftInformative` is what refuses
+ * a draft naming none of them at all.
+ */
+export interface ReceiptDraft {
+  readonly merchantHint: string | null;
+  readonly subtotal: Paise | null;
+  readonly tax: Paise | null;
+  readonly total: Paise | null;
+  readonly currency: string;
+}
+
+/** Keys the contract defines for a `ReceiptDraft`. Anything else is a contract breach. */
+const RECEIPT_DRAFT_KEYS = [
+  'merchantHint',
+  'subtotalMinorUnits',
+  'taxMinorUnits',
+  'totalMinorUnits',
+  'currency',
+];
+
+/**
+ * Validates one model response into an envelope-shaped `ReceiptDraft`.
+ *
+ * @throws AiContractError for anything that is not exactly the contract.
+ */
+export function parseParseReceiptResponse(raw: unknown): {
+  readonly proposedOutput: ReceiptDraft;
+  readonly confidence: ConfidenceLevel;
+} {
+  const response = requireObject(raw, 'response');
+  const confidence = requireEnum(response['confidence'], CONFIDENCE_LEVELS, 'confidence');
+  const proposedOutput = parseReceiptDraft(response['proposedOutput']);
+  requireNoUnexpectedKeys(response, ['confidence', 'proposedOutput'], 'response');
+  return { proposedOutput, confidence };
+}
+
+/** Validates a bare `ReceiptDraft` — the model's, or a human's correction of it. */
+export function parseReceiptDraft(raw: unknown): ReceiptDraft {
+  const draft = requireObject(raw, 'proposedOutput');
+  requireNoUnexpectedKeys(draft, RECEIPT_DRAFT_KEYS, 'proposedOutput');
+  return {
+    merchantHint: optionalNonEmptyString(draft['merchantHint'], 'proposedOutput.merchantHint'),
+    subtotal: optionalMinorUnits(draft['subtotalMinorUnits'], 'proposedOutput.subtotalMinorUnits'),
+    tax: optionalMinorUnits(draft['taxMinorUnits'], 'proposedOutput.taxMinorUnits'),
+    total: optionalMinorUnits(draft['totalMinorUnits'], 'proposedOutput.totalMinorUnits'),
+    currency: requireCurrency(draft['currency'], 'proposedOutput.currency'),
+  };
+}
+
+/**
+ * One line `ai.extractReceiptItems` proposes (`ai-boundary.md`, ADR-0036).
+ *
+ * `lineTotal` is required — an item with no total is not a line item, it is a description —
+ * while `unitPrice` stays optional: a receipt showing one combined line for "2 x Milk ₹80" may
+ * carry a per-unit price nowhere for the model to read.
+ */
+export interface ReceiptItemDraft {
+  readonly description: string;
+  /** A decimal string, matching `ReceiptItem.quantity` — a count/measure, not money. */
+  readonly quantity: string;
+  readonly unitPrice: Paise | null;
+  readonly lineTotal: Paise;
+  readonly suggestedCategory: string | null;
+}
+
+const RECEIPT_ITEM_DRAFT_KEYS = [
+  'description',
+  'quantity',
+  'unitPriceMinorUnits',
+  'lineTotalMinorUnits',
+  'suggestedCategory',
+];
+
+/**
+ * Validates one model response into an envelope-shaped array of `ReceiptItemDraft`.
+ *
+ * An empty array is a valid proposal — a total-only receipt with nothing itemized is a real
+ * outcome, not a contract breach — so this gate never requires at least one item.
+ */
+export function parseExtractReceiptItemsResponse(raw: unknown): {
+  readonly proposedOutput: readonly ReceiptItemDraft[];
+  readonly confidence: ConfidenceLevel;
+} {
+  const response = requireObject(raw, 'response');
+  const confidence = requireEnum(response['confidence'], CONFIDENCE_LEVELS, 'confidence');
+  const proposedOutput = parseReceiptItemDrafts(response['proposedOutput']);
+  requireNoUnexpectedKeys(response, ['confidence', 'proposedOutput'], 'response');
+  return { proposedOutput, confidence };
+}
+
+/** Validates a bare `ReceiptItemDraft[]` — the model's, or a human's correction of it. */
+export function parseReceiptItemDrafts(raw: unknown): readonly ReceiptItemDraft[] {
+  if (!Array.isArray(raw)) {
+    throw new AiContractError(
+      raw === undefined || raw === null ? 'FIELD_MISSING' : 'MALFORMED_RESPONSE',
+      `Expected "proposedOutput" to be an array of receipt items, received ${describe(raw)}.`,
+      { field: 'proposedOutput', received: describe(raw) },
+    );
+  }
+  return raw.map((entry, index) => parseReceiptItemDraft(entry, `proposedOutput[${index}]`));
+}
+
+function parseReceiptItemDraft(raw: unknown, field: string): ReceiptItemDraft {
+  const item = requireObject(raw, field);
+  requireNoUnexpectedKeys(item, RECEIPT_ITEM_DRAFT_KEYS, field);
+  return {
+    description: requireNonEmptyString(item['description'], `${field}.description`),
+    quantity: requireQuantity(item['quantity'], `${field}.quantity`),
+    unitPrice: optionalMinorUnits(item['unitPriceMinorUnits'], `${field}.unitPriceMinorUnits`),
+    lineTotal: requireMinorUnits(item['lineTotalMinorUnits'], `${field}.lineTotalMinorUnits`),
+    suggestedCategory: optionalNonEmptyString(
+      item['suggestedCategory'],
+      `${field}.suggestedCategory`,
+    ),
+  };
+}
+
 /* ------------------------------------------------------------------------- internals */
 
 function requireObject(value: unknown, field: string): Record<string, unknown> {
@@ -183,6 +312,72 @@ function optionalNonEmptyString(value: unknown, field: string): string | null {
     );
   }
   return value;
+}
+
+function requireNonEmptyString(value: unknown, field: string): string {
+  if (value === undefined || value === null) {
+    throw new AiContractError('FIELD_MISSING', `"${field}" is required.`, { field });
+  }
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new AiContractError(
+      'FIELD_INVALID',
+      `"${field}" must be a non-empty string, received ${describe(value)}.`,
+      { field, received: describe(value) },
+    );
+  }
+  return value;
+}
+
+/** V1 does arithmetic in one currency only; a proposal naming another is rejected, not coerced. */
+function requireCurrency(value: unknown, field: string): string {
+  const currency = requireNonEmptyString(value, field);
+  if (currency !== SUPPORTED_CURRENCY) {
+    throw new AiContractError(
+      'FIELD_INVALID',
+      `"${field}" must be "${SUPPORTED_CURRENCY}", received "${currency}". V1 supports ` +
+        'arithmetic in one currency only (invariants.md #12, "Currency scope for V1").',
+      { field, received: currency },
+    );
+  }
+  return currency;
+}
+
+/** An exact, non-negative integer count of minor units, as a decimal string — never a float. */
+const MINOR_UNITS_STRING_PATTERN = /^\d+$/;
+
+/** A count/measure with up to three decimal places, matching `ReceiptItem.quantity`'s column. */
+const QUANTITY_STRING_PATTERN = /^\d+(?:\.\d{1,3})?$/;
+
+function requireMinorUnits(value: unknown, field: string): Paise {
+  const text = requireNonEmptyString(value, field);
+  if (!MINOR_UNITS_STRING_PATTERN.test(text)) {
+    throw new AiContractError(
+      'FIELD_INVALID',
+      `"${field}" must be a non-negative integer count of minor units as a decimal string ` +
+        `(e.g. "12500"), received ${describe(value)}. Money crosses this boundary as an exact ` +
+        'string precisely so it never passes through a float (invariants.md #12).',
+      { field, received: describe(value) },
+    );
+  }
+  return paise(BigInt(text));
+}
+
+function optionalMinorUnits(value: unknown, field: string): Paise | null {
+  if (value === undefined || value === null) return null;
+  return requireMinorUnits(value, field);
+}
+
+function requireQuantity(value: unknown, field: string): string {
+  const text = requireNonEmptyString(value, field);
+  if (!QUANTITY_STRING_PATTERN.test(text) || Number(text) <= 0) {
+    throw new AiContractError(
+      'FIELD_INVALID',
+      `"${field}" must be a positive decimal with at most three places (e.g. "2" or "0.5"), ` +
+        `received ${describe(value)}.`,
+      { field, received: describe(value) },
+    );
+  }
+  return text;
 }
 
 function requirePersonRef(value: unknown, field: string): PersonRef {

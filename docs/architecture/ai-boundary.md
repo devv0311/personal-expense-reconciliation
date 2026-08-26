@@ -13,6 +13,15 @@ by convention. See `CLAUDE.md` for the one-paragraph version and
 > than purely specified — `src/ai` holds the contract, the redaction and the validation, and
 > `services.decideInference` exists. See "What exists" at the foot of this document for exactly
 > which parts, and ADRs 0023–0027 for the five decisions building it required.
+>
+> **Implementation note (2026-08-27, phase 11).** `parseReceipt`/`extractReceiptItems` are now
+> built, and are the first operations whose output writes state **without** going through
+> `decideInference` — `Receipt` is DERIVED, not APPROVED-classified, so ADR-0036 gives it a
+> narrower, direct-write path instead. The validation contract's own wording ("before it can
+> influence an Expense, Allocation, Settlement, ExpenseAdjustment, Merchant, or any other
+> APPROVED-classified record") already scoped `decideInference`'s exclusivity claim to that list;
+> ADR-0036 is what makes explicit that `Receipt` sits outside it. See "What exists" below and
+> ADRs 0036–0037.
 
 ## Service interface
 
@@ -162,3 +171,28 @@ carried forward from ADR-0022.
   it, unapproved, so that `REVIEW_REQUIRED` means something and so `data-flow.md` step 5's
   `db.updateExpense (APPROVED)` has a row to update. On the settlement path nothing exists until
   acceptance, because `Settlement` has no pre-approval state (ADR-0026).
+
+## What exists (phase 11, 2026-08-27)
+
+Two more of the nine operations, and the first time this boundary's output writes anything
+_without_ a `decideInference`-shaped gate (ADR-0036 — `Receipt` is DERIVED, not
+APPROVED-classified, unlike everything phase 8 touches).
+
+| Piece                                | Where                                  | Notes                                                                                                                                                                                                                                   |
+| ------------------------------------ | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `parseReceipt`/`extractReceiptItems` | `src/ai/receipt-extraction.ts`         | Composed into `AiService` by `classify-transaction.ts`'s `createAiService`, alongside `classifyTransaction`.                                                                                                                            |
+| Gate 1 — schema validation           | `src/ai/contract.ts`                   | `ReceiptDraft`/`ReceiptItemDraft`. Money crosses as an exact minor-units decimal string, same discipline as `RedactedPayment.amountMinorUnits`.                                                                                         |
+| Gate 2 — semantic validation         | `domain.assertReceiptDraftInformative` | Refuses a draft naming no figure at all — nothing for a `Receipt` row to record.                                                                                                                                                        |
+| Redaction                            | `src/ai/redaction.ts`                  | `redactReceiptText` — narrower than `redactDescription`: only a keyword-labelled digit run is masked, never a bare 4+ digit run, since a receipt's raw text is legitimately full of non-identifying digits (prices, quantities, dates). |
+| Direct write, no decision gate       | `services/receipt-service.ts`          | `extractReceipt` writes `Receipt` + `ReceiptItem`s in the same unit of work as the two `AIInference` rows (ADR-0036). `confirmReceipt`/`correctReceipt` are the human side — a boolean flip or an overwrite, not a second lifecycle.    |
+
+`ModelRequest.input` widened from `RedactedPayment` to `unknown` this phase, so one
+`ModelTransport` can serve every operation rather than being typed to classification's payload
+specifically — a transport reads `operation` to know which shape it received.
+
+**Still carried forward.** `ai.normalizeMerchant()` and the Merchant catalog's write path
+(ADR-0022, reaffirmed by ADR-0036 as this phase's own scope decision) — `Merchant` _is_ in this
+document's gated APPROVED-classified list, so building it needs its own decision path, not an
+extension of receipt extraction's direct-write shape. `suggestBeneficiaries`, `suggestAllocation`,
+`groupIntoOccasion`, `explainAnomaly`, `proposeRule` remain unbuilt, and any production
+`ModelTransport` still does not exist (ADR-0025 continues to hold).

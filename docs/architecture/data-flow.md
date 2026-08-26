@@ -102,14 +102,24 @@ _only_ source that will ever exist — there is no `Payment` to eventually match
 api ─▶ services.ingestEvidenceDocument ─▶ integrations/evidence-store.put ─▶ db.insertEvidence
        services.recordManualNote                                          ─▶ db.insertEvidence
        services.linkEvidence          ─▶ domain.assertEvidenceLinkOnce    ─▶ db.updateEvidenceLinks
+       services.extractReceipt        ─▶ ai.parseReceipt/extractReceiptItems
+                                       ─▶ domain.assertReceiptDraftInformative
+                                       ─▶ db (Receipt + ReceiptItems, unconfirmed) + 2 AIInference (pending)
+       services.confirmReceipt/correctReceipt ─▶ confirmed_by_user, inferences → accepted/modified
 ```
 
-> **Ingestion landed in phase 10 (2026-08-22); extraction is phase 11.** What ingestion does:
-> stores the bytes at a content address, records the row, and audits it. What it deliberately
-> does not do: call a model, read an amount, identify a merchant, or match the document to a
-> payment. A document that arrives with nothing known about it is stored unlinked and surfaces in
-> the review queue as `unmatched_evidence` (ADR-0035), where a human attaches it — the matching a
-> total would make deterministic is exactly what phase 11 unlocks.
+> **Ingestion landed in phase 10 (2026-08-22); extraction landed in phase 11 (2026-08-27).**
+> What ingestion does: stores the bytes at a content address, records the row, and audits it.
+> What it deliberately does not do: call a model, read an amount, identify a merchant, or match
+> the document to a payment. What extraction adds: a `Receipt` + `ReceiptItem`s, written directly
+> rather than through a `decideInference`-shaped gate — `Receipt` is DERIVED, not
+> APPROVED-classified (ADR-0036) — with `confirmReceipt`/`correctReceipt` as the human
+> confirmation/correction surface. A document that arrives with nothing known about it is stored
+> unlinked and surfaces in the review queue as `unmatched_evidence` (ADR-0035); once extraction
+> gives it a total, the item carries it plus any deterministic candidate payment match
+> (`domain.findCandidatePaymentMatches`) — never an automatic link, since `evidence` linkage is
+> write-once and a wrong auto-link would be unrecoverable (ADR-0037). A human still attaches it
+> via `services.linkEvidence`.
 >
 > Re-ingesting the same bytes against the same links returns the row that already holds them
 > rather than a second one. Evidence carries no money, so this is not `invariants.md` #10; it is

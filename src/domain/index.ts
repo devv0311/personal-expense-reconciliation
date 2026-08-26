@@ -25,6 +25,7 @@ export * from './lifecycle.js';
 export * from './money.js';
 export * from './normalization.js';
 export * from './payment.js';
+export * from './receipt.js';
 export * from './reconciliation.js';
 export * from './review.js';
 export * from './rounding.js';

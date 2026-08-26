@@ -41,6 +41,7 @@ import {
   optionalString,
   readJsonObject,
   requireOneOf,
+  requireParam,
   requireString,
   requireUuid,
 } from './http.js';
@@ -225,12 +226,6 @@ export async function getEvidenceContent(
 }
 
 /* ------------------------------------------------------------------------- validation */
-
-function requireParam(params: RouteParams, name: string): string {
-  const value = params[name];
-  if (value === undefined) throw new ApiRequestError(`"${name}" is missing from the path.`, name);
-  return value;
-}
 
 /**
  * An actor this ingestion can be attributed to.

@@ -13,11 +13,13 @@
  */
 
 import type {
+  EvidenceMediaType,
   MerchantId,
   Paise,
   PaymentChannel,
   PaymentDirection,
   PersonId,
+  ReceiptExtractableEvidenceType,
 } from '../domain/index.js';
 
 /** A payment as `src/services` hands it to an operation — before redaction. */
@@ -126,5 +128,67 @@ export function redactPaymentForInference(
       id: person.id,
       displayName: person.displayName,
     })),
+  };
+}
+
+/* ------------------------------------------------------------------ receipt extraction */
+
+/** A receipt-eligible `Evidence` row as `src/services` hands it to `parseReceipt`/`extractReceiptItems`. */
+export interface ClassifiableReceiptEvidence {
+  readonly evidenceType: ReceiptExtractableEvidenceType;
+  readonly mediaType: EvidenceMediaType;
+  /** OCR'd or pasted text, when the caller already has it — a photo alone may carry none. */
+  readonly rawText: string | null;
+  readonly capturedAt: Date;
+}
+
+/** Exactly what is sent to the provider for receipt extraction. No evidence id, no storage ref. */
+export interface RedactedReceiptEvidence {
+  readonly evidenceType: ReceiptExtractableEvidenceType;
+  readonly mediaType: EvidenceMediaType;
+  readonly capturedAt: string;
+  readonly rawText: string | null;
+}
+
+/**
+ * A keyword immediately followed by a run of digits (allowing spaces/hyphens inside the run) —
+ * a card, account, membership, loyalty, or contact number printed on a receipt footer.
+ *
+ * Deliberately narrower than {@link redactDescription}'s blanket "4+ digit run" rule. A
+ * payment's raw description is short bank-statement text where a long digit run is almost
+ * always an account fragment; a receipt's raw text is free-form and legitimately full of
+ * digits that are not identifiers at all — prices, quantities, item counts, a printed date.
+ * Redacting every one of those would strip the very figures extraction exists to read.
+ */
+const RECEIPT_IDENTIFIER_PATTERN =
+  /\b(card|a\/c|acct|account|member(?:ship)?|loyalty|phone|mobile|contact|tel)\s*[:#]?\s*\d[\d\s-]{3,}\d/gi;
+
+/**
+ * Strips identifiers out of a receipt's raw text.
+ *
+ * Two passes: a UPI handle (a merchant's own QR-code payment address can appear on a printed
+ * receipt exactly as it does on a bank statement), then a labelled digit run. Prices, item
+ * counts, dates and quantities are left untouched — they are the signal this operation exists
+ * to extract, not an identifier.
+ */
+export function redactReceiptText(rawText: string): string {
+  return rawText
+    .replace(UPI_ID_PATTERN, REDACTED_UPI_ID)
+    .replace(
+      RECEIPT_IDENTIFIER_PATTERN,
+      (_match, keyword: string) => `${keyword}${REDACTED_NUMBER}`,
+    )
+    .trim();
+}
+
+/** Builds the payload for a receipt-extraction inference over one evidence row. */
+export function redactReceiptEvidenceForInference(
+  evidence: ClassifiableReceiptEvidence,
+): RedactedReceiptEvidence {
+  return {
+    evidenceType: evidence.evidenceType,
+    mediaType: evidence.mediaType,
+    capturedAt: evidence.capturedAt.toISOString(),
+    rawText: evidence.rawText === null ? null : redactReceiptText(evidence.rawText),
   };
 }

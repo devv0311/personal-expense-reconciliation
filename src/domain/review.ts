@@ -100,9 +100,11 @@ export interface ReviewQueueEntry {
   /**
    * What is at stake. Ordering only; no arithmetic is done on it here.
    *
-   * Zero on an `unmatched_evidence` entry means **unknown**, not "no money": nothing has read
-   * the document yet. The effect is that unmatched documents sort last within their own rank,
-   * which is the honest place for an item whose stake nobody has established.
+   * Zero on an `unmatched_evidence` entry means **unknown**, not "no money": before extraction
+   * (phase 11) has read a `Receipt.total` off the document, nothing has established one. Once
+   * it has, this carries that total, and the item competes for attention on materiality like
+   * everything above it. The effect while it stays zero is that an unread document sorts last
+   * within its own rank — the honest place for an item whose stake nobody has established.
    */
   readonly amount: Paise;
   readonly occurredAt: Date;

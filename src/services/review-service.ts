@@ -34,6 +34,7 @@ import type {
   Paise,
   PaymentId,
   ProposedKind,
+  ReceiptId,
   ReviewItemKind,
   ReviewReason,
 } from '../domain/index.js';
@@ -47,6 +48,8 @@ import {
   listUnmatchedEvidence,
 } from '../db/index.js';
 import type { EvidenceRow, Executor, PaymentRow, PendingClassificationRow } from '../db/index.js';
+
+import { getReceiptViewByEvidenceId } from './receipt-service.js';
 
 /* --------------------------------------------------------------------------- options */
 
@@ -144,18 +147,31 @@ export interface RejectedClassificationItem {
   readonly expenseState: ExpenseState | null;
 }
 
+/** One payment candidate a receipt's total matches exactly, offered for `services.linkEvidence`. */
+export interface UnmatchedEvidenceCandidateMatch {
+  readonly paymentId: PaymentId;
+  readonly amount: Paise;
+  readonly occurredAt: Date;
+  readonly description: string;
+}
+
 /**
  * A stored document attached to nothing.
  *
  * Carries no amount of its own — nothing has read the document yet — and no proposal about
  * where it belongs, because ingestion deliberately does not guess. The action it implies is
  * `services.linkEvidence`, and the reviewer supplies the answer.
+ *
+ * `amount` stays zero (unknown) until extraction (phase 11) reads a `Receipt.total` off it —
+ * `receiptId`/`receiptTotal` are `null` exactly until then. Once one exists, `amount` becomes
+ * that total (so ordering by materiality finally applies) and `candidateMatches` carries
+ * whatever `domain.findCandidatePaymentMatches` found — never a link, per ADR-0037.
  */
 export interface UnmatchedEvidenceItem {
   readonly kind: 'unmatched_evidence';
   /** The evidence id — one item per document with no home. */
   readonly id: string;
-  /** Always zero: **unknown**, not free. See `domain.ReviewQueueEntry.amount`. */
+  /** Zero until a `Receipt.total` exists to report; see the type doc above. */
   readonly amount: Paise;
   /** When the document was captured, which is the only date this item has. */
   readonly occurredAt: Date;
@@ -167,6 +183,9 @@ export interface UnmatchedEvidenceItem {
   readonly byteSize: number | null;
   readonly capturedAt: Date;
   readonly ingestedAt: Date;
+  readonly receiptId: ReceiptId | null;
+  readonly receiptTotal: Paise | null;
+  readonly candidateMatches: readonly UnmatchedEvidenceCandidateMatch[];
 }
 
 export type ReviewQueueItem =
@@ -382,10 +401,21 @@ function asCandidate(payment: PaymentRow) {
  */
 async function unmatchedEvidenceItems(exec: Executor): Promise<UnmatchedEvidenceItem[]> {
   const rows = await listUnmatchedEvidence(exec);
-  return rows.map((row: EvidenceRow) => ({
+  return Promise.all(rows.map((row: EvidenceRow) => toUnmatchedEvidenceItem(exec, row)));
+}
+
+async function toUnmatchedEvidenceItem(
+  exec: Executor,
+  row: EvidenceRow,
+): Promise<UnmatchedEvidenceItem> {
+  // Extraction (phase 11) may already have read a total off this document — if so, that total
+  // is what "materiality" means for this item from now on, and its candidate matches are what
+  // `services.linkEvidence` needs a reviewer to confirm (ADR-0037: never linked automatically).
+  const view = await getReceiptViewByEvidenceId(exec, row.id);
+  return {
     kind: 'unmatched_evidence' as const,
     id: row.id,
-    amount: 0n as Paise,
+    amount: (view?.receipt.total ?? 0n) as Paise,
     occurredAt: row.capturedAt,
     reasons: ['evidence_unmatched'] as const,
     evidenceId: row.id,
@@ -395,7 +425,10 @@ async function unmatchedEvidenceItems(exec: Executor): Promise<UnmatchedEvidence
     byteSize: row.byteSize,
     capturedAt: row.capturedAt,
     ingestedAt: row.createdAt,
-  }));
+    receiptId: view?.receipt.id ?? null,
+    receiptTotal: view?.receipt.total ?? null,
+    candidateMatches: view?.candidateMatches ?? [],
+  };
 }
 
 async function rejectedClassificationItems(exec: Executor): Promise<RejectedClassificationItem[]> {
