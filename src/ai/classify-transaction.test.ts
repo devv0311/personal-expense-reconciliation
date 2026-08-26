@@ -5,7 +5,7 @@ import { asId, paise } from '../domain/index.js';
 import { CLASSIFY_TRANSACTION_PROMPT_VERSION, createAiService } from './classify-transaction.js';
 import type { ModelRequest, ModelTransport } from './classify-transaction.js';
 import { isAiContractError } from './errors.js';
-import type { ClassifiablePayment, ClassificationContext } from './redaction.js';
+import type { ClassifiablePayment, ClassificationContext, RedactedPayment } from './redaction.js';
 
 const PAYMENT: ClassifiablePayment = {
   amount: paise(284_000n),
@@ -78,12 +78,13 @@ describe('createAiService().classifyTransaction', () => {
     await createAiService(transport).classifyTransaction(PAYMENT, CONTEXT);
 
     const [request] = transport.seen;
+    const input = request?.input as RedactedPayment | undefined;
     expect(request?.operation).toBe('classify_transaction');
     expect(request?.promptVersion).toBe(CLASSIFY_TRANSACTION_PROMPT_VERSION);
-    expect(request?.input.merchantName).toBe('Sample Restaurant');
+    expect(input?.merchantName).toBe('Sample Restaurant');
     // Redaction is not optional and not the caller's job: the reference never reaches here.
     expect(JSON.stringify(request?.input)).not.toContain('UPI/2607031122/ZOMATO');
-    expect(request?.input.description).not.toContain('0091');
+    expect(input?.description).not.toContain('0091');
   });
 
   it('rejects a malformed response instead of returning it', async () => {
@@ -113,5 +114,30 @@ describe('createAiService().classifyTransaction', () => {
     await expect(createAiService(failing).classifyTransaction(PAYMENT, CONTEXT)).rejects.toThrow(
       'provider unavailable',
     );
+  });
+});
+
+describe('createAiService — composes the receipt-extraction operations too', () => {
+  it('routes parseReceipt and extractReceiptItems through the same injected transport', async () => {
+    const transport = scripted({
+      confidence: 'high',
+      proposedOutput: {
+        merchantHint: null,
+        subtotalMinorUnits: null,
+        taxMinorUnits: null,
+        totalMinorUnits: '270000',
+        currency: 'INR',
+      },
+    });
+
+    const inference = await createAiService(transport).parseReceipt({
+      evidenceType: 'receipt_image',
+      mediaType: 'image/jpeg',
+      rawText: null,
+      capturedAt: new Date('2026-07-16T20:05:00.000Z'),
+    });
+
+    expect(inference.inferenceType).toBe('parse_receipt');
+    expect(transport.seen[0]?.operation).toBe('parse_receipt');
   });
 });

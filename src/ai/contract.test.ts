@@ -1,18 +1,33 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseClassificationResponse, parseTransactionClassification } from './contract.js';
+import {
+  parseClassificationResponse,
+  parseExtractReceiptItemsResponse,
+  parseParseReceiptResponse,
+  parseReceiptDraft,
+  parseReceiptItemDrafts,
+  parseTransactionClassification,
+} from './contract.js';
 import { isAiContractError } from './errors.js';
 import type { AiContractErrorCode } from './errors.js';
 
-/** Runs the parser and returns the contract error's code and field, or fails loudly. */
-function rejection(raw: unknown): { code: AiContractErrorCode; field: string | undefined } {
+/** Runs a parser and returns the contract error's code and field, or fails loudly. */
+function rejectionOf(
+  parse: (raw: unknown) => unknown,
+  raw: unknown,
+): { code: AiContractErrorCode; field: string | undefined } {
   try {
-    parseClassificationResponse(raw);
+    parse(raw);
   } catch (error) {
     if (!isAiContractError(error)) throw error;
     return { code: error.code, field: error.details['field'] };
   }
   throw new Error('Expected the response to be rejected, but it was accepted.');
+}
+
+/** Runs the parser and returns the contract error's code and field, or fails loudly. */
+function rejection(raw: unknown): { code: AiContractErrorCode; field: string | undefined } {
+  return rejectionOf(parseClassificationResponse, raw);
 }
 
 const EXPENSE_RESPONSE = {
@@ -275,5 +290,221 @@ describe('parseTransactionClassification — the same gate for a human correctio
     }
 
     expect(code).toBe('FIELD_MISSING');
+  });
+});
+
+const RECEIPT_RESPONSE = {
+  confidence: 'high',
+  proposedOutput: {
+    merchantHint: 'Sample Restaurant',
+    subtotalMinorUnits: '250000',
+    taxMinorUnits: '20000',
+    totalMinorUnits: '270000',
+    currency: 'INR',
+  },
+};
+
+describe('parseParseReceiptResponse — the shapes the contract accepts', () => {
+  it('accepts a well-formed draft', () => {
+    expect(parseParseReceiptResponse(RECEIPT_RESPONSE)).toEqual({
+      confidence: 'high',
+      proposedOutput: {
+        merchantHint: 'Sample Restaurant',
+        subtotal: 250_000n,
+        tax: 20_000n,
+        total: 270_000n,
+        currency: 'INR',
+      },
+    });
+  });
+
+  it('carries money as an exact bigint, never a float', () => {
+    const { proposedOutput } = parseParseReceiptResponse(RECEIPT_RESPONSE);
+    expect(typeof proposedOutput.total).toBe('bigint');
+  });
+
+  it('accepts a draft naming only one figure, with the rest null', () => {
+    const parsed = parseParseReceiptResponse({
+      confidence: 'low',
+      proposedOutput: {
+        merchantHint: null,
+        subtotalMinorUnits: null,
+        taxMinorUnits: null,
+        totalMinorUnits: '285000',
+        currency: 'INR',
+      },
+    });
+    expect(parsed.proposedOutput).toEqual({
+      merchantHint: null,
+      subtotal: null,
+      tax: null,
+      total: 285_000n,
+      currency: 'INR',
+    });
+  });
+});
+
+describe('parseParseReceiptResponse — what it refuses', () => {
+  it('refuses a currency other than INR — V1 does arithmetic in one currency only', () => {
+    expect(
+      rejectionOf(parseParseReceiptResponse, {
+        ...RECEIPT_RESPONSE,
+        proposedOutput: { ...RECEIPT_RESPONSE.proposedOutput, currency: 'USD' },
+      }),
+    ).toEqual({ code: 'FIELD_INVALID', field: 'proposedOutput.currency' });
+  });
+
+  it('refuses a non-integer or negative minor-units string', () => {
+    for (const totalMinorUnits of ['2700.00', '-1', '27_00', 'NaN', '']) {
+      expect(
+        rejectionOf(parseParseReceiptResponse, {
+          ...RECEIPT_RESPONSE,
+          proposedOutput: { ...RECEIPT_RESPONSE.proposedOutput, totalMinorUnits },
+        }).code,
+      ).toBe('FIELD_INVALID');
+    }
+  });
+
+  it('refuses money sent as a JSON number rather than an exact string', () => {
+    // Money crosses this boundary as a string precisely so it never passes through a float
+    // (invariants.md #12) — a bare number is refused even when it looks exact.
+    expect(
+      rejectionOf(parseParseReceiptResponse, {
+        ...RECEIPT_RESPONSE,
+        proposedOutput: { ...RECEIPT_RESPONSE.proposedOutput, totalMinorUnits: 270000 },
+      }).code,
+    ).toBe('FIELD_INVALID');
+  });
+
+  it('refuses a field no key defines', () => {
+    expect(
+      rejectionOf(parseParseReceiptResponse, {
+        ...RECEIPT_RESPONSE,
+        proposedOutput: { ...RECEIPT_RESPONSE.proposedOutput, merchantId: 'merchant-1' },
+      }),
+    ).toEqual({ code: 'FIELD_UNEXPECTED', field: 'proposedOutput' });
+  });
+});
+
+describe('parseReceiptDraft — the same gate for a human correction', () => {
+  it('applies exactly the same rules a model response faces', () => {
+    expect(
+      rejectionOf(parseReceiptDraft, { ...RECEIPT_RESPONSE.proposedOutput, currency: 'USD' }),
+    ).toEqual({ code: 'FIELD_INVALID', field: 'proposedOutput.currency' });
+  });
+});
+
+const ITEMS_RESPONSE = {
+  confidence: 'high',
+  proposedOutput: [
+    {
+      description: 'Amul Milk 1L (x2)',
+      quantity: '2',
+      unitPriceMinorUnits: '4000',
+      lineTotalMinorUnits: '8000',
+      suggestedCategory: 'groceries',
+    },
+    {
+      description: 'Chicken Breast 500g',
+      quantity: '1',
+      unitPriceMinorUnits: null,
+      lineTotalMinorUnits: '31000',
+      suggestedCategory: null,
+    },
+  ],
+};
+
+describe('parseExtractReceiptItemsResponse — the shapes the contract accepts', () => {
+  it('accepts a well-formed item list', () => {
+    expect(parseExtractReceiptItemsResponse(ITEMS_RESPONSE)).toEqual({
+      confidence: 'high',
+      proposedOutput: [
+        {
+          description: 'Amul Milk 1L (x2)',
+          quantity: '2',
+          unitPrice: 4_000n,
+          lineTotal: 8_000n,
+          suggestedCategory: 'groceries',
+        },
+        {
+          description: 'Chicken Breast 500g',
+          quantity: '1',
+          unitPrice: null,
+          lineTotal: 31_000n,
+          suggestedCategory: null,
+        },
+      ],
+    });
+  });
+
+  it('accepts an empty array — a total-only receipt with nothing itemized', () => {
+    expect(
+      parseExtractReceiptItemsResponse({ confidence: 'low', proposedOutput: [] }).proposedOutput,
+    ).toEqual([]);
+  });
+
+  it('accepts a fractional quantity, up to three places', () => {
+    const parsed = parseReceiptItemDrafts([
+      {
+        description: 'Rice (loose, by weight)',
+        quantity: '1.250',
+        unitPriceMinorUnits: null,
+        lineTotalMinorUnits: '6000',
+        suggestedCategory: null,
+      },
+    ]);
+    expect(parsed[0]?.quantity).toBe('1.250');
+  });
+});
+
+describe('parseExtractReceiptItemsResponse — what it refuses', () => {
+  it('refuses a proposedOutput that is not an array', () => {
+    expect(
+      rejectionOf(parseExtractReceiptItemsResponse, {
+        confidence: 'high',
+        proposedOutput: ITEMS_RESPONSE.proposedOutput[0],
+      }),
+    ).toEqual({ code: 'MALFORMED_RESPONSE', field: 'proposedOutput' });
+  });
+
+  it('refuses an item with no description', () => {
+    expect(
+      rejectionOf(parseExtractReceiptItemsResponse, {
+        confidence: 'high',
+        proposedOutput: [{ ...ITEMS_RESPONSE.proposedOutput[0], description: undefined }],
+      }),
+    ).toEqual({ code: 'FIELD_MISSING', field: 'proposedOutput[0].description' });
+  });
+
+  it('refuses a zero or negative quantity', () => {
+    for (const quantity of ['0', '-1', '0.000']) {
+      expect(
+        rejectionOf(parseExtractReceiptItemsResponse, {
+          confidence: 'high',
+          proposedOutput: [{ ...ITEMS_RESPONSE.proposedOutput[0], quantity }],
+        }).field,
+      ).toBe('proposedOutput[0].quantity');
+    }
+  });
+
+  it('refuses a missing line total — an item with no total is not a line item', () => {
+    expect(
+      rejectionOf(parseExtractReceiptItemsResponse, {
+        confidence: 'high',
+        proposedOutput: [{ ...ITEMS_RESPONSE.proposedOutput[0], lineTotalMinorUnits: undefined }],
+      }),
+    ).toEqual({ code: 'FIELD_MISSING', field: 'proposedOutput[0].lineTotalMinorUnits' });
+  });
+
+  it('names the offending index when the second item is the malformed one', () => {
+    expect(
+      rejectionOf(parseExtractReceiptItemsResponse, {
+        confidence: 'high',
+        proposedOutput: [
+          ITEMS_RESPONSE.proposedOutput[0],
+          { ...ITEMS_RESPONSE.proposedOutput[1], lineTotalMinorUnits: 'not-a-number' },
+        ],
+      }).field,
+    ).toBe('proposedOutput[1].lineTotalMinorUnits');
   });
 });

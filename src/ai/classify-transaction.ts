@@ -1,21 +1,40 @@
 /**
- * `ai.classifyTransaction` — the first of `ai-boundary.md`'s nine operations to exist.
+ * `ai.classifyTransaction`, plus `AiService`/`createAiService` — the composition root for
+ * every operation on `ai-boundary.md`'s boundary, not only this one.
  *
- * What it does: redact, ask, validate, return a proposal. What it deliberately cannot do:
- * reach a database. There is no import of `src/db` anywhere in `src/ai`, so "no code path from
- * `ai/*` to `db` that skips `services.decideInference()`" is a property of the module graph
- * rather than a rule someone has to remember (`ai-boundary.md`).
+ * `classifyTransaction` was the first of the nine to exist (phase 8) and this file has stayed
+ * where `AiService` is assembled since — phase 11 composes `parseReceipt`/`extractReceiptItems`
+ * in here too (`receipt-extraction.ts`) rather than duplicating a second `createAiService`.
+ *
+ * What every operation does: redact, ask, validate, return a proposal. What none of them can
+ * do: reach a database. There is no import of `src/db` anywhere in `src/ai`, so "no code path
+ * from `ai/*` to `db` that skips `services.decideInference()`" is a property of the module
+ * graph rather than a rule someone has to remember (`ai-boundary.md`).
  *
  * The model itself sits behind {@link ModelTransport}, which this module does not implement —
- * see ADR-0025 for why no provider is wired in this phase and what that buys.
+ * see ADR-0025 for why no provider is wired and what that buys.
  */
 
 import type { AiInferenceType } from '../domain/index.js';
 
 import { parseClassificationResponse } from './contract.js';
-import type { Inference, ModelInfo, TransactionClassification } from './contract.js';
+import type {
+  Inference,
+  ModelInfo,
+  ReceiptDraft,
+  ReceiptItemDraft,
+  TransactionClassification,
+} from './contract.js';
+import {
+  extractReceiptItems as extractReceiptItemsOperation,
+  parseReceipt as parseReceiptOperation,
+} from './receipt-extraction.js';
 import { redactPaymentForInference } from './redaction.js';
-import type { ClassifiablePayment, ClassificationContext, RedactedPayment } from './redaction.js';
+import type {
+  ClassifiablePayment,
+  ClassificationContext,
+  ClassifiableReceiptEvidence,
+} from './redaction.js';
 
 /** `ai_inferences.inference_type` for everything this operation produces. */
 export const CLASSIFY_TRANSACTION: AiInferenceType = 'classify_transaction';
@@ -29,12 +48,18 @@ export const CLASSIFY_TRANSACTION: AiInferenceType = 'classify_transaction';
  */
 export const CLASSIFY_TRANSACTION_PROMPT_VERSION = 'classify_transaction/v1';
 
-/** One call to a model, already redacted. */
+/**
+ * One call to a model, already redacted.
+ *
+ * `input` is `unknown` rather than `RedactedPayment` specifically: this shape is shared by
+ * every operation on the boundary, and each one redacts into its own type
+ * (`RedactedPayment`, `RedactedReceiptEvidence`, …). A transport reads `operation` to know
+ * which it received; nothing here asserts a shape a general-purpose transport cannot know.
+ */
 export interface ModelRequest {
   readonly operation: AiInferenceType;
   readonly promptVersion: string;
-  /** Redacted by {@link redactPaymentForInference}; carries no identifier by construction. */
-  readonly input: RedactedPayment;
+  readonly input: unknown;
 }
 
 /**
@@ -53,16 +78,21 @@ export interface ModelTransport {
 /**
  * The typed AI interface `src/services` depends on.
  *
- * One operation today. The other eight arrive with the phases that need them (receipts in 11,
- * allocation suggestions in 12, rules in 16) — declaring them now as unimplemented members
- * would be a promise the module cannot keep, and `ai-boundary.md` is where the full interface
- * is specified.
+ * Three operations now (phase 8's `classifyTransaction`, phase 11's `parseReceipt` and
+ * `extractReceiptItems`). The other six arrive with the phases that need them (allocation
+ * suggestions in 12, rules in 16) — declaring them now as unimplemented members would be a
+ * promise the module cannot keep, and `ai-boundary.md` is where the full interface is
+ * specified.
  */
 export interface AiService {
   classifyTransaction(
     payment: ClassifiablePayment,
     context: ClassificationContext,
   ): Promise<Inference<TransactionClassification>>;
+  parseReceipt(evidence: ClassifiableReceiptEvidence): Promise<Inference<ReceiptDraft>>;
+  extractReceiptItems(
+    evidence: ClassifiableReceiptEvidence,
+  ): Promise<Inference<readonly ReceiptItemDraft[]>>;
 }
 
 /**
@@ -93,5 +123,7 @@ export function createAiService(transport: ModelTransport): AiService {
 
       return { inferenceType: CLASSIFY_TRANSACTION, proposedOutput, confidence, modelInfo };
     },
+    parseReceipt: (evidence) => parseReceiptOperation(transport, evidence),
+    extractReceiptItems: (evidence) => extractReceiptItemsOperation(transport, evidence),
   };
 }

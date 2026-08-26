@@ -14,7 +14,7 @@
  * the fixture quietly describing a payload that no longer exists.
  */
 
-import type { ModelRequest, ModelTransport } from '../../src/ai/index.js';
+import type { ModelRequest, ModelTransport, RedactedPayment } from '../../src/ai/index.js';
 import type { PersonId } from '../../src/domain/index.js';
 
 import { loadClassificationProposals } from './fixtures.js';
@@ -81,7 +81,7 @@ export function scriptedClassificationTransport(
     asked,
     modelInfo: { provider: fixture.model.provider, model: fixture.model.model },
     complete: (request: ModelRequest) => {
-      const description = request.input.description;
+      const description = (request.input as RedactedPayment).description;
       asked.push(description);
       if (!scripted.has(description)) {
         return Promise.reject(

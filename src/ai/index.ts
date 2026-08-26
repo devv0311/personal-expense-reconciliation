@@ -13,4 +13,5 @@
 export * from './classify-transaction.js';
 export * from './contract.js';
 export * from './errors.js';
+export * from './receipt-extraction.js';
 export * from './redaction.js';

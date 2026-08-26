@@ -2,9 +2,19 @@ import { describe, expect, it } from 'vitest';
 
 import { asId, paise } from '../domain/index.js';
 
-import { REDACTED_NUMBER, REDACTED_UPI_ID, redactDescription } from './redaction.js';
+import {
+  REDACTED_NUMBER,
+  REDACTED_UPI_ID,
+  redactDescription,
+  redactReceiptEvidenceForInference,
+  redactReceiptText,
+} from './redaction.js';
 import { redactPaymentForInference } from './redaction.js';
-import type { ClassifiablePayment, ClassificationContext } from './redaction.js';
+import type {
+  ClassifiablePayment,
+  ClassifiableReceiptEvidence,
+  ClassificationContext,
+} from './redaction.js';
 
 const PAYMENT: ClassifiablePayment = {
   amount: paise(124_000n),
@@ -124,6 +134,70 @@ describe('redactPaymentForInference', () => {
       'merchantCategory',
       'merchantName',
       'occurredAt',
+    ]);
+  });
+});
+
+describe('redactReceiptText — narrower than redactDescription on purpose', () => {
+  it('leaves prices, quantities and dates alone — they are the signal, not an identifier', () => {
+    const receipt =
+      'Sample Restaurant\n2 x Chicken Biryani  Rs 620.00\nSubtotal 2500.00\nTax 200.00\n' +
+      'Total 2700.00\nDate: 16/07/2026';
+    expect(redactReceiptText(receipt)).toBe(receipt);
+  });
+
+  it('masks a labelled card/account/loyalty/contact number', () => {
+    // The separator between the keyword and the digits (":", "#", a space) is consumed by the
+    // match along with the digits themselves — only the keyword survives, unadorned.
+    expect(redactReceiptText('Card: 4111 1111 1111 1111')).toBe(`Card${REDACTED_NUMBER}`);
+    expect(redactReceiptText('A/C 400123456789')).toBe(`A/C${REDACTED_NUMBER}`);
+    expect(redactReceiptText('Member #98765432')).toBe(`Member${REDACTED_NUMBER}`);
+    expect(redactReceiptText('Phone: 9876543210')).toBe(`Phone${REDACTED_NUMBER}`);
+  });
+
+  it('masks a UPI handle printed on a receipt footer', () => {
+    expect(redactReceiptText('Scan to pay: samplerestaurant@okhdfcbank')).toBe(
+      `Scan to pay: ${REDACTED_UPI_ID}`,
+    );
+  });
+
+  it('trims, exactly as redactDescription does', () => {
+    expect(redactReceiptText('  Total 2700.00  ')).toBe('Total 2700.00');
+  });
+});
+
+describe('redactReceiptEvidenceForInference', () => {
+  const EVIDENCE: ClassifiableReceiptEvidence = {
+    evidenceType: 'receipt_image',
+    mediaType: 'image/jpeg',
+    rawText: null,
+    capturedAt: new Date('2026-07-16T20:05:00.000Z'),
+  };
+
+  it('carries the evidence type, media type and captured date through untouched', () => {
+    const redacted = redactReceiptEvidenceForInference(EVIDENCE);
+    expect(redacted.evidenceType).toBe('receipt_image');
+    expect(redacted.mediaType).toBe('image/jpeg');
+    expect(redacted.capturedAt).toBe('2026-07-16T20:05:00.000Z');
+  });
+
+  it('sends null rawText as null, not as an absent key', () => {
+    expect(redactReceiptEvidenceForInference(EVIDENCE).rawText).toBeNull();
+  });
+
+  it('redacts rawText when the caller has some', () => {
+    const withText = { ...EVIDENCE, rawText: 'Card: 4111 1111 1111 1111  Total 2700.00' };
+    expect(redactReceiptEvidenceForInference(withText).rawText).toBe(
+      `Card${REDACTED_NUMBER}  Total 2700.00`,
+    );
+  });
+
+  it('sends only the fields the contract defines', () => {
+    expect(Object.keys(redactReceiptEvidenceForInference(EVIDENCE)).sort()).toEqual([
+      'capturedAt',
+      'evidenceType',
+      'mediaType',
+      'rawText',
     ]);
   });
 });
