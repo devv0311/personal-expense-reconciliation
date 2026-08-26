@@ -69,8 +69,15 @@ import (phase 6):
   `readEvidenceDocument`: the other half of the pipeline, arriving before, during or after
   classification. Documents go to an injected `EvidenceStore` (ADR-0033) and the row points at
   them by content address; re-ingesting the same bytes against the same links resolves to the
-  row that already holds them. Linkage may be filled in once, never rewritten (ADR-0034). No
-  model is called and no document is read — extraction is phase 11.
+  row that already holds them. Linkage may be filled in once, never rewritten (ADR-0034).
 
-Not yet implemented: receipt extraction and Splitwise sync orchestration — see
-`docs/roadmap.md` phases 11 and 14.
+- `receipt-service.ts` — `extractReceipt`: redact, ask both `ai.parseReceipt`/
+  `extractReceiptItems`, validate (`domain.assertReceiptDraftInformative`), write `Receipt` +
+  `ReceiptItem`s directly — no `decideInference`-shaped gate, because `Receipt` is DERIVED, not
+  APPROVED-classified (ADR-0036). `confirmReceipt`/`correctReceipt` are the human side: a
+  boolean flip or a field/item overwrite, each moving only the inferences still `pending`.
+  `getReceipt`/`getReceiptViewByEvidenceId` compute the two surfaced discrepancies (item sum vs
+  `subtotal`, `total` vs a linked payment's amount) and any deterministic candidate payment
+  match (`domain.findCandidatePaymentMatches`, ADR-0037) fresh on every read — never stored.
+
+Not yet implemented: Splitwise sync orchestration — see `docs/roadmap.md` phase 14.
