@@ -42,6 +42,8 @@ import type {
   MerchantId,
   PaymentId,
   PersonId,
+  ReceiptId,
+  ReceiptItemId,
   ReconciliationRunId,
   SettlementId,
 } from '../domain/ids.js';
@@ -70,6 +72,8 @@ import {
   paymentExpenseLinks,
   payments,
   people,
+  receiptItems,
+  receipts,
   reconciliationRuns,
   settlements,
   splitwiseExpenses,
@@ -1290,6 +1294,234 @@ function toEvidenceRow(row: typeof evidence.$inferSelect): EvidenceRow {
   };
 }
 
+/* ============================================================================ receipts */
+
+/** A `Receipt` row. DERIVED — every field here has an update path, unlike `Evidence`'s. */
+export interface ReceiptRow {
+  readonly id: ReceiptId;
+  readonly evidenceId: EvidenceId;
+  readonly merchantId: MerchantId | null;
+  readonly subtotal: Paise | null;
+  readonly tax: Paise | null;
+  readonly total: Paise | null;
+  readonly currency: string;
+  readonly extractionConfidence: ConfidenceLevel | null;
+  readonly extractedAt: Date | null;
+  readonly confirmedByUser: boolean;
+  readonly createdAt: Date;
+}
+
+export interface InsertReceiptDraft {
+  readonly evidenceId: EvidenceId;
+  readonly merchantId: MerchantId | null;
+  readonly subtotal: Paise | null;
+  readonly tax: Paise | null;
+  readonly total: Paise | null;
+  readonly currency: string;
+  readonly extractionConfidence: ConfidenceLevel | null;
+  readonly extractedAt: Date | null;
+}
+
+export async function insertReceipt(exec: Executor, draft: InsertReceiptDraft): Promise<ReceiptId> {
+  const [row] = await exec
+    .insert(receipts)
+    .values({
+      evidenceId: draft.evidenceId,
+      merchantId: draft.merchantId,
+      subtotal: draft.subtotal,
+      tax: draft.tax,
+      total: draft.total,
+      currency: draft.currency,
+      extractionConfidence: draft.extractionConfidence,
+      extractedAt: draft.extractedAt,
+      confirmedByUser: false,
+    })
+    .returning({ id: receipts.id });
+  return requireRow(row, 'receipts').id as ReceiptId;
+}
+
+export async function getReceiptById(
+  exec: Executor,
+  receiptId: ReceiptId,
+): Promise<ReceiptRow | null> {
+  const [row] = await exec.select().from(receipts).where(eq(receipts.id, receiptId));
+  return row === undefined ? null : toReceiptRow(row);
+}
+
+/**
+ * The `Receipt` extracted from one piece of evidence, if any.
+ *
+ * At most one exists: `services.extractReceipt` refuses to run a second time over evidence
+ * that already has one, pointing the caller at `correctReceipt` instead.
+ */
+export async function getReceiptByEvidenceId(
+  exec: Executor,
+  evidenceId: EvidenceId,
+): Promise<ReceiptRow | null> {
+  const [row] = await exec.select().from(receipts).where(eq(receipts.evidenceId, evidenceId));
+  return row === undefined ? null : toReceiptRow(row);
+}
+
+/** Overwrites the fields `services.correctReceipt`/`confirmReceipt` may change. Never `evidence_id`. */
+export async function updateReceiptExtraction(
+  exec: Executor,
+  receiptId: ReceiptId,
+  next: {
+    readonly merchantId?: MerchantId | null;
+    readonly subtotal?: Paise | null;
+    readonly tax?: Paise | null;
+    readonly total?: Paise | null;
+    readonly currency?: string;
+    readonly confirmedByUser?: boolean;
+  },
+): Promise<void> {
+  const set: Partial<typeof receipts.$inferInsert> = { updatedAt: new Date() };
+  if ('merchantId' in next) set.merchantId = next.merchantId;
+  if ('subtotal' in next) set.subtotal = next.subtotal;
+  if ('tax' in next) set.tax = next.tax;
+  if ('total' in next) set.total = next.total;
+  if (next.currency !== undefined) set.currency = next.currency;
+  if (next.confirmedByUser !== undefined) set.confirmedByUser = next.confirmedByUser;
+  await exec.update(receipts).set(set).where(eq(receipts.id, receiptId));
+}
+
+/** A `ReceiptItem` row. */
+export interface ReceiptItemRow {
+  readonly id: ReceiptItemId;
+  readonly receiptId: ReceiptId;
+  readonly description: string;
+  readonly quantity: string;
+  readonly unitPrice: Paise | null;
+  readonly lineTotal: Paise;
+  readonly suggestedCategory: string | null;
+}
+
+export interface InsertReceiptItemDraft {
+  readonly description: string;
+  readonly quantity: string;
+  readonly unitPrice: Paise | null;
+  readonly lineTotal: Paise;
+  readonly suggestedCategory: string | null;
+}
+
+/** Inserts a receipt's items in one call. An empty list is a no-op, not an error. */
+export async function insertReceiptItems(
+  exec: Executor,
+  receiptId: ReceiptId,
+  items: readonly InsertReceiptItemDraft[],
+): Promise<void> {
+  if (items.length === 0) return;
+  await exec.insert(receiptItems).values(
+    items.map((item) => ({
+      receiptId,
+      description: item.description,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      lineTotal: item.lineTotal,
+      suggestedCategory: item.suggestedCategory,
+    })),
+  );
+}
+
+export async function listReceiptItemsByReceipt(
+  exec: Executor,
+  receiptId: ReceiptId,
+): Promise<ReceiptItemRow[]> {
+  const rows = await exec
+    .select()
+    .from(receiptItems)
+    .where(eq(receiptItems.receiptId, receiptId))
+    .orderBy(asc(receiptItems.createdAt), asc(receiptItems.id));
+  return rows.map(toReceiptItemRow);
+}
+
+/**
+ * Replaces a receipt's item set wholesale — `services.correctReceipt`'s only way to edit
+ * items, rather than a per-item update path. A `ReceiptItem` carries no identity a human ever
+ * refers back to (`domain-model.md`: a receipt is corrected, not edited line by line through
+ * an API), so "the corrected set" is simpler and safer than reconciling a diff.
+ */
+export async function replaceReceiptItems(
+  exec: Executor,
+  receiptId: ReceiptId,
+  items: readonly InsertReceiptItemDraft[],
+): Promise<void> {
+  await exec.delete(receiptItems).where(eq(receiptItems.receiptId, receiptId));
+  await insertReceiptItems(exec, receiptId, items);
+}
+
+function toReceiptRow(row: typeof receipts.$inferSelect): ReceiptRow {
+  return {
+    id: row.id as ReceiptId,
+    evidenceId: row.evidenceId as EvidenceId,
+    merchantId: row.merchantId as MerchantId | null,
+    subtotal: row.subtotal as Paise | null,
+    tax: row.tax as Paise | null,
+    total: row.total as Paise | null,
+    currency: row.currency,
+    extractionConfidence: row.extractionConfidence as ConfidenceLevel | null,
+    extractedAt: row.extractedAt,
+    confirmedByUser: row.confirmedByUser,
+    createdAt: row.createdAt,
+  };
+}
+
+function toReceiptItemRow(row: typeof receiptItems.$inferSelect): ReceiptItemRow {
+  return {
+    id: row.id as ReceiptItemId,
+    receiptId: row.receiptId as ReceiptId,
+    description: row.description,
+    quantity: row.quantity,
+    unitPrice: row.unitPrice as Paise | null,
+    lineTotal: row.lineTotal as Paise,
+    suggestedCategory: row.suggestedCategory,
+  };
+}
+
+/**
+ * Live, unlinked debit payments sharing a candidate receipt's exact amount, within a coarse
+ * date window.
+ *
+ * A **pre-filter, not the rule** — exactly the pattern `listPaymentsAwaitingClassification`
+ * already establishes. `domain.findCandidatePaymentMatches` re-checks the date window
+ * precisely; this query's job is only to avoid pulling every payment ever imported to answer
+ * one receipt's candidate list.
+ */
+export async function listUnlinkedDebitPaymentsNear(
+  exec: Executor,
+  input: { readonly amount: Paise; readonly from: Date; readonly to: Date },
+): Promise<PaymentRow[]> {
+  const rows = await exec
+    .select({
+      id: payments.id,
+      amount: payments.amount,
+      currency: payments.currency,
+      direction: payments.direction,
+      counterpartyType: payments.counterpartyType,
+      counterpartyId: payments.counterpartyId,
+      state: payments.state,
+      ignoredReason: payments.ignoredReason,
+      occurredAt: payments.occurredAt,
+      externalReference: payments.externalReference,
+      accountId: payments.accountId,
+      channel: payments.channel,
+      referenceType: payments.referenceType,
+      rawDescription: payments.rawDescription,
+    })
+    .from(payments)
+    .where(
+      and(
+        eq(payments.amount, input.amount),
+        eq(payments.direction, 'debit'),
+        inArray(payments.state, ['imported', 'normalized']),
+        sql`${payments.occurredAt} >= ${input.from}`,
+        sql`${payments.occurredAt} <= ${input.to}`,
+      ),
+    )
+    .orderBy(asc(payments.occurredAt), asc(payments.id));
+  return rows as PaymentRow[];
+}
+
 /** The most recent reconciliation run, for the Splitwise-discrepancy status signal. */
 export async function getLatestReconciliationRun(
   exec: Executor,
@@ -1532,13 +1764,36 @@ export async function findClassificationInferenceByPayment(
 export async function attachAiInferenceRecord(
   exec: Executor,
   inferenceId: AiInferenceId,
-  recordType: 'expense' | 'settlement',
+  recordType: 'expense' | 'settlement' | 'receipt',
   recordId: string,
 ): Promise<void> {
   await exec
     .update(aiInferences)
     .set({ resultingRecordType: recordType, resultingRecordId: recordId })
     .where(eq(aiInferences.id, inferenceId));
+}
+
+/**
+ * Every inference that produced one record — `services.confirmReceipt`/`correctReceipt`'s way
+ * of finding the `parse_receipt`/`extract_receipt_items` pair a `Receipt` came from, without
+ * assuming there are exactly two (a future re-extraction path might not hold that).
+ */
+export async function listAiInferencesByResultingRecord(
+  exec: Executor,
+  recordType: 'expense' | 'settlement' | 'receipt',
+  recordId: string,
+): Promise<AiInferenceRow[]> {
+  const rows = await exec
+    .select(AI_INFERENCE_COLUMNS)
+    .from(aiInferences)
+    .where(
+      and(
+        eq(aiInferences.resultingRecordType, recordType),
+        eq(aiInferences.resultingRecordId, recordId),
+      ),
+    )
+    .orderBy(asc(aiInferences.createdAt), asc(aiInferences.id));
+  return rows as AiInferenceRow[];
 }
 
 /**
