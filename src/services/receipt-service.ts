@@ -19,6 +19,7 @@
  */
 
 import {
+  DEFAULT_RECEIPT_MATCH_WINDOW_DAYS,
   assertAiInferenceTransition,
   assertReceiptDraftInformative,
   findCandidatePaymentMatches,
@@ -61,9 +62,6 @@ import type { Database, EvidenceRow, ReceiptItemRow, ReceiptRow } from '../db/in
 
 import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
 import { ServiceError } from './errors.js';
-
-/** How far a receipt's captured date may sit from a candidate payment's, either way. */
-const CANDIDATE_MATCH_WINDOW_DAYS = 3;
 
 /* ------------------------------------------------------------------------------- extraction */
 
@@ -485,8 +483,8 @@ async function buildReceiptView(
     const payment = await getPaymentById(exec, evidence.linkedPaymentId);
     paymentDiscrepancy = receiptPaymentDiscrepancy(receipt.total, payment?.amount ?? null);
   } else if (receipt.total !== null) {
-    const from = addDays(evidence.capturedAt, -CANDIDATE_MATCH_WINDOW_DAYS);
-    const to = addDays(evidence.capturedAt, CANDIDATE_MATCH_WINDOW_DAYS);
+    const from = addDays(evidence.capturedAt, -DEFAULT_RECEIPT_MATCH_WINDOW_DAYS);
+    const to = addDays(evidence.capturedAt, DEFAULT_RECEIPT_MATCH_WINDOW_DAYS);
     const candidates = await listUnlinkedDebitPaymentsNear(exec, {
       amount: receipt.total,
       from,
@@ -499,7 +497,7 @@ async function buildReceiptView(
         amount: payment.amount,
         occurredAt: payment.occurredAt,
       })),
-      { windowDays: CANDIDATE_MATCH_WINDOW_DAYS },
+      { windowDays: DEFAULT_RECEIPT_MATCH_WINDOW_DAYS },
     );
     const byId = new Map(candidates.map((payment) => [payment.id, payment]));
     candidateMatches = matched.map((match) => {
