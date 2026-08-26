@@ -58,7 +58,9 @@ export type DomainErrorCode =
   /** An `AIInference` decision named an actor that is neither a person nor a `Rule` (#17). */
   | 'DECISION_ACTOR_INVALID'
   /** A referenced entity was absent from the input set handed to a pure function. */
-  | 'UNKNOWN_REFERENCE';
+  | 'UNKNOWN_REFERENCE'
+  /** A `parseReceipt`/`extractReceiptItems` draft carried no figure worth recording. */
+  | 'RECEIPT_DRAFT_INVALID';
 
 /** Thrown by `src/domain` when an input violates a documented invariant. */
 export class DomainError extends Error {

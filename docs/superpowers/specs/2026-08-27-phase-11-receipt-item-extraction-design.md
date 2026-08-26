@@ -105,7 +105,7 @@ early. `services.recordManualNote` remains the only manual-evidence path this sy
 
 ### 3. Receipt extraction writes DERIVED rows directly; confirmation is a boolean (ADR-0036)
 
-`ai-boundary.md`'s validation contract requires `services.decideInference` as "the *only* code
+`ai-boundary.md`'s validation contract requires `services.decideInference` as "the _only_ code
 path allowed to copy proposal data into an APPROVED-classified field" — but its own list of
 what that means is `Expense`, `Allocation`, `Settlement`, `ExpenseAdjustment`, `Merchant`, "or
 any other **APPROVED-classified** record." `Receipt` carries no such classification anywhere in
@@ -152,15 +152,15 @@ Seven slices, each independently green (`typecheck`, `lint`, `format:check`, `db
 pass (`migration 0000`, `0004`) — this phase is the first real caller of tables that have
 existed, unused, since then.
 
-| #   | Slice                | Delivers                                                                                                                                       |
-| --- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Receipt domain rules  | `src/domain/receipt.ts` — eligibility, discrepancy computation, confidence ordering, candidate-match matching; a new `RECEIPT_DRAFT_INVALID` error code |
-| 2   | AI boundary            | `src/ai/contract.ts` (`ReceiptDraft`/`ReceiptItemDraft` + parsers), `src/ai/redaction.ts` (receipt-evidence redaction), `src/ai/receipt-extraction.ts` (the two operations, extending `AiService`) |
-| 3   | Repository queries     | Receipt/ReceiptItem read+write, `attachAiInferenceRecord`'s type union widened, an inferences-by-resulting-record read, an unlinked-candidate-payments read |
-| 4   | Receipt service        | `services.extractReceipt` / `confirmReceipt` / `correctReceipt` / `getReceipt`, the proposal fixture, the scripted transport helper              |
-| 5   | Review queue enrichment | `unmatched_evidence` items carry a receipt's total and its candidate matches when one exists                                                    |
-| 6   | API surface             | `src/api/receipt-routes.ts`, router registration, two body-JSON money helpers on `http.ts`                                                       |
-| 7   | Documentation           | Roadmap, `ai-boundary.md`'s "what exists", ADR-0036/0037, module READMEs where they name what a layer holds                                      |
+| #   | Slice                   | Delivers                                                                                                                                                                                           |
+| --- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Receipt domain rules    | `src/domain/receipt.ts` — eligibility, discrepancy computation, confidence ordering, candidate-match matching; a new `RECEIPT_DRAFT_INVALID` error code                                            |
+| 2   | AI boundary             | `src/ai/contract.ts` (`ReceiptDraft`/`ReceiptItemDraft` + parsers), `src/ai/redaction.ts` (receipt-evidence redaction), `src/ai/receipt-extraction.ts` (the two operations, extending `AiService`) |
+| 3   | Repository queries      | Receipt/ReceiptItem read+write, `attachAiInferenceRecord`'s type union widened, an inferences-by-resulting-record read, an unlinked-candidate-payments read                                        |
+| 4   | Receipt service         | `services.extractReceipt` / `confirmReceipt` / `correctReceipt` / `getReceipt`, the proposal fixture, the scripted transport helper                                                                |
+| 5   | Review queue enrichment | `unmatched_evidence` items carry a receipt's total and its candidate matches when one exists                                                                                                       |
+| 6   | API surface             | `src/api/receipt-routes.ts`, router registration, two body-JSON money helpers on `http.ts`                                                                                                         |
+| 7   | Documentation           | Roadmap, `ai-boundary.md`'s "what exists", ADR-0036/0037, module READMEs where they name what a layer holds                                                                                        |
 
 ## Definition of done
 
