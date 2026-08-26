@@ -451,6 +451,24 @@ export async function getReceipt(db: Database, receiptId: ReceiptId): Promise<Re
   return buildReceiptView(db, evidence, receipt, items);
 }
 
+/**
+ * The `Receipt` extracted from one piece of evidence, with its view computed — or `null` when
+ * extraction has not happened yet.
+ *
+ * `services.listReviewQueue`'s way of enriching an `unmatched_evidence` item once an amount
+ * exists to enrich it with (ADR-0035's "matching needs an amount", finally answered).
+ */
+export async function getReceiptViewByEvidenceId(
+  db: Database,
+  evidenceId: EvidenceId,
+): Promise<ReceiptView | null> {
+  const receipt = await getReceiptByEvidenceId(db, evidenceId);
+  if (receipt === null) return null;
+  const evidence = await requireEvidence(db, evidenceId);
+  const items = await listReceiptItemsByReceipt(db, receipt.id);
+  return buildReceiptView(db, evidence, receipt, items);
+}
+
 /** Computes the two surfaced discrepancies and any candidate match — never written anywhere. */
 async function buildReceiptView(
   exec: Database,

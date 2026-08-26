@@ -3,8 +3,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { asId, paise } from '../../src/domain/index.js';
 import type { EvidenceId, ExpenseId, PaymentId } from '../../src/domain/index.js';
 import { listAuditEvents, listUnmatchedEvidence } from '../../src/db/index.js';
+import { createAiService } from '../../src/ai/index.js';
 import {
   MAX_EVIDENCE_DOCUMENT_BYTES,
+  extractReceipt,
   getEvidence,
   ingestEvidenceDocument,
   linkEvidence,
@@ -18,6 +20,7 @@ import { createMemoryEvidenceStore, syntheticDocument } from '../support/evidenc
 import type { MemoryEvidenceStore } from '../support/evidence-store.js';
 import { addExpense, addPayment, seedCast } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
+import { scriptedReceiptExtractionTransport } from '../support/ai.js';
 
 const AS_USER = { actor: 'user', source: 'services.ingestEvidenceDocument' } as const;
 const CAPTURED_AT = new Date('2026-07-12T20:14:00Z');
@@ -403,5 +406,55 @@ describe('an unmatched document in the review queue', () => {
 
     const queue = await listReviewQueue(database.db, { kinds: ['possible_duplicate'] });
     expect(queue.items).toHaveLength(0);
+  });
+});
+
+describe('an unmatched document once extraction has read a Receipt off it', () => {
+  const BLINKIT_CAPTURED_AT = new Date('2026-07-01T19:25:00.000Z');
+  const ai = createAiService(scriptedReceiptExtractionTransport());
+
+  it('carries the receipt total as its amount, no longer zero', async () => {
+    const { evidenceId } = await ingest({ capturedAt: BLINKIT_CAPTURED_AT });
+    await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+
+    const [item] = (await listReviewQueue(database.db)).items;
+
+    expect(item?.amount).toBe(124_000n);
+    expect(item).toMatchObject({ receiptTotal: 124_000n });
+    expect((item as { receiptId?: string })?.receiptId).toEqual(expect.any(String));
+  });
+
+  it('offers a deterministic candidate payment, without linking anything (ADR-0037)', async () => {
+    const matchingPaymentId = await addPayment(database.db, cast, {
+      accountId: cast.account['account_hdfc_savings']!,
+      amount: paise(124_000n),
+      direction: 'debit',
+      occurredAt: BLINKIT_CAPTURED_AT,
+      rawDescription: 'UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD',
+      channel: 'upi',
+    });
+    const { evidenceId } = await ingest({ capturedAt: BLINKIT_CAPTURED_AT });
+    await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+
+    const item = (await listReviewQueue(database.db)).items.find(
+      (entry) => entry.kind === 'unmatched_evidence',
+    );
+
+    expect(item).toMatchObject({
+      candidateMatches: [{ paymentId: matchingPaymentId, amount: 124_000n }],
+    });
+    // Still in the queue: a candidate is an offer, not a decision (services.linkEvidence is).
+    expect((await listReviewQueue(database.db)).counts.unmatched_evidence).toBe(1);
+  });
+
+  it('carries no candidates when nothing matches the extracted total', async () => {
+    const { evidenceId } = await ingest({ capturedAt: BLINKIT_CAPTURED_AT });
+    await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+
+    const item = (await listReviewQueue(database.db)).items.find(
+      (entry) => entry.kind === 'unmatched_evidence',
+    );
+
+    expect(item).toMatchObject({ candidateMatches: [] });
   });
 });
