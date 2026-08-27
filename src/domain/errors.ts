@@ -37,6 +37,8 @@ export type DomainErrorCode =
   | 'GROUP_EXPANSION_NO_MEMBERS'
   /** Adjustments for one expense exceeded its gross amount (`invariants.md` #8). */
   | 'ADJUSTMENT_EXCEEDS_EXPENSE'
+  /** `ExpenseItem` amounts did not sum to the expense's gross amount (`domain-model.md`). */
+  | 'EXPENSE_ITEMS_SUM_MISMATCH'
   /** A custom distribution would drive a line below zero (`invariants.md` #12a). */
   | 'ADJUSTMENT_DISTRIBUTION_NEGATIVE'
   /** Links + settlements would exceed the payment they are drawn from. */

@@ -37,6 +37,7 @@ import type {
   AuditEventId,
   EvidenceId,
   ExpenseId,
+  ExpenseItemId,
   ImportBatchId,
   GroupId,
   MerchantId,
@@ -1125,6 +1126,72 @@ export async function listExpenseItems(
   return rows as Array<{ id: string; amount: Paise }>;
 }
 
+/** One `ExpenseItem` row, as `services.recordExpenseItems`/an API response needs it. */
+export interface ExpenseItemRow {
+  readonly id: ExpenseItemId;
+  readonly expenseId: ExpenseId;
+  readonly description: string;
+  readonly amount: Paise;
+  readonly quantity: string;
+  readonly receiptItemId: ReceiptItemId | null;
+}
+
+export interface InsertExpenseItemDraft {
+  readonly expenseId: ExpenseId;
+  readonly description: string;
+  readonly amount: Paise;
+  readonly quantity: string;
+  readonly receiptItemId: ReceiptItemId | null;
+}
+
+/**
+ * Writes an expense's whole item set in one call.
+ *
+ * There is no per-item insert and no update path: `services.recordExpenseItems` validates the
+ * complete set against `domain.validateExpenseItemsSum` before calling this, so "the items for
+ * this expense" is always written as one complete, gross-amount-accounting fact
+ * (`domain-model.md`, `ExpenseItem` invariant) rather than assembled incrementally.
+ */
+export async function insertExpenseItems(
+  exec: Executor,
+  items: readonly InsertExpenseItemDraft[],
+): Promise<readonly ExpenseItemId[]> {
+  if (items.length === 0) return [];
+  const rows = await exec
+    .insert(expenseItems)
+    .values(
+      items.map((item) => ({
+        expenseId: item.expenseId,
+        description: item.description,
+        amount: item.amount,
+        quantity: item.quantity,
+        receiptItemId: item.receiptItemId,
+      })),
+    )
+    .returning({ id: expenseItems.id });
+  return rows.map((row) => row.id as ExpenseItemId);
+}
+
+/** Every `ExpenseItem` for an expense, in the shape a caller reading them back needs. */
+export async function listExpenseItemsByExpense(
+  exec: Executor,
+  expenseId: ExpenseId,
+): Promise<ExpenseItemRow[]> {
+  const rows = await exec
+    .select()
+    .from(expenseItems)
+    .where(eq(expenseItems.expenseId, expenseId))
+    .orderBy(asc(expenseItems.createdAt), asc(expenseItems.id));
+  return rows.map((row) => ({
+    id: row.id as ExpenseItemId,
+    expenseId: row.expenseId as ExpenseId,
+    description: row.description,
+    amount: row.amount as Paise,
+    quantity: row.quantity,
+    receiptItemId: row.receiptItemId as ReceiptItemId | null,
+  }));
+}
+
 /**
  * Expenses carrying a **settlement-claim** manual note.
  *
@@ -1433,6 +1500,15 @@ export async function listReceiptItemsByReceipt(
     .where(eq(receiptItems.receiptId, receiptId))
     .orderBy(asc(receiptItems.createdAt), asc(receiptItems.id));
   return rows.map(toReceiptItemRow);
+}
+
+/** One `ReceiptItem`, for `services.recordExpenseItems` to validate a `receiptItemId` FK against. */
+export async function getReceiptItemById(
+  exec: Executor,
+  receiptItemId: ReceiptItemId,
+): Promise<ReceiptItemRow | null> {
+  const [row] = await exec.select().from(receiptItems).where(eq(receiptItems.id, receiptItemId));
+  return row === undefined ? null : toReceiptItemRow(row);
 }
 
 /**
