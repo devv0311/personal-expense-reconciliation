@@ -27,6 +27,10 @@ import (phase 6):
   gate that keeps a `gift` out; and `assertAmountChangeAllowed`, which exists so that a caller
   attempting to change an approved amount gets pointed at `ExpenseAdjustment` rather than
   finding a missing function and adding one.
+- `expense-item-service.ts` — `recordExpenseItems`/`getExpenseItems` (phase 12). Writes an
+  expense's complete item breakdown once — `domain.validateExpenseItemsSum` refuses a partial
+  one — optionally linking each item back to the `ReceiptItem` it derives from. Also the manual
+  (no-AI) item-entry path phase 11 deferred here: the caller supplies final numbers directly.
 - `allocation-service.ts` — `approveAllocation`, including group-line expansion.
 - `settlement-service.ts` — `recordSettlement`. Imports nothing that could create an
   `Allocation` (invariant #9a).
