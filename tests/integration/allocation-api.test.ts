@@ -145,6 +145,36 @@ describe('POST /api/expenses/:expenseId/allocation', () => {
     expect(expansion.length).toBeGreaterThan(0);
   });
 
+  it('applies a groupShareOverride, not the equal-weight default', async () => {
+    // Active flat members at OCCURRED_AT: Dev, Flatmate A, Flatmate C (people-and-groups.json).
+    // Weighting Flatmate A to zero should leave them with nothing, unlike the equal split.
+    const response = await api.handle(
+      post(`/api/expenses/${expenseId}/allocation`, {
+        actor: 'user',
+        method: 'equal',
+        beneficiaries: [{ type: 'group', id: cast.group['group_flat'] }],
+        groupShareOverrides: [
+          {
+            groupId: cast.group['group_flat'],
+            weights: [
+              { personId: cast.userPersonId, weight: '1' },
+              { personId: cast.person['person_flatmate_a'], weight: '0' },
+              { personId: cast.person['person_flatmate_c'], weight: '1' },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(response.status).toBe(201);
+
+    const expansion = await currentGroupExpansion(database.db, expenseId);
+    const flatmateAShare = expansion.find(
+      (row) => row.personId === cast.person['person_flatmate_a'],
+    );
+    expect(flatmateAShare?.amount).toBe(0n);
+    expect(expansion.reduce((sum, row) => sum + row.amount, 0n)).toBe(90_000n);
+  });
+
   it('approves an exact split', async () => {
     const response = await api.handle(
       post(`/api/expenses/${expenseId}/allocation`, {
