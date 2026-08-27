@@ -224,6 +224,40 @@ export function optionalMinorUnitsField(
   return BigInt(value);
 }
 
+/** A required JSON body field carrying minor units — no "absent" or "null" reading. */
+export function requireMinorUnitsField(body: Record<string, unknown>, field: string): bigint {
+  const value = optionalMinorUnitsField(body, field);
+  if (value === undefined || value === null) {
+    throw new ApiRequestError(
+      `"${field}" is required and must be a non-negative integer count of minor units as a ` +
+        'decimal string.',
+      field,
+    );
+  }
+  return value;
+}
+
+/** An ISO-8601 timestamp, refused rather than coerced. */
+export function requireTimestamp(body: Record<string, unknown>, field: string): Date {
+  const raw = requireString(body, field);
+  const value = new Date(raw);
+  if (Number.isNaN(value.getTime())) {
+    throw new ApiRequestError(`"${field}" must be an ISO-8601 timestamp.`, field);
+  }
+  return value;
+}
+
+/** An optional ISO-8601 timestamp — `undefined` when the field is absent or null. */
+export function optionalTimestamp(body: Record<string, unknown>, field: string): Date | undefined {
+  const raw = optionalString(body, field);
+  if (raw === undefined) return undefined;
+  const value = new Date(raw);
+  if (Number.isNaN(value.getTime())) {
+    throw new ApiRequestError(`"${field}", when present, must be an ISO-8601 timestamp.`, field);
+  }
+  return value;
+}
+
 /** The path segment `params` should have carried, refused as a 400 rather than a cast failure. */
 export function requireParam(params: Readonly<Record<string, string>>, name: string): string {
   const value = params[name];

@@ -61,3 +61,4 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0035](0035-unmatched-evidence-is-a-review-kind.md)               | An unmatched document is a review kind ranked last, carrying no proposal    | Accepted                                                     |
 | [0036](0036-receipt-extraction-writes-derived-rows-directly.md)   | Receipt extraction writes DERIVED rows directly, confirmation is a boolean  | Accepted                                                     |
 | [0037](0037-receipt-payment-matching-surfaces-candidates-only.md) | Receipt-to-payment matching surfaces candidates only, never auto-links      | Accepted                                                     |
+| [0038](0038-phase-12-scope-is-api-surface-and-expenseitem.md)     | Phase 12 is an API surface + ExpenseItem write path, not a new engine       | Accepted                                                     |

@@ -79,3 +79,24 @@ export function validateAdjustmentTotal(
   // Recomputing the net amount is the check: it throws when adjustments overshoot.
   netAmount(grossAmount, adjustmentAmounts);
 }
+
+/**
+ * `domain-model.md`'s `ExpenseItem` invariant: when an expense is broken down into items at
+ * all, their amounts must sum to exactly the expense's **gross** amount — never the net one.
+ * `ExpenseItem`s "represent the original purchase's composition and are unaffected by later
+ * adjustments, same as `Expense.amount` itself." An expense with no items at all is valid
+ * (whole-expense `equal`/`exact`/`percentage` allocation needs none); a *partially* itemized
+ * one is not, because a partial set could never be complete evidence of what was bought.
+ */
+export function validateExpenseItemsSum(itemAmounts: readonly Paise[], grossAmount: Paise): void {
+  const total = sumPaise(itemAmounts);
+  if (total !== grossAmount) {
+    throw new DomainError(
+      'EXPENSE_ITEMS_SUM_MISMATCH',
+      `${itemAmounts.length} item(s) sum to ${total} paise, but the expense's gross amount is ` +
+        `${grossAmount} paise. ExpenseItems must fully account for what the expense cost ` +
+        '(domain-model.md, ExpenseItem invariant) — there is no partial itemization.',
+      { total: total.toString(), grossAmount: grossAmount.toString() },
+    );
+  }
+}

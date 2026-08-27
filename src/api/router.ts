@@ -15,6 +15,8 @@
 
 import type { AiService, Database, EvidenceStore } from '../services/index.js';
 
+import { postDistributeAdjustment, postExpenseAdjustment } from './adjustment-routes.js';
+import { postAllocation } from './allocation-routes.js';
 import {
   getEvidenceContent,
   getEvidenceMetadata,
@@ -22,6 +24,7 @@ import {
   postEvidenceLink,
   postEvidenceNote,
 } from './evidence-routes.js';
+import { getExpenseItemsRoute, postExpenseItems } from './expense-item-routes.js';
 import { jsonResponse, toErrorResponse } from './http.js';
 import {
   getReceiptRoute,
@@ -35,6 +38,7 @@ import {
   postPaymentDuplicateDecision,
   postPaymentReclassification,
 } from './review-routes.js';
+import { postSettlement } from './settlement-routes.js';
 
 /** What the handlers need. Injected, so nothing in `src/api` reaches for a connection. */
 export interface ApiDependencies {
@@ -97,6 +101,31 @@ export const RECEIPT_ROUTES: readonly ApiRoute[] = [
 ];
 
 /**
+ * Items, allocation and adjustments over one expense — deciding who benefited from it and by
+ * how much (`docs/roadmap.md` phase 12).
+ */
+export const ALLOCATION_ROUTES: readonly ApiRoute[] = [
+  { method: 'POST', path: '/api/expenses/:expenseId/items', handler: postExpenseItems },
+  { method: 'GET', path: '/api/expenses/:expenseId/items', handler: getExpenseItemsRoute },
+  { method: 'POST', path: '/api/expenses/:expenseId/allocation', handler: postAllocation },
+  {
+    method: 'POST',
+    path: '/api/expenses/:expenseId/adjustments/distribute',
+    handler: postDistributeAdjustment,
+  },
+  {
+    method: 'POST',
+    path: '/api/expenses/:expenseId/adjustments',
+    handler: postExpenseAdjustment,
+  },
+];
+
+/** A manual settlement over a payment, independent of classification (phase 12). */
+export const SETTLEMENT_ROUTES: readonly ApiRoute[] = [
+  { method: 'POST', path: '/api/payments/:paymentId/settlements', handler: postSettlement },
+];
+
+/**
  * Every route, in match order.
  *
  * Order carries one rule: a literal segment is listed before the capture that would swallow
@@ -109,6 +138,8 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...REVIEW_ROUTES,
   ...EVIDENCE_ROUTES,
   ...RECEIPT_ROUTES,
+  ...ALLOCATION_ROUTES,
+  ...SETTLEMENT_ROUTES,
 ];
 
 export interface Api {

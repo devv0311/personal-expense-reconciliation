@@ -22,6 +22,7 @@ export * from './evidence-service.js';
 export * from './receipt-service.js';
 export * from './review-action-service.js';
 export * from './expense-service.js';
+export * from './expense-item-service.js';
 export * from './allocation-service.js';
 export * from './settlement-service.js';
 export * from './adjustment-service.js';

@@ -54,6 +54,23 @@ ineligible or already-extracted evidence row is a `ServiceError`, mapped the sam
 other precondition failure is. `optionalMinorUnitsField` (`http.ts`) distinguishes a
 correction field left out of the body (unchanged) from one sent as `null` (cleared).
 
+**Implemented (phase 12): allocation, adjustments, settlement.**
+
+| Route                                                  | Service                   |
+| ------------------------------------------------------ | ------------------------- |
+| `POST /api/expenses/:expenseId/items`                  | `recordExpenseItems`      |
+| `GET /api/expenses/:expenseId/items`                   | `getExpenseItems`         |
+| `POST /api/expenses/:expenseId/allocation`             | `approveAllocation`       |
+| `POST /api/expenses/:expenseId/adjustments`            | `recordExpenseAdjustment` |
+| `POST /api/expenses/:expenseId/adjustments/distribute` | `distributeAdjustment`    |
+| `POST /api/payments/:paymentId/settlements`            | `recordSettlement`        |
+
+These service functions predate this phase (the 2026-08-14 foundation pass) — phase 12 is
+their first caller from this layer, the same gap phases 9–11 each closed for their own service.
+The settlement route is a **second**, independent path alongside `decideInference`'s existing
+one: a human explicitly settling a payment classification never flagged as one. `getBalance`/
+`runReconciliation` stay unexposed — `roadmap.md` assigns those to phases 13 and 15.
+
 Handlers are Web `Request → Response` functions — precisely a Next.js App Router route
 handler's signature — so mounting them under `app/api/<route>/route.ts` later is a re-export, not a
 rewrite. **No framework is installed** to serve nine routes before any UI exists (ADR-0032).
@@ -83,4 +100,5 @@ decision, so `parseDecisionActor` does not apply to it, but an upload arriving o
 still a person's act and `system` would be an answer nobody can check.
 
 **Not implemented:** any UI, any server process (nothing listens on a port yet), auth, and any
-route outside the review, evidence and receipt surfaces.
+route outside the review, evidence, receipt and allocation surfaces — including `getBalance`/
+`runReconciliation`, deliberately (see phase 12 above).

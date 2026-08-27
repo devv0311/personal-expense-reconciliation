@@ -6,6 +6,7 @@ import {
   totalAdjusted,
   undistributedAmount,
   validateAdjustmentTotal,
+  validateExpenseItemsSum,
 } from './expense.js';
 import { paise } from './money.js';
 
@@ -102,5 +103,31 @@ describe('validateAdjustmentTotal — an expense cannot be refunded for more tha
 
   it('rejects a negative adjustment — there is no signed ExpenseAdjustment (#12a)', () => {
     expect(() => validateAdjustmentTotal(paise(90000n), [paise(-15000n)])).toThrow(DomainError);
+  });
+});
+
+describe('validateExpenseItemsSum — items must fully account for the gross amount', () => {
+  it('accepts an empty item set — items are optional entirely', () => {
+    expect(() => validateExpenseItemsSum([], paise(0n))).not.toThrow();
+  });
+
+  it('accepts items summing to exactly the gross amount', () => {
+    expect(() =>
+      validateExpenseItemsSum([paise(8000n), paise(31000n), paise(26000n)], paise(65000n)),
+    ).not.toThrow();
+  });
+
+  it('rejects items summing to less than the gross amount — no partial itemization', () => {
+    let raised: DomainError | undefined;
+    try {
+      validateExpenseItemsSum([paise(8000n)], paise(65000n));
+    } catch (error) {
+      raised = error as DomainError;
+    }
+    expect(raised?.code).toBe('EXPENSE_ITEMS_SUM_MISMATCH');
+  });
+
+  it('rejects items summing to more than the gross amount', () => {
+    expect(() => validateExpenseItemsSum([paise(70000n)], paise(65000n))).toThrow(DomainError);
   });
 });

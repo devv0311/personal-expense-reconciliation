@@ -43,6 +43,7 @@ import {
   requireOneOf,
   requireParam,
   requireString,
+  requireTimestamp,
   requireUuid,
 } from './http.js';
 import type { ApiDependencies, RouteParams } from './router.js';
@@ -245,16 +246,6 @@ function requirePersonActor(body: Record<string, unknown>): string {
     );
   }
   return actor;
-}
-
-/** An ISO-8601 timestamp, refused rather than coerced. */
-function requireTimestamp(body: Record<string, unknown>, field: string): Date {
-  const raw = requireString(body, field);
-  const value = new Date(raw);
-  if (Number.isNaN(value.getTime())) {
-    throw new ApiRequestError(`"${field}" must be an ISO-8601 timestamp.`, field);
-  }
-  return value;
 }
 
 /** The two optional link fields, present only when the caller supplied them. */

@@ -23,7 +23,7 @@ belongs in `src/services` instead.
 | `entities.ts`        | Entity shapes from `domain-model.md`                                                                    |
 | `allocation.ts`      | All six allocation methods; sum checks #11, #13, #14                                                    |
 | `group-expansion.ts` | Membership resolution as of the expense date; group-line expansion (ADR-0009)                           |
-| `expense.ts`         | `netAmount`, adjustment-total validation                                                                |
+| `expense.ts`         | `netAmount`, adjustment-total validation, `validateExpenseItemsSum` (`ExpenseItem` invariant)           |
 | `adjustment.ts`      | Adjustment distribution, including the full-refund zero-line shape (ADR-0013)                           |
 | `balance.ts`         | Pairwise obligations and `NetBalance` in both directions; `obligationEvidenceStatus`                    |
 | `payment.ts`         | Payment-explanation budget, non-spend guard #7, duplicate detection #10                                 |
