@@ -9,8 +9,12 @@
  * `src/api/README.md`.
  */
 
+export * from './adjustment-routes.js';
+export * from './allocation-routes.js';
 export * from './evidence-routes.js';
+export * from './expense-item-routes.js';
 export * from './http.js';
 export * from './receipt-routes.js';
 export * from './review-routes.js';
 export * from './router.js';
+export * from './settlement-routes.js';

@@ -103,11 +103,11 @@ Four slices, each independently green (`typecheck`, `lint`, `format:check`, `db:
 No new migration: `expense_items` was already migrated by the foundation pass; this phase is
 its first writer.
 
-| #   | Slice                | Delivers                                                                                          |
-| --- | --------------------- | --------------------------------------------------------------------------------------------------- |
+| #   | Slice                    | Delivers                                                                                                                                                    |
+| --- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | `ExpenseItem` write path | `domain.validateExpenseItemsSum`, `db.insertExpenseItems`/`listExpenseItemsByExpense`/`getReceiptItemById`, `services.recordExpenseItems`/`getExpenseItems` |
-| 2   | API surface            | Route handlers for items, allocation, adjustments (record + distribute), settlements             |
-| 3   | Documentation           | Roadmap correction, module READMEs, one ADR recording the scope-boundary decisions above           |
+| 2   | API surface              | Route handlers for items, allocation, adjustments (record + distribute), settlements                                                                        |
+| 3   | Documentation            | Roadmap correction, module READMEs, one ADR recording the scope-boundary decisions above                                                                    |
 
 ## Definition of done
 

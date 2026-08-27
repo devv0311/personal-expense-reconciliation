@@ -514,6 +514,12 @@ describe('the surface itself', () => {
       'POST /api/receipts/:receiptId/confirm',
       'POST /api/receipts/:receiptId/correct',
       'GET /api/receipts/:receiptId',
+      'POST /api/expenses/:expenseId/items',
+      'GET /api/expenses/:expenseId/items',
+      'POST /api/expenses/:expenseId/allocation',
+      'POST /api/expenses/:expenseId/adjustments/distribute',
+      'POST /api/expenses/:expenseId/adjustments',
+      'POST /api/payments/:paymentId/settlements',
     ]);
   });
 });
