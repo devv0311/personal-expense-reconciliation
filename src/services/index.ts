@@ -38,3 +38,4 @@ export * from './splitwise-service.js';
 export type { Database } from '../db/index.js';
 export type { AiService } from '../ai/index.js';
 export type { EvidenceStore } from '../integrations/evidence-store/index.js';
+export type { SplitwisePort } from '../integrations/splitwise/index.js';

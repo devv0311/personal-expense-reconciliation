@@ -20,3 +20,4 @@ export * from './receipt-routes.js';
 export * from './review-routes.js';
 export * from './router.js';
 export * from './settlement-routes.js';
+export * from './splitwise-routes.js';

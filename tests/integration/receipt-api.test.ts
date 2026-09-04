@@ -8,6 +8,7 @@ import { createTestDatabase } from '../support/database.js';
 import type { TestDatabase } from '../support/database.js';
 import { createMemoryEvidenceStore, syntheticDocument } from '../support/evidence-store.js';
 import type { MemoryEvidenceStore } from '../support/evidence-store.js';
+import { createMockSplitwisePort } from '../support/splitwise.js';
 import { scriptedReceiptExtractionTransport } from '../support/ai.js';
 
 const BASE = 'http://localhost';
@@ -32,6 +33,7 @@ beforeEach(async () => {
     db: database.db,
     ai: createAiService(scriptedReceiptExtractionTransport()),
     evidenceStore: store,
+    splitwise: createMockSplitwisePort(),
   });
 });
 

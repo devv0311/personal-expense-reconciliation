@@ -9,6 +9,7 @@ import { createTestDatabase } from '../support/database.js';
 import type { TestDatabase } from '../support/database.js';
 import { createMemoryEvidenceStore } from '../support/evidence-store.js';
 import type { MemoryEvidenceStore } from '../support/evidence-store.js';
+import { createMockSplitwisePort } from '../support/splitwise.js';
 import { scriptedClassificationTransport } from '../support/ai.js';
 import { addExpense, addPayment, currentGroupExpansion, seedCast } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
@@ -38,6 +39,7 @@ beforeEach(async () => {
     db: database.db,
     ai: createAiService(scriptedClassificationTransport({ people: cast.person })),
     evidenceStore: store,
+    splitwise: createMockSplitwisePort(),
   });
   expenseId = await addExpense(database.db, {
     description: 'Taxi to the airport',
