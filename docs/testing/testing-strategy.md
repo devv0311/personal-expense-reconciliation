@@ -194,5 +194,23 @@ it covers:
   because a queue that reorders itself under a reviewer is the defect `domain/review.ts` exists
   to prevent.
 
-Not yet covered, because the layer does not exist yet: `src/integrations` adapter tests
-(`docs/roadmap.md` phase 14).
+- **Reconciliation and frontend tests** (added phase 15) —
+  `tests/integration/reconciliation-service.test.ts` covers Splitwise drift detection against a
+  real database and mock port: no integration connected (unchanged behaviour), agreeing
+  balances (no drift), a mismatch (the right rows marked `drifted`, unrelated ones untouched),
+  and a `fetchBalances()` failure (the run still completes, surfaced as a discrepancy).
+  `tests/integration/reconciliation-api.test.ts` and `tests/integration/people-api.test.ts`
+  cover the new routes. `src/domain/splitwise-drift.test.ts` unit-tests the pure comparison.
+  `web/` gets its own test layer for the same reason it gets its own tsconfig/eslint (ADR-0042):
+  Vitest + React Testing Library, colocated with the code under test (`web/README.md`) — unit
+  tests for money formatting (exact `BigInt` arithmetic, including a value beyond
+  `Number.MAX_SAFE_INTEGER`, per `invariants.md` #12's discipline extending to display code) and
+  the API client's error mapping, component tests for the domain-meaning-based color/label rules
+  (e.g. `Money`'s tone is never derived from a figure's raw sign), and one page-level test
+  (`web/src/app/balances/page.test.tsx`) exercising loading/error/success against a mocked
+  `fetch`. Run separately from the root suite (`cd web && npm test`), not part of `npm test` at
+  the repository root — the mandated gate stays backend-only (ADR-0042).
+
+Not yet covered, because the layer does not exist yet: a concrete `src/integrations` adapter
+(`SplitwisePort`/`ModelTransport` are both still injected mocks in every test, by design —
+ADR-0025, ADR-0040).

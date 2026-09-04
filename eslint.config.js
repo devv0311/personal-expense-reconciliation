@@ -6,7 +6,9 @@ import eslintConfigPrettier from 'eslint-config-prettier';
 export default tseslint.config(
   {
     // `.remember/` is scratch state written by a local tooling plugin, not project source.
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '.remember/**', 'drizzle/**'],
+    // `web/` is a standalone Next.js package with its own eslint.config.mjs and tsconfig — a
+    // separate project, not source this config's TS project service knows about (ADR-0042).
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '.remember/**', 'drizzle/**', 'web/**'],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

@@ -98,5 +98,20 @@ import (phase 6):
   `loaders.resolveAllocationShares`, shared with `expense-service.ts`'s `assertReadyToSync`
   rather than re-implemented.
 
-Not yet implemented: `runReconciliation`'s API exposure, `fetchBalances`/drift detection, and
-re-sync of a `stale` `SplitwiseExpense` — see `docs/roadmap.md` phase 15.
+- `balance-service.ts` — `getBalance` (unchanged since phase 13) and `runReconciliation`
+  (phase 15, ADR-0041): stores the outflow-only `ReconciliationRun` snapshot exactly as before,
+  and now also, when a Splitwise `ExternalIntegration` is connected, compares this ledger's own
+  `NetBalance` against `splitwise.fetchBalances()` for every linked person via the pure
+  `domain.compareSplitwiseBalance`, records any disagreement as a `ReconciliationDiscrepancy`,
+  and marks every affected `synced` `SplitwiseExpense`/`SplitwiseSettlement` `drifted` — its
+  first writer. A `fetchBalances()` call that itself fails doesn't fail the run: it's recorded
+  as a `splitwise_fetch_failed` discrepancy instead, since the ledger's own totals don't depend
+  on Splitwise being reachable. `listReconciliationRunHistory`/`getReconciliationRun` are new,
+  thin reads over `db.listReconciliationRuns`/`getReconciliationRunById`.
+
+- `people-service.ts` — `listPeople` (phase 15): everyone not archived, each flagged with
+  whether they're the ledger's user. `db.listPeople`/`getPrimaryUserPerson`'s first
+  `src/api` caller — no phase before 15 had a UI needing a name to render.
+
+Not yet implemented: re-sync of a `stale` `SplitwiseExpense`/`SplitwiseSettlement`, and
+resolving a `ReconciliationDiscrepancy` — see `docs/roadmap.md` phase 15's implementation note.

@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #fafaf7;
+  --panel: #ffffff;
+  --ink: #1b2333;
+  --ink-muted: #5b6478;
+  --ink-faint: #8b93a3;
+  --rule: #d8d9cd;
+  --rule-strong: #b7bba8;
+  --debit: #a33b2e;
+  --debit-bg: #f8ece9;
+  --credit: #2f6e4f;
+  --credit-bg: #eaf2ec;
+  --accent: #2a3a6b;
+  --accent-bg: #ecedf5;
+  --focus-ring: #2a3a6b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #14161c;
+    --panel: #1b1e26;
+    --ink: #eceef4;
+    --ink-muted: #a2a9bb;
+    --ink-faint: #6b7284;
+    --rule: #2c2f3a;
+    --rule-strong: #3c4050;
+    --debit: #e08678;
+    --debit-bg: #2e211f;
+    --credit: #7fbb9c;
+    --credit-bg: #1c2921;
+    --accent: #8b9be0;
+    --accent-bg: #232744;
+    --focus-ring: #8b9be0;
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-panel: var(--panel);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-debit: var(--debit);
+  --color-debit-bg: var(--debit-bg);
+  --color-credit: var(--credit);
+  --color-credit-bg: var(--credit-bg);
+  --color-accent: var(--accent);
+  --color-accent-bg: var(--accent-bg);
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-plex-mono);
+}
+
+* {
+  border-color: var(--rule);
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

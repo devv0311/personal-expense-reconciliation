@@ -101,3 +101,35 @@ browser ─▶ web/ (Next.js) ─▶ fetch http://localhost:4000/api/... ─▶ 
 Rules/learning (`docs/roadmap.md`). Also inherited, undecided by this phase on purpose (ADR-0041):
 stale re-sync, discrepancy resolution, frontend coverage of review/evidence/receipts, and
 frontend CI.
+
+## Delivered
+
+Backend: `SplitwisePort.fetchBalances()`, `domain.compareSplitwiseBalance`, drift detection and
+attribution wired into `runReconciliation` (resilient to a failed fetch), three reconciliation
+routes, `GET /api/people`. 21 new/changed backend integration tests plus 6 new domain unit tests;
+full backend gate green (1133 tests).
+
+Frontend: `src/server.ts` (the API's first real process), `scripts/seed-dev-data.ts`, and `web/`
+— a standalone Next.js app with three screens (reconciliation, balances, expenses), IBM Plex
+Sans/Mono type, a ledger-derived visual language (hairline-ruled rows, a double rule under
+totals, red/green reserved for debit/credit meaning rather than sign). 37 frontend tests
+(Vitest + React Testing Library); full `web/` gate green. Verified live in a real browser against
+`scripts/seed-dev-data.ts`'s seeded scenario: light and dark mode, desktop and mobile viewports,
+every loading/error/empty/success state, and an end-to-end "run a reconciliation → see the
+result" flow. Two real defects were found and fixed during that pass:
+
+1. `Money`'s `tone="auto"` colored a figure by its raw sign — wrong for `ledgerUnexplainedTotal`
+   (a positive figure needs attention just as much as a negative one; only exactly zero is
+   "good news") and for `NetBalance` (a negative balance just means the debt runs the other
+   way, not that something is wrong). Replaced with an explicit `debit`/`credit`/`neutral` tone
+   the caller decides from domain meaning, never derived from the sign.
+2. The expenses screen's "Paid by" column silently fell back to a raw UUID, and the "Paid by"
+   filter silently disappeared, when the people list failed to load — reproduced by killing the
+   API mid-session and clicking "Try again" on the expenses error (which only retried the
+   expenses query, leaving people's own failure unretried). Fixed: a dedicated error/retry for
+   the people query, a non-UUID placeholder while it's missing, and the main retry now also
+   retries people if it's the one still failing.
+
+A third, narrower issue (not a defect, a devDependency version-skew type conflict between Next
+16's and Vitest's differently-pinned `vite` majors) surfaced in `vitest.config.ts` and is
+documented at its exclusion in `web/tsconfig.json`.

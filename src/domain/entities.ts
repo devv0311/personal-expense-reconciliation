@@ -475,8 +475,12 @@ export interface ReconciliationRun {
 
 /**
  * One surfaced gap. Only the shape `domain.obligationEvidenceStatus` actually reads is
- * modelled concretely (ADR-0014); other discrepancy kinds carry free-form detail until
- * the reconciliation phase (`docs/roadmap.md` phase 15) needs them typed.
+ * modelled concretely (ADR-0014). Phase 15 (`docs/roadmap.md`), the reconciliation phase this
+ * comment once deferred to, confirmed rather than resolved the deferral: `kind` stays a loose
+ * `string` (`'splitwise_balance_mismatch'`, `'splitwise_fetch_failed'`, ADR-0041) — a union
+ * would buy nothing `compareSplitwiseBalance`'s own return type doesn't already give its one
+ * caller, and every consumer (`DiscrepancyList` in `web/`) already falls back gracefully for an
+ * unrecognised kind by design.
  */
 export interface ReconciliationDiscrepancy {
   readonly kind: string;

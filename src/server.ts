@@ -41,6 +41,8 @@ import type {
 
 const PORT = Number.parseInt(process.env.PORT ?? '4000', 10);
 const EVIDENCE_STORAGE_PATH = process.env.EVIDENCE_STORAGE_PATH ?? './local-data/evidence';
+/** `web/`'s dev origin — this API and its UI are two separate processes (ADR-0042). */
+const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000';
 
 /**
  * A real Postgres server given `DATABASE_URL`; otherwise PGlite persisted on disk at
@@ -106,6 +108,20 @@ async function main(): Promise<void> {
 
   const server = createServer((req, res) => {
     void (async () => {
+      // `web/` runs on a different origin (ADR-0042), so every response — including the
+      // preflight `OPTIONS` a browser sends before a non-simple request — needs these headers.
+      // This lives here, not in `createApi`, because CORS is a browser/transport concern:
+      // `src/api` has no idea what origin is calling it, by design.
+      res.setHeader('Access-Control-Allow-Origin', CORS_ORIGIN);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'content-type');
+
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
       const request = toWebRequest(req);
       const response = await api.handle(request);
       res.writeHead(response.status, headersToNodeObject(response.headers));

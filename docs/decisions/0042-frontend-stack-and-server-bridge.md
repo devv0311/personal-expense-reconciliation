@@ -79,9 +79,16 @@ own `tsconfig.json`/`eslint.config.js`/test setup, rather than folding into the 
    entry, `web/**`, so `npm run lint` is untouched too (Next.js projects use their own, React/
    JSX-aware ESLint config — `typescript-eslint`'s backend rule set, e.g.
    `no-floating-promises` tuned for Drizzle transactions, isn't the right rule set for React
-   components either). `.prettierignore` is deliberately **not** changed — Prettier needs no
-   project-specific type information, so `npm run format:check` (`prettier --check .`) checking
-   `web/` too costs nothing and keeps one formatting standard across the whole repository.
+   components either). **`.prettierignore` gains a `web/` entry too** — tried the opposite first
+   (leave it unchanged, on the reasoning that Prettier needs no project-specific type
+   information) and it was wrong in practice: `create-next-app`'s scaffold writes
+   double-quoted source throughout, the root `.prettierrc.json` sets `singleQuote: true`, and
+   checking `web/` against it disagreed with every generated file. `web/` gets its own
+   `.prettierrc.json` (Prettier's own default, `singleQuote` unset, matching what was already
+   there) and its own `format`/`format:check` scripts, the same isolation already applied to
+   typecheck/lint/test — one Prettier standard _per package_, not one across a repository with
+   two different ecosystem conventions. `web/.prettierignore` also excludes `.next/`, which the
+   root config was never going to know to exclude either.
 2. **Avoids cross-project TypeScript resolution risk for no real benefit.** `web/` never imports
    from `src/`; it only calls the HTTP server `server.ts` exposes, over `fetch`, the same way any
    other client of this API would. That is what "the UI must use the real API" in this phase's
@@ -92,8 +99,12 @@ own `tsconfig.json`/`eslint.config.js`/test setup, rather than folding into the 
 
 Two processes: `npx tsx src/server.ts` (the API, `PORT` env var, default `4000`) and
 `cd web && npm run dev` (Next.js, port `3000`, `NEXT_PUBLIC_API_BASE_URL` pointing at the first).
-Documented in `web/README.md` and the root `README`-equivalent (`docs/architecture/
-system-architecture.md`).
+`scripts/seed-dev-data.ts` populates a believable scenario against the same on-disk PGlite
+`src/server.ts` opens (`PGLITE_DATA_DIR`, default `./local-data/pglite-dev`), so the UI has
+something real to render without connecting any account. `web/`'s own gate —
+`npm run typecheck && npm run lint && npm run format:check && npm test` — is run from inside
+`web/`, separately from the root one, per the CI scope note below. Documented in `web/README.md`
+and the root `README`-equivalent (`docs/architecture/system-architecture.md`).
 
 ## Consequences
 

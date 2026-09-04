@@ -9,3 +9,9 @@ drizzle/meta/
 # Scratch state written by a local tooling plugin, not project source. Matches the
 # corresponding entry in eslint.config.js.
 .remember/
+
+# web/ is a standalone Next.js package with its own Prettier config (double quotes, matching
+# create-next-app's own convention rather than fighting it) and its own format/format:check
+# scripts (ADR-0042, corrected — checking it against this root config was tried first and
+# immediately disagreed with every file create-next-app generated).
+web/
