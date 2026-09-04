@@ -26,9 +26,13 @@ import type {
   EvidenceType,
   ExpenseRelationshipType,
   ExpenseState,
+  ExternalIntegrationStatus,
+  ExternalIntegrationType,
   PaymentChannel,
   PaymentCounterpartyType,
   PaymentState,
+  SplitwiseExpenseSyncStatus,
+  SplitwiseSettlementSyncStatus,
 } from '../domain/enums.js';
 import type {
   AiInferenceId,
@@ -38,6 +42,7 @@ import type {
   EvidenceId,
   ExpenseId,
   ExpenseItemId,
+  ExternalIntegrationId,
   ImportBatchId,
   GroupId,
   MerchantId,
@@ -47,6 +52,9 @@ import type {
   ReceiptItemId,
   ReconciliationRunId,
   SettlementId,
+  SplitwiseExpenseId,
+  SplitwiseSettlementId,
+  UserId,
 } from '../domain/ids.js';
 import type { Paise } from '../domain/money.js';
 import { netAmount } from '../domain/expense.js';
@@ -66,6 +74,7 @@ import {
   expenseAdjustments,
   expenseItems,
   expenses,
+  externalIntegrations,
   groupMemberships,
   importBatches,
   merchantAliases,
@@ -78,6 +87,7 @@ import {
   reconciliationRuns,
   settlements,
   splitwiseExpenses,
+  splitwiseSettlements,
   users,
 } from './schema.js';
 
@@ -555,6 +565,34 @@ export async function listSettlementsByPayment(
   return rows as Array<{ amount: Paise }>;
 }
 
+export interface SettlementRow {
+  readonly id: SettlementId;
+  readonly paymentId: PaymentId;
+  readonly counterpartyPersonId: PersonId;
+  readonly amount: Paise;
+  readonly reason: string | null;
+  readonly recordedAt: Date;
+}
+
+/** One settlement, for resolving who it is between before syncing it to Splitwise. */
+export async function getSettlementById(
+  exec: Executor,
+  settlementId: SettlementId,
+): Promise<SettlementRow | null> {
+  const [row] = await exec
+    .select({
+      id: settlements.id,
+      paymentId: settlements.paymentId,
+      counterpartyPersonId: settlements.counterpartyPersonId,
+      amount: settlements.amount,
+      reason: settlements.reason,
+      recordedAt: settlements.recordedAt,
+    })
+    .from(settlements)
+    .where(eq(settlements.id, settlementId));
+  return row === undefined ? null : (row as SettlementRow);
+}
+
 export async function listPaymentExpenseLinksByPayment(
   exec: Executor,
   paymentId: PaymentId,
@@ -1025,16 +1063,20 @@ export async function updatePaymentState(
  */
 export async function getPrimaryUserPerson(
   exec: Executor,
-): Promise<{ personId: PersonId; displayName: string } | null> {
+): Promise<{ userId: UserId; personId: PersonId; displayName: string } | null> {
   const [row] = await exec
-    .select({ personId: users.personId, displayName: people.displayName })
+    .select({ userId: users.id, personId: users.personId, displayName: people.displayName })
     .from(users)
     .innerJoin(people, eq(people.id, users.personId))
     .orderBy(asc(users.createdAt), asc(users.id))
     .limit(1);
   return row === undefined
     ? null
-    : { personId: row.personId as PersonId, displayName: row.displayName };
+    : {
+        userId: row.userId as UserId,
+        personId: row.personId as PersonId,
+        displayName: row.displayName,
+      };
 }
 
 /** Everyone not archived, oldest first — the roster a proposal may name a counterparty from. */
@@ -1053,14 +1095,29 @@ export async function listPeople(
 export async function getPersonById(
   exec: Executor,
   personId: PersonId,
-): Promise<{ id: PersonId; displayName: string; archivedAt: Date | null } | null> {
+): Promise<{
+  id: PersonId;
+  displayName: string;
+  archivedAt: Date | null;
+  splitwiseUserId: string | null;
+} | null> {
   const [row] = await exec
-    .select({ id: people.id, displayName: people.displayName, archivedAt: people.archivedAt })
+    .select({
+      id: people.id,
+      displayName: people.displayName,
+      archivedAt: people.archivedAt,
+      splitwiseUserId: people.splitwiseUserId,
+    })
     .from(people)
     .where(eq(people.id, personId));
   return row === undefined
     ? null
-    : { id: row.id as PersonId, displayName: row.displayName, archivedAt: row.archivedAt };
+    : {
+        id: row.id as PersonId,
+        displayName: row.displayName,
+        archivedAt: row.archivedAt,
+        splitwiseUserId: row.splitwiseUserId,
+      };
 }
 
 /* ==================================================================== group membership */
@@ -1723,6 +1780,169 @@ export async function markSplitwiseExpenseStale(
     )
     .returning({ id: splitwiseExpenses.id });
   return rows.map((row) => row.id);
+}
+
+/* ================================================================ Splitwise integration */
+
+export interface ExternalIntegrationDraft {
+  readonly type: ExternalIntegrationType;
+  readonly ownerUserId: UserId;
+  readonly externalAccountRef: string | null;
+  readonly status: ExternalIntegrationStatus;
+  readonly connectedAt: Date | null;
+}
+
+export interface ExternalIntegrationRow {
+  readonly id: ExternalIntegrationId;
+  readonly type: ExternalIntegrationType;
+  readonly ownerUserId: UserId;
+  readonly externalAccountRef: string | null;
+  readonly status: ExternalIntegrationStatus;
+  readonly connectedAt: Date | null;
+  readonly lastSyncedAt: Date | null;
+}
+
+/** No credential/token field exists on this draft — none is ever stored (`security-model.md`). */
+export async function insertExternalIntegration(
+  exec: Executor,
+  draft: ExternalIntegrationDraft,
+): Promise<ExternalIntegrationId> {
+  const [row] = await exec
+    .insert(externalIntegrations)
+    .values({
+      type: draft.type,
+      ownerUserId: draft.ownerUserId,
+      externalAccountRef: draft.externalAccountRef,
+      status: draft.status,
+      connectedAt: draft.connectedAt,
+    })
+    .returning({ id: externalIntegrations.id });
+  return requireRow(row, 'external_integrations').id as ExternalIntegrationId;
+}
+
+/** The most recently connected integration of one type for one owner, or none. */
+export async function getConnectedExternalIntegration(
+  exec: Executor,
+  ownerUserId: UserId,
+  type: ExternalIntegrationType,
+): Promise<ExternalIntegrationRow | null> {
+  const [row] = await exec
+    .select({
+      id: externalIntegrations.id,
+      type: externalIntegrations.type,
+      ownerUserId: externalIntegrations.ownerUserId,
+      externalAccountRef: externalIntegrations.externalAccountRef,
+      status: externalIntegrations.status,
+      connectedAt: externalIntegrations.connectedAt,
+      lastSyncedAt: externalIntegrations.lastSyncedAt,
+    })
+    .from(externalIntegrations)
+    .where(
+      and(
+        eq(externalIntegrations.ownerUserId, ownerUserId),
+        eq(externalIntegrations.type, type),
+        eq(externalIntegrations.status, 'connected'),
+      ),
+    )
+    .orderBy(desc(externalIntegrations.connectedAt), desc(externalIntegrations.id))
+    .limit(1);
+  return row === undefined ? null : (row as ExternalIntegrationRow);
+}
+
+export interface SplitwiseExpenseDraft {
+  readonly expenseId: ExpenseId;
+  readonly externalIntegrationId: ExternalIntegrationId;
+  readonly splitwiseExpenseId: string;
+  readonly syncedAt: Date;
+  readonly ourSnapshot: unknown;
+  readonly theirSnapshot: unknown;
+  readonly syncStatus: SplitwiseExpenseSyncStatus;
+}
+
+/**
+ * Records a successful first sync. Only reachable once the port already returned an external
+ * id — `splitwise_expense_id`/`synced_at` are `NOT NULL`, so a failed call writes nothing here.
+ */
+export async function insertSplitwiseExpense(
+  exec: Executor,
+  draft: SplitwiseExpenseDraft,
+): Promise<SplitwiseExpenseId> {
+  const [row] = await exec
+    .insert(splitwiseExpenses)
+    .values({
+      expenseId: draft.expenseId,
+      externalIntegrationId: draft.externalIntegrationId,
+      splitwiseExpenseId: draft.splitwiseExpenseId,
+      syncedAt: draft.syncedAt,
+      ourSnapshot: draft.ourSnapshot,
+      theirSnapshot: draft.theirSnapshot,
+      syncStatus: draft.syncStatus,
+    })
+    .returning({ id: splitwiseExpenses.id });
+  return requireRow(row, 'splitwise_expenses').id as SplitwiseExpenseId;
+}
+
+/** Whether an `Expense` has already been synced — the duplicate-sync guard. */
+export async function getSplitwiseExpenseByExpenseId(
+  exec: Executor,
+  expenseId: ExpenseId,
+): Promise<{ id: SplitwiseExpenseId; syncStatus: SplitwiseExpenseSyncStatus } | null> {
+  const [row] = await exec
+    .select({ id: splitwiseExpenses.id, syncStatus: splitwiseExpenses.syncStatus })
+    .from(splitwiseExpenses)
+    .where(eq(splitwiseExpenses.expenseId, expenseId));
+  return row === undefined
+    ? null
+    : {
+        id: row.id as SplitwiseExpenseId,
+        syncStatus: row.syncStatus as SplitwiseExpenseSyncStatus,
+      };
+}
+
+export interface SplitwiseSettlementDraft {
+  readonly settlementId: SettlementId;
+  readonly externalIntegrationId: ExternalIntegrationId;
+  readonly splitwiseTransactionId: string;
+  readonly syncedAt: Date;
+  readonly ourSnapshot: unknown;
+  readonly theirSnapshot: unknown;
+  readonly syncStatus: SplitwiseSettlementSyncStatus;
+}
+
+export async function insertSplitwiseSettlement(
+  exec: Executor,
+  draft: SplitwiseSettlementDraft,
+): Promise<SplitwiseSettlementId> {
+  const [row] = await exec
+    .insert(splitwiseSettlements)
+    .values({
+      settlementId: draft.settlementId,
+      externalIntegrationId: draft.externalIntegrationId,
+      splitwiseTransactionId: draft.splitwiseTransactionId,
+      syncedAt: draft.syncedAt,
+      ourSnapshot: draft.ourSnapshot,
+      theirSnapshot: draft.theirSnapshot,
+      syncStatus: draft.syncStatus,
+    })
+    .returning({ id: splitwiseSettlements.id });
+  return requireRow(row, 'splitwise_settlements').id as SplitwiseSettlementId;
+}
+
+/** Whether a `Settlement` has already been synced — the duplicate-sync guard. */
+export async function getSplitwiseSettlementBySettlementId(
+  exec: Executor,
+  settlementId: SettlementId,
+): Promise<{ id: SplitwiseSettlementId; syncStatus: SplitwiseSettlementSyncStatus } | null> {
+  const [row] = await exec
+    .select({ id: splitwiseSettlements.id, syncStatus: splitwiseSettlements.syncStatus })
+    .from(splitwiseSettlements)
+    .where(eq(splitwiseSettlements.settlementId, settlementId));
+  return row === undefined
+    ? null
+    : {
+        id: row.id as SplitwiseSettlementId,
+        syncStatus: row.syncStatus as SplitwiseSettlementSyncStatus,
+      };
 }
 
 /** Everything `domain.computeUnexplained` needs for one period. */

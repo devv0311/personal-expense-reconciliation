@@ -13,6 +13,7 @@ import {
   type ExpenseState,
   type Paise,
   type PersonId,
+  type ResolvedShare,
 } from '../domain/index.js';
 import type { AllocationLineRow, CurrentAllocationRow, Executor, PaymentRow } from '../db/index.js';
 import {
@@ -111,6 +112,28 @@ export async function loadCurrentAllocation(
     })),
     expansions,
   };
+}
+
+/**
+ * Resolves a current allocation's lines to individual `PersonId`/`Paise` shares.
+ *
+ * A `group`-typed line is read through its `AllocationLineGroupExpansion` rows, never as the
+ * raw group id — the one rule both real settlement and Splitwise sync share (`invariants.md`
+ * #19, ADR-0009). Shared here so `expense-service.ts`'s READY_TO_SYNC gate and
+ * `splitwise-service.ts`'s sync-payload builder read the same resolution rather than each
+ * re-implementing the same walk over `expansions`.
+ */
+export function resolveAllocationShares(
+  current: CurrentAllocationSnapshot,
+): readonly ResolvedShare[] {
+  return current.rows.flatMap((row) =>
+    row.beneficiaryType === 'group'
+      ? (current.expansions.get(row.id) ?? []).map((expansion) => ({
+          beneficiaryId: expansion.personId,
+          amount: expansion.amount,
+        }))
+      : [{ beneficiaryId: row.beneficiaryId as PersonId, amount: row.amount }],
+  );
 }
 
 /** Loads the current allocation, failing when the expense has none. */
