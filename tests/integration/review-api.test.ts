@@ -27,6 +27,7 @@ import {
 import type { ProposedClassification } from '../../src/services/index.js';
 import { createTestDatabase } from '../support/database.js';
 import { createMemoryEvidenceStore } from '../support/evidence-store.js';
+import { createMockSplitwisePort } from '../support/splitwise.js';
 import type { TestDatabase } from '../support/database.js';
 import { scriptedClassificationTransport } from '../support/ai.js';
 import { AS_USER, addPayment, seedCast, seedMerchants } from '../support/ledger.js';
@@ -58,6 +59,7 @@ beforeEach(async () => {
     db: database.db,
     ai: createAiService(scriptedClassificationTransport({ people: cast.person })),
     evidenceStore: createMemoryEvidenceStore(),
+    splitwise: createMockSplitwisePort(),
   });
 });
 
@@ -487,6 +489,7 @@ describe('the surface itself', () => {
       db: null as unknown as TestDatabase['db'],
       ai: createAiService(scriptedClassificationTransport({ people: cast.person })),
       evidenceStore: createMemoryEvidenceStore(),
+      splitwise: createMockSplitwisePort(),
     });
 
     const response = await broken.handle(new Request(`${BASE}/api/review`));
@@ -522,6 +525,10 @@ describe('the surface itself', () => {
       'POST /api/payments/:paymentId/settlements',
       'GET /api/expenses',
       'GET /api/balances/:personAId/:personBId',
+      'POST /api/integrations/splitwise/connect',
+      'POST /api/expenses/:expenseId/ready-to-sync',
+      'POST /api/expenses/:expenseId/splitwise-sync',
+      'POST /api/settlements/:settlementId/splitwise-sync',
     ]);
   });
 });

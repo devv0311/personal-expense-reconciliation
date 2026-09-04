@@ -405,6 +405,7 @@ describe('the references a proposal is checked against', () => {
 
   it('resolves the single user to their Person', async () => {
     expect(await getPrimaryUserPerson(database.db)).toEqual({
+      userId: cast.userId,
       personId: cast.userPersonId,
       displayName: 'Dev',
     });

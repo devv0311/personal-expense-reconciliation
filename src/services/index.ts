@@ -28,6 +28,7 @@ export * from './allocation-service.js';
 export * from './settlement-service.js';
 export * from './adjustment-service.js';
 export * from './balance-service.js';
+export * from './splitwise-service.js';
 
 /**
  * The two handles every service call needs, re-exported so a caller — `src/api`, a future
@@ -37,3 +38,4 @@ export * from './balance-service.js';
 export type { Database } from '../db/index.js';
 export type { AiService } from '../ai/index.js';
 export type { EvidenceStore } from '../integrations/evidence-store/index.js';
+export type { SplitwisePort } from '../integrations/splitwise/index.js';

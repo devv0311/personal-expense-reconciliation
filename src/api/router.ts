@@ -13,7 +13,7 @@
  * does have is written down at `API_ROUTES`.
  */
 
-import type { AiService, Database, EvidenceStore } from '../services/index.js';
+import type { AiService, Database, EvidenceStore, SplitwisePort } from '../services/index.js';
 
 import { postDistributeAdjustment, postExpenseAdjustment } from './adjustment-routes.js';
 import { postAllocation } from './allocation-routes.js';
@@ -41,6 +41,12 @@ import {
   postPaymentReclassification,
 } from './review-routes.js';
 import { postSettlement } from './settlement-routes.js';
+import {
+  postConnectSplitwiseIntegration,
+  postReadyToSync,
+  postSyncExpense,
+  postSyncSettlement,
+} from './splitwise-routes.js';
 
 /** What the handlers need. Injected, so nothing in `src/api` reaches for a connection. */
 export interface ApiDependencies {
@@ -49,6 +55,8 @@ export interface ApiDependencies {
   readonly ai: AiService;
   /** Where documents live, which is deliberately not the database (`security-model.md`). */
   readonly evidenceStore: EvidenceStore;
+  /** No concrete adapter is wired yet (ADR-0025's precedent) — a test injects a mock. */
+  readonly splitwise: SplitwisePort;
 }
 
 export type RouteParams = Readonly<Record<string, string>>;
@@ -137,6 +145,22 @@ export const BALANCE_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/balances/:personAId/:personBId', handler: getBalanceRoute },
 ];
 
+/** Connecting to, and syncing with, Splitwise for the first time (phase 14, ADR-0040). */
+export const SPLITWISE_ROUTES: readonly ApiRoute[] = [
+  {
+    method: 'POST',
+    path: '/api/integrations/splitwise/connect',
+    handler: postConnectSplitwiseIntegration,
+  },
+  { method: 'POST', path: '/api/expenses/:expenseId/ready-to-sync', handler: postReadyToSync },
+  { method: 'POST', path: '/api/expenses/:expenseId/splitwise-sync', handler: postSyncExpense },
+  {
+    method: 'POST',
+    path: '/api/settlements/:settlementId/splitwise-sync',
+    handler: postSyncSettlement,
+  },
+];
+
 /**
  * Every route, in match order.
  *
@@ -154,6 +178,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...SETTLEMENT_ROUTES,
   ...EXPENSE_LEDGER_ROUTES,
   ...BALANCE_ROUTES,
+  ...SPLITWISE_ROUTES,
 ];
 
 export interface Api {

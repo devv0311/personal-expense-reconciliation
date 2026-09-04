@@ -63,3 +63,4 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0037](0037-receipt-payment-matching-surfaces-candidates-only.md)     | Receipt-to-payment matching surfaces candidates only, never auto-links      | Accepted                                                     |
 | [0038](0038-phase-12-scope-is-api-surface-and-expenseitem.md)         | Phase 12 is an API surface + ExpenseItem write path, not a new engine       | Accepted                                                     |
 | [0039](0039-phase-13-scope-is-balance-exposure-and-ledger-listing.md) | Phase 13 is `getBalance` exposure + a new ledger listing, not a new engine  | Accepted                                                     |
+| [0040](0040-phase-14-scope-is-first-sync-not-full-lifecycle.md)       | Phase 14 delivers the first Splitwise sync, not the full sync lifecycle     | Accepted                                                     |

@@ -12,20 +12,18 @@ import {
   assertExpenseAmountImmutable,
   canEnterReadyToSync,
 } from '../domain/index.js';
-import type {
-  ExpenseId,
-  ExpenseRelationshipType,
-  ExpenseState,
-  Paise,
-  PersonId,
-  ResolvedShare,
-} from '../domain/index.js';
+import type { ExpenseId, ExpenseRelationshipType, ExpenseState, Paise } from '../domain/index.js';
 import { updateExpenseState } from '../db/index.js';
 import type { Database, Executor } from '../db/index.js';
 
 import { runAudited, type AuditMeta } from './audit.js';
 import { ServiceError } from './errors.js';
-import { loadCurrentAllocation, requireExpenseSnapshot, type ExpenseSnapshot } from './loaders.js';
+import {
+  loadCurrentAllocation,
+  requireExpenseSnapshot,
+  resolveAllocationShares,
+  type ExpenseSnapshot,
+} from './loaders.js';
 
 export interface TransitionExpenseInput {
   readonly expenseId: ExpenseId;
@@ -111,14 +109,7 @@ async function assertReadyToSync(exec: Executor, expense: ExpenseSnapshot): Prom
     );
   }
 
-  const resolvedShares: ResolvedShare[] = current.rows.flatMap((row) =>
-    row.beneficiaryType === 'group'
-      ? (current.expansions.get(row.id) ?? []).map((expansion) => ({
-          beneficiaryId: expansion.personId,
-          amount: expansion.amount,
-        }))
-      : [{ beneficiaryId: row.beneficiaryId as PersonId, amount: row.amount }],
-  );
+  const resolvedShares = resolveAllocationShares(current);
 
   const eligible = canEnterReadyToSync({
     relationshipType: expense.relationshipType as ExpenseRelationshipType,
