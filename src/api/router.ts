@@ -17,6 +17,7 @@ import type { AiService, Database, EvidenceStore } from '../services/index.js';
 
 import { postDistributeAdjustment, postExpenseAdjustment } from './adjustment-routes.js';
 import { postAllocation } from './allocation-routes.js';
+import { getBalanceRoute } from './balance-routes.js';
 import {
   getEvidenceContent,
   getEvidenceMetadata,
@@ -25,6 +26,7 @@ import {
   postEvidenceNote,
 } from './evidence-routes.js';
 import { getExpenseItemsRoute, postExpenseItems } from './expense-item-routes.js';
+import { getExpensesRoute } from './expense-ledger-routes.js';
 import { jsonResponse, toErrorResponse } from './http.js';
 import {
   getReceiptRoute,
@@ -125,6 +127,16 @@ export const SETTLEMENT_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/payments/:paymentId/settlements', handler: postSettlement },
 ];
 
+/** The expense ledger, queryable — `services.listExpenses` (`docs/roadmap.md` phase 13). */
+export const EXPENSE_LEDGER_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/expenses', handler: getExpensesRoute },
+];
+
+/** The pairwise `Balance` between any two people — `services.getBalance` (phase 13, ADR-0006). */
+export const BALANCE_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/balances/:personAId/:personBId', handler: getBalanceRoute },
+];
+
 /**
  * Every route, in match order.
  *
@@ -140,6 +152,8 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...RECEIPT_ROUTES,
   ...ALLOCATION_ROUTES,
   ...SETTLEMENT_ROUTES,
+  ...EXPENSE_LEDGER_ROUTES,
+  ...BALANCE_ROUTES,
 ];
 
 export interface Api {
