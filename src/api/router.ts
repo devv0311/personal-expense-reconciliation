@@ -31,6 +31,7 @@ import {
 import { getExpenseItemsRoute, postExpenseItems } from './expense-item-routes.js';
 import { getExpensesRoute } from './expense-ledger-routes.js';
 import { jsonResponse, toErrorResponse } from './http.js';
+import { getPeopleRoute } from './people-routes.js';
 import {
   getReceiptRoute,
   postReceiptConfirmation,
@@ -153,6 +154,11 @@ export const BALANCE_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/balances/:personAId/:personBId', handler: getBalanceRoute },
 ];
 
+/** The people roster `web/` renders names from — `services.listPeople` (phase 15). */
+export const PEOPLE_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/people', handler: getPeopleRoute },
+];
+
 /**
  * Running a reconciliation and reading its history — `services.runReconciliation`
  * (phase 15, ADR-0041).
@@ -196,6 +202,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...SETTLEMENT_ROUTES,
   ...EXPENSE_LEDGER_ROUTES,
   ...BALANCE_ROUTES,
+  ...PEOPLE_ROUTES,
   ...SPLITWISE_ROUTES,
   ...RECONCILIATION_ROUTES,
 ];

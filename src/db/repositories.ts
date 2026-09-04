@@ -1081,16 +1081,24 @@ export async function getPrimaryUserPerson(
       };
 }
 
-/** Everyone not archived, oldest first — the roster a proposal may name a counterparty from. */
+/**
+ * Everyone not archived, oldest first — the roster a proposal may name a counterparty from, and
+ * (phase 15) the roster `GET /api/people` gives `web/` to render names and Splitwise-linkage
+ * instead of bare ids. `splitwiseUserId` is additive to this query, not a new one.
+ */
 export async function listPeople(
   exec: Executor,
-): Promise<Array<{ id: PersonId; displayName: string }>> {
+): Promise<Array<{ id: PersonId; displayName: string; splitwiseUserId: string | null }>> {
   const rows = await exec
-    .select({ id: people.id, displayName: people.displayName })
+    .select({
+      id: people.id,
+      displayName: people.displayName,
+      splitwiseUserId: people.splitwiseUserId,
+    })
     .from(people)
     .where(isNull(people.archivedAt))
     .orderBy(asc(people.createdAt), asc(people.id));
-  return rows as Array<{ id: PersonId; displayName: string }>;
+  return rows as Array<{ id: PersonId; displayName: string; splitwiseUserId: string | null }>;
 }
 
 /** One person, for confirming a proposal named someone who actually exists. */

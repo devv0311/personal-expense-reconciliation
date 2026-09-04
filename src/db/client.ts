@@ -14,6 +14,8 @@
  * which is exactly the class of bug `invariants.md` #12 exists to prevent.
  */
 
+import { mkdirSync } from 'node:fs';
+
 import { drizzle as drizzleNodePg } from 'drizzle-orm/node-postgres';
 import { migrate as migrateNodePg } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
@@ -70,9 +72,12 @@ export async function createPostgresDatabase(connectionString: string): Promise<
  * Starts an in-process PostgreSQL (PGlite).
  *
  * `dataDir` defaults to an in-memory database, which is what the test suite wants: fresh
- * engine per suite, nothing left on disk.
+ * engine per suite, nothing left on disk. When given a path whose parent directories don't
+ * exist yet (a fresh checkout's first `npx tsx src/server.ts`), they're created first — PGlite
+ * itself only creates the leaf directory, not the path to it.
  */
 export async function createPgliteDatabase(dataDir?: string): Promise<DatabaseHandle> {
+  if (dataDir !== undefined) mkdirSync(dataDir, { recursive: true });
   const { PGlite } = await import('@electric-sql/pglite');
   const client = new PGlite(dataDir, {
     // Keep int8 exact. Without this, PGlite hands back a JavaScript number and a paise
