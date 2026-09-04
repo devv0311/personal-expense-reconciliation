@@ -6,9 +6,9 @@ Thin HTTP/API layer (Next.js route handlers / server actions, per
 **Owns:** request validation, calling the appropriate `src/services` function, response
 serialization. Nothing else.
 
-**Depends on:** `src/services` — including the `Database`, `AiService` and `EvidenceStore`
-handles it merely passes through, which are re-exported there so this layer never reaches past
-it into `src/db`, `src/ai`, or `src/integrations`.
+**Depends on:** `src/services` — including the `Database`, `AiService`, `EvidenceStore` and
+`SplitwisePort` handles it merely passes through, which are re-exported there so this layer
+never reaches past it into `src/db`, `src/ai`, or `src/integrations`.
 The one exception is `isAiContractError`, imported from `src/ai` because mapping an error to a
 status code means recognising which family it came from.
 
@@ -87,21 +87,38 @@ the typical read, not a hidden filter a caller cannot override. `GET /api/balanc
 path person needs to be the user. `runReconciliation` still stays unexposed — `roadmap.md`
 assigns it to phase 15 (ADR-0039).
 
+**Implemented (phase 14): connecting to, and syncing with, Splitwise.**
+
+| Route                                                | Service                       |
+| ---------------------------------------------------- | ----------------------------- |
+| `POST /api/integrations/splitwise/connect`           | `connectSplitwiseIntegration` |
+| `POST /api/expenses/:expenseId/ready-to-sync`        | `transitionExpense`           |
+| `POST /api/expenses/:expenseId/splitwise-sync`       | `syncExpenseToSplitwise`      |
+| `POST /api/settlements/:settlementId/splitwise-sync` | `syncSettlementToSplitwise`   |
+
+The `ready-to-sync` route is the first `src/api` caller for `transitionExpense`, unchanged
+since it was built (phase 9 era) — reused, not new lifecycle logic. The two sync routes build
+the payload and call the injected `SplitwisePort` in one request; there is no separate preview
+route, since `data-flow.md` says no AI proposal sits on this path to review the way
+`decideInference` reviews one (ADR-0040). `createApi` takes a `splitwise: SplitwisePort`
+dependency alongside `db`/`ai`/`evidenceStore`; no concrete adapter is wired (ADR-0025's
+precedent), so a test injects an in-memory mock.
+
 Handlers are Web `Request → Response` functions — precisely a Next.js App Router route
 handler's signature — so mounting them under `app/api/<route>/route.ts` later is a re-export, not a
-rewrite. **No framework is installed** to serve nine routes before any UI exists (ADR-0032).
-`createApi({ db, ai, evidenceStore })` builds the surface over its dependencies and exposes both
-the route table and a small exact-segment dispatcher, which is what the integration tests drive.
-The first pattern that matches a path owns it, so a wrong verb on a known path is a 405 rather
-than a 400 from whichever capture route swallowed it.
+rewrite. **No framework is installed** to serve these routes before any UI exists (ADR-0032).
+`createApi({ db, ai, evidenceStore, splitwise })` builds the surface over its dependencies and
+exposes both the route table and a small exact-segment dispatcher, which is what the
+integration tests drive. The first pattern that matches a path owns it, so a wrong verb on a
+known path is a 405 rather than a 400 from whichever capture route swallowed it.
 
 Three things this layer does that look like rules but are translations:
 
 - **Status mapping.** `DECISION_ACTOR_INVALID → 403`, `INVALID_STATE_TRANSITION → 409`,
   `PRECONDITION_FAILED → 409`, `ENTITY_NOT_FOUND → 404`, `EVIDENCE_DOCUMENT_TOO_LARGE → 413`,
-  `EVIDENCE_STORE_UNAVAILABLE → 503`, an `AiContractError → 422`, anything unrecognised → a bare
-  500 with no detail (`security-model.md`). The codes are raised by `src/domain` and
-  `src/services`; this only chooses the number.
+  `EVIDENCE_STORE_UNAVAILABLE → 503`, `SPLITWISE_SYNC_FAILED → 502`, an `AiContractError → 422`,
+  anything unrecognised → a bare 500 with no detail (`security-model.md`). The codes are raised
+  by `src/domain` and `src/services`; this only chooses the number.
 - **Money serialization.** Every amount crosses as an exact decimal **string** of minor units.
   `JSON.stringify` cannot represent a `bigint`, and must never represent money as a `number`
   (`invariants.md` #12).
@@ -116,5 +133,6 @@ decision, so `parseDecisionActor` does not apply to it, but an upload arriving o
 still a person's act and `system` would be an answer nobody can check.
 
 **Not implemented:** any UI, any server process (nothing listens on a port yet), auth, and any
-route outside the review, evidence, receipt, allocation and ledger surfaces — including
-`runReconciliation`, deliberately deferred to phase 15 (see phase 13 above).
+route outside the review, evidence, receipt, allocation, ledger and Splitwise surfaces —
+including `runReconciliation` and `fetchBalances`-driven drift/stale-resync routes, deliberately
+deferred to phase 15 (see phase 13 and phase 14 above).

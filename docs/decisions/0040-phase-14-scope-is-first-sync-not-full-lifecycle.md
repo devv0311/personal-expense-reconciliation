@@ -81,6 +81,15 @@ splitwise-sync`.
   already-synced expense is adjusted: the `SplitwiseExpense` row sits at `sync_status = stale`
   with no route to act on it yet. Documented here and in `roadmap.md` rather than silently
   left for someone to rediscover.
+- **Discovered during implementation:** `audit_events_entity_type_check`
+  (`drizzle/0000_initial_financial_schema.sql`) already includes `splitwise_expense`/
+  `splitwise_settlement` but never `external_integration` — the foundation pass classified
+  `ExternalIntegration` as SYSTEM configuration data, the same tier as `people`/`accounts`/
+  `users`, none of which get an `AuditEvent` entity type either. `connectSplitwiseIntegration`
+  therefore does not use `runAudited`; adding `external_integration` to the constraint to make
+  it auditable would need a migration this phase's own scope decision (#2 above) already ruled
+  out, and invariant #21's audit requirement is scoped to APPROVED/user-facing DERIVED data,
+  which `ExternalIntegration` is not (`domain-model.md`: "Classification. SYSTEM.").
 
 ## Alternatives considered
 

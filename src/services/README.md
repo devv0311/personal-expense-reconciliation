@@ -88,4 +88,15 @@ import (phase 6):
   `subtotal`, `total` vs a linked payment's amount) and any deterministic candidate payment
   match (`domain.findCandidatePaymentMatches`, ADR-0037) fresh on every read — never stored.
 
-Not yet implemented: Splitwise sync orchestration — see `docs/roadmap.md` phase 14.
+- `splitwise-service.ts` — `connectSplitwiseIntegration` (not run through `runAudited`;
+  `ExternalIntegration` is SYSTEM-classified, not APPROVED/DERIVED, ADR-0040),
+  `syncExpenseToSplitwise`/`syncSettlementToSplitwise` (phase 14). Both build the payload and
+  call the injected `SplitwisePort` in one call — no separate propose/confirm pair, since no AI
+  proposal sits on this path. A `SplitwiseExpense`/`SplitwiseSettlement` row is only ever
+  written once the port already returned an external id, so a failed sync leaves nothing behind
+  and a retry is calling the same function again. Group-line resolution comes from
+  `loaders.resolveAllocationShares`, shared with `expense-service.ts`'s `assertReadyToSync`
+  rather than re-implemented.
+
+Not yet implemented: `runReconciliation`'s API exposure, `fetchBalances`/drift detection, and
+re-sync of a `stale` `SplitwiseExpense` — see `docs/roadmap.md` phase 15.
