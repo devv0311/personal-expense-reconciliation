@@ -71,6 +71,22 @@ The settlement route is a **second**, independent path alongside `decideInferenc
 one: a human explicitly settling a payment classification never flagged as one. `getBalance`/
 `runReconciliation` stay unexposed — `roadmap.md` assigns those to phases 13 and 15.
 
+**Implemented (phase 13): the expense ledger.**
+
+| Route                                     | Service        |
+| ----------------------------------------- | -------------- |
+| `GET /api/expenses`                       | `listExpenses` |
+| `GET /api/balances/:personAId/:personBId` | `getBalance`   |
+
+`listExpenses` is the one genuinely new service this phase adds; `getBalance` predates it (the
+2026-08-14 foundation pass, ADR-0038) and this is its first `src/api` caller. Query parameters
+on `GET /api/expenses` (`state`, `paidBy`, `limit`) are all optional — omitting `state` returns
+every state, not only `approved`, since "querying/reporting over approved expenses" describes
+the typical read, not a hidden filter a caller cannot override. `GET /api/balances/…` resolves
+`userPersonId` through `requireUserPersonId` rather than accepting it from the request; neither
+path person needs to be the user. `runReconciliation` still stays unexposed — `roadmap.md`
+assigns it to phase 15 (ADR-0039).
+
 Handlers are Web `Request → Response` functions — precisely a Next.js App Router route
 handler's signature — so mounting them under `app/api/<route>/route.ts` later is a re-export, not a
 rewrite. **No framework is installed** to serve nine routes before any UI exists (ADR-0032).
@@ -100,5 +116,5 @@ decision, so `parseDecisionActor` does not apply to it, but an upload arriving o
 still a person's act and `system` would be an answer nobody can check.
 
 **Not implemented:** any UI, any server process (nothing listens on a port yet), auth, and any
-route outside the review, evidence, receipt and allocation surfaces — including `getBalance`/
-`runReconciliation`, deliberately (see phase 12 above).
+route outside the review, evidence, receipt, allocation and ledger surfaces — including
+`runReconciliation`, deliberately deferred to phase 15 (see phase 13 above).

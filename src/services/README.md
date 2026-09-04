@@ -36,6 +36,10 @@ import (phase 6):
   `Allocation` (invariant #9a).
 - `adjustment-service.ts` — `recordExpenseAdjustment` and `distributeAdjustment`.
 - `balance-service.ts` — `getBalance` and `runReconciliation`, both read-then-compute.
+- `expense-ledger-service.ts` — `listExpenses` (phase 13). A thin pass-through over
+  `db.listExpenses`, which does the filtering and the batched `domain.netAmount` computation
+  itself (mirroring `loadReconciliationInput`'s split for the same figure) — kept here only so
+  `src/api` depends on `src/services`, never `src/db`, directly.
 - `import-service.ts` — `importBankStatementCsv`: parse, then `ImportBatch` + immutable
   `Payment` rows, with deterministic duplicate handling at both the file and the row level
   (ADR-0019). Classifies nothing.
