@@ -12,6 +12,7 @@ import type {
   CreateSplitwiseExpenseResult,
   RecordSplitwisePaymentInput,
   RecordSplitwisePaymentResult,
+  SplitwiseFriendBalance,
   SplitwisePort,
 } from '../../src/integrations/splitwise/index.js';
 
@@ -27,10 +28,14 @@ export interface MockSplitwisePort extends SplitwisePort {
  *
  * `failNextCreateExpense`/`failNextRecordPayment` make exactly the next call reject, for the
  * "the port fails and no row is left behind" test — after which the port returns to succeeding.
+ * `setFriendBalances` scripts what `fetchBalances()` returns (empty until set, matching a
+ * connected account with a not-yet-fetched or empty friends list — phase 15, ADR-0041).
  */
 export function createMockSplitwisePort(): MockSplitwisePort & {
   failNextCreateExpense: (message: string) => void;
   failNextRecordPayment: (message: string) => void;
+  failNextFetchBalances: (message: string) => void;
+  setFriendBalances: (balances: readonly SplitwiseFriendBalance[]) => void;
 } {
   const createdExpenses: CreateSplitwiseExpenseInput[] = [];
   const recordedPayments: RecordSplitwisePaymentInput[] = [];
@@ -38,6 +43,8 @@ export function createMockSplitwisePort(): MockSplitwisePort & {
   let paymentCounter = 0;
   let nextCreateExpenseFailure: string | null = null;
   let nextRecordPaymentFailure: string | null = null;
+  let nextFetchBalancesFailure: string | null = null;
+  let friendBalances: readonly SplitwiseFriendBalance[] = [];
 
   return {
     createdExpenses,
@@ -48,6 +55,21 @@ export function createMockSplitwisePort(): MockSplitwisePort & {
     },
     failNextRecordPayment: (message: string) => {
       nextRecordPaymentFailure = message;
+    },
+    failNextFetchBalances: (message: string) => {
+      nextFetchBalancesFailure = message;
+    },
+    setFriendBalances: (balances: readonly SplitwiseFriendBalance[]) => {
+      friendBalances = balances;
+    },
+
+    fetchBalances(): Promise<readonly SplitwiseFriendBalance[]> {
+      if (nextFetchBalancesFailure !== null) {
+        const message = nextFetchBalancesFailure;
+        nextFetchBalancesFailure = null;
+        return Promise.reject(new Error(message));
+      }
+      return Promise.resolve(friendBalances);
     },
 
     createExpense(input: CreateSplitwiseExpenseInput): Promise<CreateSplitwiseExpenseResult> {

@@ -105,8 +105,10 @@ dependency alongside `db`/`ai`/`evidenceStore`; no concrete adapter is wired (AD
 precedent), so a test injects an in-memory mock.
 
 Handlers are Web `Request → Response` functions — precisely a Next.js App Router route
-handler's signature — so mounting them under `app/api/<route>/route.ts` later is a re-export, not a
-rewrite. **No framework is installed** to serve these routes before any UI exists (ADR-0032).
+handler's signature. `../server.ts` (phase 15, ADR-0042) is what actually runs this dispatcher
+now: a plain `node:http` + `Request`/`Response` bridge over `createApi(deps).handle`, no
+framework added here — `web/` (also phase 15) calls it over `fetch`, the same way any other
+client of this API would, rather than importing anything from `src/`.
 `createApi({ db, ai, evidenceStore, splitwise })` builds the surface over its dependencies and
 exposes both the route table and a small exact-segment dispatcher, which is what the
 integration tests drive. The first pattern that matches a path owns it, so a wrong verb on a
@@ -132,7 +134,13 @@ evidence routes check the same thing at the edge instead — ingestion is not an
 decision, so `parseDecisionActor` does not apply to it, but an upload arriving over HTTP is
 still a person's act and `system` would be an answer nobody can check.
 
-**Not implemented:** any UI, any server process (nothing listens on a port yet), auth, and any
-route outside the review, evidence, receipt, allocation, ledger and Splitwise surfaces —
-including `runReconciliation` and `fetchBalances`-driven drift/stale-resync routes, deliberately
-deferred to phase 15 (see phase 13 and phase 14 above).
+**Phase 15 (ADR-0041, ADR-0042) added:** `POST`/`GET /api/reconciliation/runs`,
+`GET /api/reconciliation/runs/:id` — `services.runReconciliation`'s first `src/api` caller,
+deferred here since phase 13 — and `GET /api/people` (`services.listPeople`), the roster
+`web/` needed and no earlier phase had a caller for. `../server.ts` is the first real process
+serving this dispatcher; `web/` is the first UI calling it.
+
+**Not implemented:** auth, and re-sync/discrepancy-resolution routes for a `stale`
+`SplitwiseExpense`/`SplitwiseSettlement` or a `ReconciliationDiscrepancy` (deliberately deferred
+past phase 15, ADR-0041 — `fetchBalances`-driven drift detection is implemented, acting on it
+is not).

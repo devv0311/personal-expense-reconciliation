@@ -7,6 +7,7 @@
  */
 
 import {
+  compareSplitwiseBalance,
   computeNetBalance,
   computeObligations,
   computeUnexplained,
@@ -14,23 +15,37 @@ import {
   validateReconciliationTotals,
 } from '../domain/index.js';
 import type {
+  ExpenseId,
   ObligationContribution,
   ObligationEvidenceStatus,
   Paise,
   PersonId,
   ReconciliationDiscrepancy,
+  ReconciliationRunId,
   ReconciliationTotals,
+  ResolvedShare,
 } from '../domain/index.js';
 import {
+  getConnectedExternalIntegration,
   getLatestReconciliationRun,
+  getPrimaryUserPerson,
+  getReconciliationRunById,
   insertReconciliationRun,
+  listPersonsWithSplitwiseUserId,
+  listReconciliationRuns,
   listSettlementClaimExpenseIds,
+  listSyncedSplitwiseExpensesPaidBy,
+  listSyncedSplitwiseSettlementsByCounterparty,
   loadBalanceInput,
   loadReconciliationInput,
+  markSplitwiseExpenseDrifted,
+  markSplitwiseSettlementDrifted,
 } from '../db/index.js';
-import type { Database, Executor } from '../db/index.js';
+import type { Database, Executor, ReconciliationRunRow } from '../db/index.js';
+import type { SplitwiseFriendBalance, SplitwisePort } from '../integrations/splitwise/index.js';
 
-import { runAudited, type AuditMeta } from './audit.js';
+import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
+import { loadCurrentAllocation, resolveAllocationShares } from './loaders.js';
 
 export interface BalanceResult {
   readonly personAId: PersonId;
@@ -100,21 +115,29 @@ export interface RunReconciliationInput {
   readonly periodStart: Date;
   /** Exclusive, so consecutive periods neither overlap nor leave a gap. */
   readonly periodEnd: Date;
-  readonly discrepancies?: readonly ReconciliationDiscrepancy[];
+  /** No concrete adapter is wired yet (ADR-0025/0040 precedent) — a caller injects one. */
+  readonly splitwise: SplitwisePort;
   readonly audit: AuditMeta;
 }
 
 export interface RunReconciliationResult {
   readonly reconciliationRunId: string;
   readonly totals: ReconciliationTotals;
+  readonly discrepancies: readonly ReconciliationDiscrepancy[];
 }
 
 /**
  * Computes and stores one reconciliation snapshot for a period.
  *
- * The arithmetic is `domain.computeUnexplained`; this function only gathers its inputs and
- * persists the result. `ledger_unexplained_total` is stored whatever it comes to — surfaced
- * especially when non-zero (`invariants.md` #20).
+ * The outflow arithmetic is `domain.computeUnexplained`, unchanged since before this phase.
+ * New in phase 15 (ADR-0041): when a Splitwise `ExternalIntegration` is connected, this also
+ * compares this ledger's own `NetBalance` against `splitwise.fetchBalances()` for every
+ * Splitwise-linked person, records any disagreement as a `ReconciliationDiscrepancy`, and marks
+ * every affected `synced` `SplitwiseExpense`/`SplitwiseSettlement` `drifted`. With no integration
+ * connected, `splitwise.fetchBalances()` is never called and this behaves exactly as before —
+ * required, since `CLAUDE.md` forbids a real Splitwise connection in development.
+ * `ledger_unexplained_total` is stored whatever it comes to — surfaced especially when non-zero
+ * (`invariants.md` #20).
  */
 export async function runReconciliation(
   db: Database,
@@ -143,11 +166,18 @@ export async function runReconciliation(
     });
     validateReconciliationTotals(totals);
 
+    const { discrepancies, splitwiseBalancesSnapshot } = await detectSplitwiseDrift(exec, {
+      userPersonId: input.userPersonId,
+      splitwise: input.splitwise,
+      record,
+    });
+
     const reconciliationRunId = await insertReconciliationRun(exec, {
       periodStart: input.periodStart,
       periodEnd: input.periodEnd,
       totals,
-      discrepancies: input.discrepancies ?? [],
+      discrepancies: discrepancies.map(toStorableDiscrepancy),
+      splitwiseBalancesSnapshot,
     });
 
     await record({
@@ -163,14 +193,171 @@ export async function runReconciliation(
         ledgerSettlementsTotal: totals.ledgerSettlementsTotal.toString(),
         ledgerExplainedTotal: totals.ledgerExplainedTotal.toString(),
         ledgerUnexplainedTotal: totals.ledgerUnexplainedTotal.toString(),
+        discrepancyCount: discrepancies.length.toString(),
       },
     });
 
-    return { reconciliationRunId, totals };
+    return { reconciliationRunId, totals, discrepancies };
   });
 }
 
+/** History, newest first — a reconciliation dashboard's run list. */
+export async function listReconciliationRunHistory(
+  db: Executor,
+  options: { readonly limit?: number } = {},
+): Promise<readonly ReconciliationRunRow[]> {
+  return listReconciliationRuns(db, options);
+}
+
+/** One `ReconciliationRun` in full, or `null` when the id does not exist. */
+export async function getReconciliationRun(
+  db: Executor,
+  reconciliationRunId: ReconciliationRunId,
+): Promise<ReconciliationRunRow | null> {
+  return getReconciliationRunById(db, reconciliationRunId);
+}
+
 /* ------------------------------------------------------------------------- internals */
+
+/**
+ * Compares this ledger's `NetBalance` against Splitwise's reported balance for every
+ * Splitwise-linked person, and marks every affected synced row `drifted` (ADR-0041).
+ *
+ * Returns `{ discrepancies: [], splitwiseBalancesSnapshot: null }` with no Splitwise call made
+ * at all when no `ExternalIntegration` is connected — reconciliation must fully work with zero
+ * Splitwise setup.
+ *
+ * A `fetchBalances()` failure (the account is connected, but the call itself errors — a network
+ * failure, an unconfigured adapter) does **not** fail the whole run: this ledger's own outflow
+ * totals are independent of Splitwise and must still be computed and stored. The failure is
+ * surfaced as one `splitwise_fetch_failed` discrepancy instead of being silently swallowed —
+ * "surfaced, never hidden" applies to a failed check exactly as it does to a disagreeing one.
+ */
+async function detectSplitwiseDrift(
+  exec: Executor,
+  input: {
+    readonly userPersonId: PersonId;
+    readonly splitwise: SplitwisePort;
+    readonly record: AuditContext['record'];
+  },
+): Promise<{
+  readonly discrepancies: ReconciliationDiscrepancy[];
+  readonly splitwiseBalancesSnapshot: unknown;
+}> {
+  const ownerUser = await getPrimaryUserPerson(exec);
+  const integration =
+    ownerUser === null
+      ? null
+      : await getConnectedExternalIntegration(exec, ownerUser.userId, 'splitwise');
+  if (integration === null) {
+    return { discrepancies: [], splitwiseBalancesSnapshot: null };
+  }
+
+  let theirBalances: readonly SplitwiseFriendBalance[];
+  try {
+    theirBalances = await input.splitwise.fetchBalances();
+  } catch (error) {
+    return {
+      discrepancies: [
+        {
+          kind: 'splitwise_fetch_failed',
+          detail:
+            'fetchBalances() failed, so no drift comparison ran this time: ' +
+            (error instanceof Error ? error.message : String(error)),
+        },
+      ],
+      splitwiseBalancesSnapshot: null,
+    };
+  }
+
+  const [friends, balanceInput, syncedExpenses] = await Promise.all([
+    listPersonsWithSplitwiseUserId(exec, input.userPersonId),
+    loadBalanceInput(exec, input.userPersonId),
+    listSyncedSplitwiseExpensesPaidBy(exec, input.userPersonId),
+  ]);
+
+  const sharesByExpenseId = new Map<ExpenseId, readonly ResolvedShare[]>();
+  for (const row of syncedExpenses) {
+    const current = await loadCurrentAllocation(exec, row.expenseId);
+    sharesByExpenseId.set(row.expenseId, current === null ? [] : resolveAllocationShares(current));
+  }
+
+  // A friend Splitwise does not report at all (never in this response, as opposed to reporting
+  // a balance of 0) is treated as "nothing to compare" rather than "Splitwise says 0" — this
+  // ledger having linked a `splitwise_user_id` locally does not guarantee Splitwise's own
+  // friends list currently includes them.
+  const theirBalanceByUserId = new Map(
+    theirBalances.map((entry) => [entry.splitwiseUserId, entry.netBalance]),
+  );
+  const discrepancies: ReconciliationDiscrepancy[] = [];
+
+  for (const friend of friends) {
+    const theirs = theirBalanceByUserId.get(friend.splitwiseUserId);
+    if (theirs === undefined) continue;
+
+    const ours = computeNetBalance(balanceInput, input.userPersonId, friend.id);
+    const discrepancy = compareSplitwiseBalance({
+      ourNetBalance: ours,
+      theirNetBalance: theirs,
+      userPersonId: input.userPersonId,
+      friendPersonId: friend.id,
+    });
+    if (discrepancy === null) continue;
+    discrepancies.push(discrepancy);
+
+    for (const row of syncedExpenses) {
+      const shares = sharesByExpenseId.get(row.expenseId) ?? [];
+      if (!shares.some((share) => share.beneficiaryId === friend.id)) continue;
+      const moved = await markSplitwiseExpenseDrifted(exec, row.id);
+      if (moved) {
+        await input.record({
+          entityType: 'splitwise_expense',
+          entityId: row.id,
+          action: 'update',
+          oldValue: { syncStatus: 'synced' },
+          newValue: { syncStatus: 'drifted', theirNetBalance: theirs.toString() },
+        });
+      }
+    }
+
+    const syncedSettlements = await listSyncedSplitwiseSettlementsByCounterparty(exec, friend.id);
+    for (const row of syncedSettlements) {
+      const moved = await markSplitwiseSettlementDrifted(exec, row.id);
+      if (moved) {
+        await input.record({
+          entityType: 'splitwise_settlement',
+          entityId: row.id,
+          action: 'update',
+          oldValue: { syncStatus: 'synced' },
+          newValue: { syncStatus: 'drifted', theirNetBalance: theirs.toString() },
+        });
+      }
+    }
+  }
+
+  const splitwiseBalancesSnapshot = theirBalances.map((entry) => ({
+    splitwiseUserId: entry.splitwiseUserId,
+    netBalance: entry.netBalance.toString(),
+  }));
+
+  return { discrepancies, splitwiseBalancesSnapshot };
+}
+
+/**
+ * The write side of {@link toDiscrepancies} below: JSONB cannot serialize a `bigint`
+ * (invariants.md #12's discipline applies at this boundary too), so `externalNetBalance`
+ * crosses as an exact decimal string, the same convention every other money field crossing an
+ * API/storage boundary in this codebase already uses.
+ */
+function toStorableDiscrepancy(discrepancy: ReconciliationDiscrepancy): Record<string, unknown> {
+  const { externalNetBalance, ...rest } = discrepancy;
+  return {
+    ...rest,
+    ...(externalNetBalance === undefined
+      ? {}
+      : { externalNetBalance: externalNetBalance.toString() }),
+  };
+}
 
 /** Revives `bigint` amounts from the JSONB discrepancy list, which stores them as text. */
 function toDiscrepancies(raw: unknown): ReconciliationDiscrepancy[] {

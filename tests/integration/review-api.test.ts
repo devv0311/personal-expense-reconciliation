@@ -525,10 +525,14 @@ describe('the surface itself', () => {
       'POST /api/payments/:paymentId/settlements',
       'GET /api/expenses',
       'GET /api/balances/:personAId/:personBId',
+      'GET /api/people',
       'POST /api/integrations/splitwise/connect',
       'POST /api/expenses/:expenseId/ready-to-sync',
       'POST /api/expenses/:expenseId/splitwise-sync',
       'POST /api/settlements/:settlementId/splitwise-sync',
+      'POST /api/reconciliation/runs',
+      'GET /api/reconciliation/runs',
+      'GET /api/reconciliation/runs/:id',
     ]);
   });
 });

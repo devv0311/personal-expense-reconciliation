@@ -38,6 +38,7 @@ import type { TestDatabase } from '../support/database.js';
 import { scriptedClassificationTransport } from '../support/ai.js';
 import { AS_USER, seedCast, seedMerchants } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
+import { createMockSplitwisePort } from '../support/splitwise.js';
 
 const FIXTURE = readFileSync(join(process.cwd(), 'fixtures', 'bank-statement.csv'), 'utf8');
 
@@ -253,6 +254,7 @@ describe('the statement, all the way through', () => {
       userPersonId: cast.userPersonId,
       periodStart: new Date('2026-07-01T00:00:00.000Z'),
       periodEnd: new Date('2026-08-01T00:00:00.000Z'),
+      splitwise: createMockSplitwisePort(),
       audit: AS_USER,
     });
 
@@ -289,6 +291,7 @@ describe('the statement, all the way through', () => {
       userPersonId: cast.userPersonId,
       periodStart: new Date('2026-07-01T00:00:00.000Z'),
       periodEnd: new Date('2026-08-01T00:00:00.000Z'),
+      splitwise: createMockSplitwisePort(),
       audit: AS_USER,
     });
 
