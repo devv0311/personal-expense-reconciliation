@@ -172,6 +172,7 @@ export async function listAuditEvents(
 
 export interface ExpenseRow {
   readonly id: ExpenseId;
+  readonly description: string | null;
   readonly amount: Paise;
   readonly currency: string;
   readonly occurredAt: Date;
@@ -187,6 +188,7 @@ export async function getExpenseById(
   const [row] = await exec
     .select({
       id: expenses.id,
+      description: expenses.description,
       amount: expenses.amount,
       currency: expenses.currency,
       occurredAt: expenses.occurredAt,

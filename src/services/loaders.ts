@@ -29,6 +29,7 @@ import { ServiceError } from './errors.js';
 
 export interface ExpenseSnapshot {
   readonly id: ExpenseId;
+  readonly description: string | null;
   readonly grossAmount: Paise;
   readonly netAmount: Paise;
   readonly currency: string;
@@ -51,6 +52,7 @@ export async function requireExpenseSnapshot(
   const adjustmentAmounts = await listAdjustmentAmounts(exec, expenseId);
   return {
     id: expense.id,
+    description: expense.description,
     grossAmount: expense.amount,
     netAmount: computeNetAmount(expense.amount, adjustmentAmounts),
     currency: expense.currency,

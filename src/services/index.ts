@@ -28,6 +28,7 @@ export * from './allocation-service.js';
 export * from './settlement-service.js';
 export * from './adjustment-service.js';
 export * from './balance-service.js';
+export * from './splitwise-service.js';
 
 /**
  * The two handles every service call needs, re-exported so a caller — `src/api`, a future

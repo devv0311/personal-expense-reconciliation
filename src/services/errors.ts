@@ -40,7 +40,15 @@ export type ServiceErrorCode =
    * This is the structural half of invariant #21: rather than trusting every call site to
    * remember, `runAudited` refuses to commit a mutation that recorded nothing.
    */
-  | 'AUDIT_EVENT_MISSING';
+  | 'AUDIT_EVENT_MISSING'
+  /**
+   * `SplitwisePort.createExpense`/`recordPayment` rejected (`splitwise-service.ts`).
+   *
+   * Distinct from `PRECONDITION_FAILED`: the request was valid and the ledger was ready to
+   * sync, but the external call itself failed. No `SplitwiseExpense`/`SplitwiseSettlement` row
+   * is ever written in this case, so retrying is simply calling the route again.
+   */
+  | 'SPLITWISE_SYNC_FAILED';
 
 export class ServiceError extends Error {
   public readonly code: ServiceErrorCode;
