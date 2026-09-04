@@ -35,7 +35,7 @@ before the ones before it are solid; see `CLAUDE.md`, "Development workflow."
 | 10  | Receipt ingestion          | **Done (2026-08-22)** — the storage decision made rather than described. Documents are content-addressed (`sha256/<digest>.<ext>`) behind an `EvidenceStore` port with one adapter, the filesystem one, rooted at `EVIDENCE_STORAGE_PATH` (ADR-0033); no S3 client is wired. `services.ingestEvidenceDocument` / `recordManualNote` / `linkEvidence` / `readEvidenceDocument` write and read `Evidence`, audited, with re-ingestion of the same bytes resolving to the row that already holds them. Linkage may be filled in once and never rewritten (ADR-0034). A document attached to nothing surfaces as `unmatched_evidence`, ranked last in the existing queue and carrying no proposal (ADR-0035). Five more route handlers, still no framework. Migration `0006_evidence_ingestion.sql` adds `media_type`/`byte_size` and five check constraints. Extraction is deliberately **not** performed: no model is called and no receipt is read.                       |
 | 11  | Receipt item extraction    | **Done (2026-08-27)** — `ai.parseReceipt`/`ai.extractReceiptItems`, the fourth and fifth operations on phase 8's boundary, still behind an injected transport with no provider wired. `services.extractReceipt` writes `Receipt` + `ReceiptItem`s directly (no `decideInference`-shaped gate — `Receipt` is DERIVED, not APPROVED-classified, ADR-0036); `confirmReceipt`/`correctReceipt` are the human side, a boolean flip or an overwrite. The two discrepancies `scenario-analysis.md` §20 and `ReceiptItem`'s own invariant call for are computed and returned, never enforced. `unmatched_evidence` (ADR-0035) is enriched with a receipt's total and any deterministic candidate payment match once one exists — never auto-linked (ADR-0037); `services.linkEvidence` is still the only write path. Four route handlers. Deferred, by explicit scope decision: `ai.normalizeMerchant()`/the Merchant catalog write path, and manual (no-AI) receipt/item entry. |
 | 12  | Beneficiary allocation     | **Done (2026-08-27)** — the write path (`approveAllocation`, all six methods, group-line expansion, `recordExpenseAdjustment`/`distributeAdjustment`, `recordSettlement`) turned out to already exist, complete, from the 2026-08-14 foundation pass (ADR-0038 corrects this row's earlier "Not started"). This phase's actual work: `services.recordExpenseItems` (the one genuinely new piece — `ExpenseItem`'s write path, closing phase 11's deferred manual item entry), and six route handlers giving all of the above their first `src/api` caller, including a second, independent settlement path alongside `decideInference`'s existing one. `ai.suggestBeneficiaries`/`suggestAllocation` and `getBalance`/`runReconciliation` API exposure deliberately deferred (the latter to phases 13/15, which already own it).                                                                                                                                         |
-| 13  | Expense ledger             | Not started. Querying/reporting over approved expenses; pairwise `Balance` computation (ADR-0006).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 13  | Expense ledger             | **Done (2026-09-04)** — `services.getBalance` (pairwise `Balance`, in either direction, ADR-0006) turned out to already exist, complete, from the 2026-08-14 foundation pass (ADR-0039 corrects this row's earlier "Not started"). This phase's actual work: `db.listExpenses`/`services.listExpenses`, a new filterable, newest-first ledger listing computing `netAmount` the same batched way `loadReconciliationInput` already does, and two route handlers — `GET /api/expenses`, `GET /api/balances/:personAId/:personBId` — giving both their first `src/api` caller. `runReconciliation` API exposure deliberately deferred to phase 15, which already owns it.                                                                                                                                                                                                                                                                                                  |
 | 14  | Splitwise integration      | Not started. `ExternalIntegration` + `SplitwiseExpense` + `SplitwiseSettlement` (ADR-0007), sandbox-only until deliberately switched to a real account. Group-line expansion (ADR-0009) is enforced here as the only path into the sync payload builder.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 15  | Reconciliation             | Not started. `ReconciliationRun` computation (now with `ledger_investments_total` and `ledger_settlements_total` buckets, ADR-0011/0007) and discrepancy surfacing, including `stale` vs. `drifted` sync-status handling (ADR-0008).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | 16  | Rules/learning             | Not started. `Rule` creation (manual first, AI-proposed later) and auto-application.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -257,19 +257,37 @@ before the ones before it are solid; see `CLAUDE.md`, "Development workflow."
 > and this documentation pass — see `docs/superpowers/specs/2026-08-27-phase-12-beneficiary-
 allocation-design.md` for the full scope-correction reasoning.
 
+> **Phase 13 implementation note (2026-09-04, ADR-0039).** Before implementation started,
+> checking the two things phase 12's own "Recommended next phase" note asked to verify found
+> both true: `services.getBalance` (`balance-service.ts:67-96`) was complete, from the
+> 2026-08-14 foundation pass, and had no `src/api` caller; there was no `db.repositories.ts`
+> listing query and no service reading back the expense ledger. The corrected, confirmed scope:
+>
+> - **`GET /api/balances/:personAId/:personBId`** — the already-complete `getBalance`'s first
+>   caller. `userPersonId` resolves via the existing `requireUserPersonId`, not a request field.
+> - **`db.listExpenses` + `services.listExpenses` + `GET /api/expenses`** — the one genuinely
+>   new piece: a filterable (`state`, `paidByPersonId`, bounded `limit`), newest-first ledger
+>   listing. `netAmount` per row is computed the same "batch gross + adjustments, let
+>   `domain.netAmount` subtract" way `loadReconciliationInput` already does for the identical
+>   figure — never a second implementation of the subtraction.
+>
+> Deferred, explicitly: `runReconciliation` API exposure, left to phase 15 which already owns
+> that surface per this document; date-range/cursor pagination on the ledger listing, not named
+> by this phase's own description.
+>
+> Delivered as two slices on one phase branch: the read path (`db.listExpenses` +
+> `services.listExpenses`), and the API surface — see
+> `docs/superpowers/specs/2026-09-04-phase-13-expense-ledger-design.md` for the full reasoning.
+
 ## Recommended next phase
 
-**Phase 13, Expense ledger — verify before trusting this description too.** Phase 12's own
-history is the reason for that warning: `services.getBalance` (pairwise `Balance`, in either
-direction, ADR-0006) already exists, complete, from the same 2026-08-14 foundation pass, and
-has never been exposed over `src/api` — check `src/services/balance-service.ts` and `grep`
-`src/api/` for `getBalance` again before assuming phase 13 starts from zero. What this
-document's phase-13 description ("querying/reporting over approved expenses") most plausibly
-still needs, based on the same grep discipline this phase's ADR-0038 argues for: there is no
-`db.repositories.ts` listing query and no service for reading back approved expenses as a
-ledger view (`transitionExpense`/`approveExpense`/`assertAmountChangeAllowed` in
-`expense-service.ts` are all mutations, not reads) — but confirm that before scoping, the same
-way this phase should have been confirmed before its roadmap entry was trusted.
+**Phase 14, Splitwise integration.** `ExternalIntegration` + `SplitwiseExpense` +
+`SplitwiseSettlement` (ADR-0007), sandbox-only until deliberately switched to a real account;
+group-line expansion (ADR-0009) is enforced as the only path into the sync payload builder.
+Given the pattern the last several phases have found — service/domain logic already built by
+the 2026-08-14 foundation pass, waiting only for a caller — check `src/services/` and `grep`
+`src/api/` for any Splitwise-shaped function before assuming this phase starts from zero, the
+same discipline ADR-0038 and ADR-0039 both argue for.
 
 ## Open questions carried forward from the 2026-08 revision
 

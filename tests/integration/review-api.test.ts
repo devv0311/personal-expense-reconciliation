@@ -520,6 +520,8 @@ describe('the surface itself', () => {
       'POST /api/expenses/:expenseId/adjustments/distribute',
       'POST /api/expenses/:expenseId/adjustments',
       'POST /api/payments/:paymentId/settlements',
+      'GET /api/expenses',
+      'GET /api/balances/:personAId/:personBId',
     ]);
   });
 });

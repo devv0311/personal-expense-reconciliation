@@ -264,6 +264,100 @@ export async function updateExpenseClassification(
     .where(eq(expenses.id, expenseId));
 }
 
+/** One row of `listExpenses` — the ledger view (`docs/roadmap.md` phase 13). */
+export interface ExpenseLedgerRow {
+  readonly id: ExpenseId;
+  readonly description: string | null;
+  readonly category: string | null;
+  readonly grossAmount: Paise;
+  /** `domain.netAmount(grossAmount, adjustments)` — never the gross figure (ADR-0008). */
+  readonly netAmount: Paise;
+  readonly currency: string;
+  readonly occurredAt: Date;
+  readonly relationshipType: string;
+  readonly paidByPersonId: PersonId;
+  readonly state: ExpenseState;
+}
+
+export interface ListExpensesFilter {
+  readonly state?: ExpenseState;
+  readonly paidByPersonId?: PersonId;
+  /** Defaults to `DEFAULT_EXPENSE_LEDGER_LIMIT`; a listing is bounded even with no filter. */
+  readonly limit?: number;
+}
+
+/** No filter narrows an unbounded table to a safe size on its own — this does. */
+const DEFAULT_EXPENSE_LEDGER_LIMIT = 200;
+
+/**
+ * The expense ledger, newest `occurred_at` first (`docs/roadmap.md` phase 13: "querying/
+ * reporting over approved expenses").
+ *
+ * `netAmount` is computed here rather than in `src/services`, the same "gather gross amounts
+ * and `ExpenseAdjustment`s, then let `domain.netAmount` subtract" split
+ * `loadReconciliationInput` already uses for the identical figure — a second, batched select
+ * rather than one `listAdjustmentAmounts` call per row, since this function can return many
+ * expenses at once.
+ */
+export async function listExpenses(
+  exec: Executor,
+  filter: ListExpensesFilter = {},
+): Promise<ExpenseLedgerRow[]> {
+  const conditions = [];
+  if (filter.state !== undefined) conditions.push(eq(expenses.state, filter.state));
+  if (filter.paidByPersonId !== undefined) {
+    conditions.push(eq(expenses.paidByPersonId, filter.paidByPersonId));
+  }
+
+  const rows = await exec
+    .select({
+      id: expenses.id,
+      description: expenses.description,
+      category: expenses.category,
+      amount: expenses.amount,
+      currency: expenses.currency,
+      occurredAt: expenses.occurredAt,
+      relationshipType: expenses.relationshipType,
+      paidByPersonId: expenses.paidByPersonId,
+      state: expenses.state,
+    })
+    .from(expenses)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(expenses.occurredAt), asc(expenses.id))
+    .limit(filter.limit ?? DEFAULT_EXPENSE_LEDGER_LIMIT);
+
+  if (rows.length === 0) return [];
+
+  const adjustmentRows = await exec
+    .select({ expenseId: expenseAdjustments.originalExpenseId, amount: expenseAdjustments.amount })
+    .from(expenseAdjustments)
+    .where(
+      inArray(
+        expenseAdjustments.originalExpenseId,
+        rows.map((row) => row.id),
+      ),
+    );
+  const adjustmentsByExpense = new Map<string, Paise[]>();
+  for (const row of adjustmentRows) {
+    const bucket = adjustmentsByExpense.get(row.expenseId) ?? [];
+    bucket.push(row.amount as Paise);
+    adjustmentsByExpense.set(row.expenseId, bucket);
+  }
+
+  return rows.map((row) => ({
+    id: row.id as ExpenseId,
+    description: row.description,
+    category: row.category,
+    grossAmount: row.amount as Paise,
+    netAmount: netAmount(row.amount as Paise, adjustmentsByExpense.get(row.id) ?? []),
+    currency: row.currency,
+    occurredAt: row.occurredAt,
+    relationshipType: row.relationshipType,
+    paidByPersonId: row.paidByPersonId as PersonId,
+    state: row.state as ExpenseState,
+  }));
+}
+
 /* ========================================================================= allocation */
 
 export interface AllocationLineDraft {
