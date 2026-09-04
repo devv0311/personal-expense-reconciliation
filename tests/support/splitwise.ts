@@ -34,6 +34,7 @@ export interface MockSplitwisePort extends SplitwisePort {
 export function createMockSplitwisePort(): MockSplitwisePort & {
   failNextCreateExpense: (message: string) => void;
   failNextRecordPayment: (message: string) => void;
+  failNextFetchBalances: (message: string) => void;
   setFriendBalances: (balances: readonly SplitwiseFriendBalance[]) => void;
 } {
   const createdExpenses: CreateSplitwiseExpenseInput[] = [];
@@ -42,6 +43,7 @@ export function createMockSplitwisePort(): MockSplitwisePort & {
   let paymentCounter = 0;
   let nextCreateExpenseFailure: string | null = null;
   let nextRecordPaymentFailure: string | null = null;
+  let nextFetchBalancesFailure: string | null = null;
   let friendBalances: readonly SplitwiseFriendBalance[] = [];
 
   return {
@@ -54,11 +56,19 @@ export function createMockSplitwisePort(): MockSplitwisePort & {
     failNextRecordPayment: (message: string) => {
       nextRecordPaymentFailure = message;
     },
+    failNextFetchBalances: (message: string) => {
+      nextFetchBalancesFailure = message;
+    },
     setFriendBalances: (balances: readonly SplitwiseFriendBalance[]) => {
       friendBalances = balances;
     },
 
     fetchBalances(): Promise<readonly SplitwiseFriendBalance[]> {
+      if (nextFetchBalancesFailure !== null) {
+        const message = nextFetchBalancesFailure;
+        nextFetchBalancesFailure = null;
+        return Promise.reject(new Error(message));
+      }
       return Promise.resolve(friendBalances);
     },
 

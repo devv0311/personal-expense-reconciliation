@@ -42,7 +42,7 @@ import {
   markSplitwiseSettlementDrifted,
 } from '../db/index.js';
 import type { Database, Executor, ReconciliationRunRow } from '../db/index.js';
-import type { SplitwisePort } from '../integrations/splitwise/index.js';
+import type { SplitwiseFriendBalance, SplitwisePort } from '../integrations/splitwise/index.js';
 
 import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
 import { loadCurrentAllocation, resolveAllocationShares } from './loaders.js';
@@ -226,6 +226,12 @@ export async function getReconciliationRun(
  * Returns `{ discrepancies: [], splitwiseBalancesSnapshot: null }` with no Splitwise call made
  * at all when no `ExternalIntegration` is connected — reconciliation must fully work with zero
  * Splitwise setup.
+ *
+ * A `fetchBalances()` failure (the account is connected, but the call itself errors — a network
+ * failure, an unconfigured adapter) does **not** fail the whole run: this ledger's own outflow
+ * totals are independent of Splitwise and must still be computed and stored. The failure is
+ * surfaced as one `splitwise_fetch_failed` discrepancy instead of being silently swallowed —
+ * "surfaced, never hidden" applies to a failed check exactly as it does to a disagreeing one.
  */
 async function detectSplitwiseDrift(
   exec: Executor,
@@ -247,9 +253,25 @@ async function detectSplitwiseDrift(
     return { discrepancies: [], splitwiseBalancesSnapshot: null };
   }
 
-  const [friends, theirBalances, balanceInput, syncedExpenses] = await Promise.all([
+  let theirBalances: readonly SplitwiseFriendBalance[];
+  try {
+    theirBalances = await input.splitwise.fetchBalances();
+  } catch (error) {
+    return {
+      discrepancies: [
+        {
+          kind: 'splitwise_fetch_failed',
+          detail:
+            'fetchBalances() failed, so no drift comparison ran this time: ' +
+            (error instanceof Error ? error.message : String(error)),
+        },
+      ],
+      splitwiseBalancesSnapshot: null,
+    };
+  }
+
+  const [friends, balanceInput, syncedExpenses] = await Promise.all([
     listPersonsWithSplitwiseUserId(exec, input.userPersonId),
-    input.splitwise.fetchBalances(),
     loadBalanceInput(exec, input.userPersonId),
     listSyncedSplitwiseExpensesPaidBy(exec, input.userPersonId),
   ]);

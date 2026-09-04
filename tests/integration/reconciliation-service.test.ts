@@ -283,6 +283,36 @@ describe('runReconciliation — Splitwise integration connected', () => {
       { splitwiseUserId: 'sw-friend-a', netBalance: '12345' },
     ]);
   });
+
+  it('still computes and stores outflow totals when fetchBalances itself fails', async () => {
+    await addExpense(database.db, {
+      description: 'Groceries',
+      amount: paise(50_000n),
+      occurredAt: OCCURRED_AT,
+      relationshipType: 'personal',
+      paidByPersonId: cast.userPersonId,
+      state: 'approved',
+    });
+    splitwise.failNextFetchBalances('sandbox unreachable');
+
+    const result = await runReconciliation(database.db, {
+      userPersonId: cast.userPersonId,
+      ...JULY,
+      splitwise,
+      audit: AS_USER,
+    });
+
+    expect(result.totals.ledgerExplainedTotal).toBe(50_000n);
+    expect(result.discrepancies).toHaveLength(1);
+    expect(result.discrepancies[0]).toMatchObject({ kind: 'splitwise_fetch_failed' });
+    expect(result.discrepancies[0]?.detail).toContain('sandbox unreachable');
+
+    const stored = await getReconciliationRun(
+      database.db,
+      asId<'reconciliation_run'>(result.reconciliationRunId),
+    );
+    expect(stored?.splitwiseBalancesSnapshot).toBeNull();
+  });
 });
 
 describe('reconciliation history and single-run read', () => {

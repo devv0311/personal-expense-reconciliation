@@ -80,6 +80,17 @@ real Splitwise credentials during development, and the `runReconciliation` route
 verbatim) — the same "keep what they said, uninterpreted" pattern `SplitwiseExpense.their_snapshot`
 already uses. `insertReconciliationRun` gains this as an additional optional field.
 
+**A `fetchBalances()` call that itself fails (connected, but the call errors) does not fail the
+whole run.** This ledger's own outflow totals are computed independently of Splitwise and must
+still be persisted even when the external check errors — a reconciliation feature that goes down
+because a third party is unreachable would make its own primary value (the outflow/unexplained
+totals) hostage to an unrelated dependency. The failure is not swallowed either: it is recorded
+as one `kind: 'splitwise_fetch_failed'` discrepancy carrying the error message, so it is visible
+on the run rather than silently absent. This is a different failure mode from `createExpense`/
+`recordPayment` rejecting (`SPLITWISE_SYNC_FAILED`, phase 14): those are the entire point of the
+request they're in, so failing the request is correct there; `fetchBalances` is one optional
+enrichment of a request whose primary output (the ledger totals) does not depend on it.
+
 ### 4. What marks a `SplitwiseExpense`/`SplitwiseSettlement` row `drifted`
 
 A balance-level discrepancy is between the user and one friend — it does not, by itself, name
