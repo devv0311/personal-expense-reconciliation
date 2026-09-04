@@ -1122,6 +1122,36 @@ export async function getPersonById(
       };
 }
 
+/**
+ * Every non-archived person other than `excludePersonId` who has a linked Splitwise account —
+ * the connected user's "friends," for reconciliation's drift comparison (phase 15, ADR-0041).
+ */
+export async function listPersonsWithSplitwiseUserId(
+  exec: Executor,
+  excludePersonId: PersonId,
+): Promise<Array<{ id: PersonId; displayName: string; splitwiseUserId: string }>> {
+  const rows = await exec
+    .select({
+      id: people.id,
+      displayName: people.displayName,
+      splitwiseUserId: people.splitwiseUserId,
+    })
+    .from(people)
+    .where(
+      and(
+        isNull(people.archivedAt),
+        sql`${people.splitwiseUserId} is not null`,
+        not(eq(people.id, excludePersonId)),
+      ),
+    )
+    .orderBy(asc(people.createdAt), asc(people.id));
+  return rows.map((row) => ({
+    id: row.id as PersonId,
+    displayName: row.displayName,
+    splitwiseUserId: row.splitwiseUserId as string,
+  }));
+}
+
 /* ==================================================================== group membership */
 
 export async function listGroupMemberships(
@@ -1247,6 +1277,8 @@ export async function insertReconciliationRun(
     readonly periodEnd: Date;
     readonly totals: ReconciliationTotals;
     readonly discrepancies: readonly unknown[];
+    /** Raw `SplitwisePort.fetchBalances()` result, or `null` when no integration is connected. */
+    readonly splitwiseBalancesSnapshot?: unknown;
   },
 ): Promise<ReconciliationRunId> {
   const [row] = await exec
@@ -1261,9 +1293,64 @@ export async function insertReconciliationRun(
       ledgerExplainedTotal: input.totals.ledgerExplainedTotal,
       ledgerUnexplainedTotal: input.totals.ledgerUnexplainedTotal,
       discrepancies: input.discrepancies,
+      splitwiseBalancesSnapshot: input.splitwiseBalancesSnapshot ?? null,
     })
     .returning({ id: reconciliationRuns.id });
   return requireRow(row, 'reconciliation_runs').id as ReconciliationRunId;
+}
+
+/** One `ReconciliationRun`, in full — history listing and single-run read share this shape. */
+export interface ReconciliationRunRow {
+  readonly id: ReconciliationRunId;
+  readonly runAt: Date;
+  readonly periodStart: Date;
+  readonly periodEnd: Date;
+  readonly totals: ReconciliationTotals;
+  readonly splitwiseBalancesSnapshot: unknown;
+  readonly discrepancies: unknown;
+  readonly resolvedAt: Date | null;
+}
+
+function toReconciliationRunRow(row: typeof reconciliationRuns.$inferSelect): ReconciliationRunRow {
+  return {
+    id: row.id as ReconciliationRunId,
+    runAt: row.runAt,
+    periodStart: row.periodStart,
+    periodEnd: row.periodEnd,
+    totals: {
+      ledgerTotalOutflow: row.ledgerTotalOutflow,
+      ledgerTransfersTotal: row.ledgerTransfersTotal,
+      ledgerInvestmentsTotal: row.ledgerInvestmentsTotal,
+      ledgerSettlementsTotal: row.ledgerSettlementsTotal,
+      ledgerExplainedTotal: row.ledgerExplainedTotal,
+      ledgerUnexplainedTotal: row.ledgerUnexplainedTotal,
+    } as ReconciliationTotals,
+    splitwiseBalancesSnapshot: row.splitwiseBalancesSnapshot,
+    discrepancies: row.discrepancies,
+    resolvedAt: row.resolvedAt,
+  };
+}
+
+/** Every `ReconciliationRun`, newest first — the history a reconciliation dashboard lists. */
+export async function listReconciliationRuns(
+  exec: Executor,
+  options: { readonly limit?: number } = {},
+): Promise<ReconciliationRunRow[]> {
+  const query = exec
+    .select()
+    .from(reconciliationRuns)
+    .orderBy(desc(reconciliationRuns.runAt), desc(reconciliationRuns.id));
+  const rows = await (options.limit === undefined ? query : query.limit(options.limit));
+  return rows.map(toReconciliationRunRow);
+}
+
+/** One `ReconciliationRun` in full, or `null` — a run's own detail view. */
+export async function getReconciliationRunById(
+  exec: Executor,
+  id: ReconciliationRunId,
+): Promise<ReconciliationRunRow | null> {
+  const [row] = await exec.select().from(reconciliationRuns).where(eq(reconciliationRuns.id, id));
+  return row === undefined ? null : toReconciliationRunRow(row);
 }
 
 /** The `ExpenseItem`s an item-based allocation draws its amounts from. */
@@ -1784,6 +1871,48 @@ export async function markSplitwiseExpenseStale(
   return rows.map((row) => row.id);
 }
 
+/**
+ * Every `synced` `SplitwiseExpense` for an expense this ledger recorded `paidByPersonId` fronting
+ * — reconciliation's candidate set for `drifted` (phase 15, ADR-0041 §4). Callers still resolve
+ * the current allocation themselves (`loaders.resolveAllocationShares`) to check the other side
+ * of the pair before marking anything.
+ */
+export async function listSyncedSplitwiseExpensesPaidBy(
+  exec: Executor,
+  paidByPersonId: PersonId,
+): Promise<Array<{ id: SplitwiseExpenseId; expenseId: ExpenseId }>> {
+  const rows = await exec
+    .select({ id: splitwiseExpenses.id, expenseId: splitwiseExpenses.expenseId })
+    .from(splitwiseExpenses)
+    .innerJoin(expenses, eq(splitwiseExpenses.expenseId, expenses.id))
+    .where(
+      and(eq(splitwiseExpenses.syncStatus, 'synced'), eq(expenses.paidByPersonId, paidByPersonId)),
+    );
+  return rows.map((row) => ({
+    id: row.id as SplitwiseExpenseId,
+    expenseId: row.expenseId as ExpenseId,
+  }));
+}
+
+/**
+ * Flips a `synced` `SplitwiseExpense` to `drifted` — **Splitwise's** side changed, distinct from
+ * `stale` (`markSplitwiseExpenseStale`, our side changed). Returns whether a row actually moved,
+ * so the caller only audits when something did.
+ */
+export async function markSplitwiseExpenseDrifted(
+  exec: Executor,
+  splitwiseExpenseId: SplitwiseExpenseId,
+): Promise<boolean> {
+  const rows = await exec
+    .update(splitwiseExpenses)
+    .set({ syncStatus: 'drifted' })
+    .where(
+      and(eq(splitwiseExpenses.id, splitwiseExpenseId), eq(splitwiseExpenses.syncStatus, 'synced')),
+    )
+    .returning({ id: splitwiseExpenses.id });
+  return rows.length > 0;
+}
+
 /* ================================================================ Splitwise integration */
 
 export interface ExternalIntegrationDraft {
@@ -1945,6 +2074,49 @@ export async function getSplitwiseSettlementBySettlementId(
         id: row.id as SplitwiseSettlementId,
         syncStatus: row.syncStatus as SplitwiseSettlementSyncStatus,
       };
+}
+
+/**
+ * Every `synced` `SplitwiseSettlement` whose `Settlement` names this person as the counterparty
+ * — unambiguous, unlike the expense side, since a settlement is already exactly between two
+ * people (phase 15, ADR-0041 §4).
+ */
+export async function listSyncedSplitwiseSettlementsByCounterparty(
+  exec: Executor,
+  counterpartyPersonId: PersonId,
+): Promise<Array<{ id: SplitwiseSettlementId; settlementId: SettlementId }>> {
+  const rows = await exec
+    .select({ id: splitwiseSettlements.id, settlementId: splitwiseSettlements.settlementId })
+    .from(splitwiseSettlements)
+    .innerJoin(settlements, eq(splitwiseSettlements.settlementId, settlements.id))
+    .where(
+      and(
+        eq(splitwiseSettlements.syncStatus, 'synced'),
+        eq(settlements.counterpartyPersonId, counterpartyPersonId),
+      ),
+    );
+  return rows.map((row) => ({
+    id: row.id as SplitwiseSettlementId,
+    settlementId: row.settlementId as SettlementId,
+  }));
+}
+
+/** Flips a `synced` `SplitwiseSettlement` to `drifted`. Returns whether a row actually moved. */
+export async function markSplitwiseSettlementDrifted(
+  exec: Executor,
+  splitwiseSettlementId: SplitwiseSettlementId,
+): Promise<boolean> {
+  const rows = await exec
+    .update(splitwiseSettlements)
+    .set({ syncStatus: 'drifted' })
+    .where(
+      and(
+        eq(splitwiseSettlements.id, splitwiseSettlementId),
+        eq(splitwiseSettlements.syncStatus, 'synced'),
+      ),
+    )
+    .returning({ id: splitwiseSettlements.id });
+  return rows.length > 0;
 }
 
 /** Everything `domain.computeUnexplained` needs for one period. */

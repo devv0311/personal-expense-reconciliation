@@ -65,4 +65,4 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0039](0039-phase-13-scope-is-balance-exposure-and-ledger-listing.md) | Phase 13 is `getBalance` exposure + a new ledger listing, not a new engine  | Accepted                                                     |
 | [0040](0040-phase-14-scope-is-first-sync-not-full-lifecycle.md)       | Phase 14 delivers the first Splitwise sync, not the full sync lifecycle     | Accepted                                                     |
 | [0041](0041-reconciliation-drift-detection-scope.md)                  | Reconciliation drift detection: `fetchBalances`, comparison, `drifted`      | Accepted                                                     |
-| [0042](0042-frontend-stack-and-server-bridge.md)                      | Frontend stack (Next.js), and a real process to run the API behind it      | Accepted                                                     |
+| [0042](0042-frontend-stack-and-server-bridge.md)                      | Frontend stack (Next.js), and a real process to run the API behind it       | Accepted                                                     |

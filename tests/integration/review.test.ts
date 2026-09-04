@@ -36,6 +36,7 @@ import type { TestDatabase } from '../support/database.js';
 import { scriptedClassificationTransport } from '../support/ai.js';
 import { AS_USER, addPayment, seedCast, seedMerchants } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
+import { createMockSplitwisePort } from '../support/splitwise.js';
 
 const FIXTURE = readFileSync(join(process.cwd(), 'fixtures', 'bank-statement.csv'), 'utf8');
 
@@ -1245,6 +1246,7 @@ describe('a rejected proposal reaches no total', () => {
     const before = await runReconciliation(database.db, {
       userPersonId: cast.userPersonId,
       ...period,
+      splitwise: createMockSplitwisePort(),
       audit: AS_USER,
     });
 
@@ -1259,6 +1261,7 @@ describe('a rejected proposal reaches no total', () => {
     const after = await runReconciliation(database.db, {
       userPersonId: cast.userPersonId,
       ...period,
+      splitwise: createMockSplitwisePort(),
       audit: AS_USER,
     });
     // Five rejected expenses now exist. None of them is spending, and none of them moved a

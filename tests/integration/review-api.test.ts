@@ -529,6 +529,9 @@ describe('the surface itself', () => {
       'POST /api/expenses/:expenseId/ready-to-sync',
       'POST /api/expenses/:expenseId/splitwise-sync',
       'POST /api/settlements/:settlementId/splitwise-sync',
+      'POST /api/reconciliation/runs',
+      'GET /api/reconciliation/runs',
+      'GET /api/reconciliation/runs/:id',
     ]);
   });
 });

@@ -44,7 +44,7 @@ fetchBalances(): Promise<readonly SplitwiseFriendBalance[]>;
 ```
 
 Scoped to **the connected user's own friends list**, matching what Splitwise's real API actually
-exposes (a "get friends" call returns, per friend, their balance *with the authenticated account*
+exposes (a "get friends" call returns, per friend, their balance _with the authenticated account_
 — not arbitrary third-party-to-third-party balances). This is also exactly what
 `domain-model.md`'s own reconciliation text describes: _"Splitwise's own balance for the pair"_,
 where in practice one side of "the pair" is always the connected account. No adapter ships with
@@ -83,7 +83,7 @@ already uses. `insertReconciliationRun` gains this as an additional optional fie
 ### 4. What marks a `SplitwiseExpense`/`SplitwiseSettlement` row `drifted`
 
 A balance-level discrepancy is between the user and one friend — it does not, by itself, name
-*which* expense caused it (Splitwise's balance API is aggregate, not itemized). Two attribution
+_which_ expense caused it (Splitwise's balance API is aggregate, not itemized). Two attribution
 rules are used, both fully deterministic from data already in this ledger, so nothing here is a
 guess dressed up as a fact:
 
@@ -91,10 +91,10 @@ guess dressed up as a fact:
   has `counterparty_person_id = <the friend>` is between exactly this pair, so it is marked
   `drifted`.
 - **Expense rows**: a `synced` `SplitwiseExpense` whose expense's `paid_by_person_id` is the user
-  **and** whose *current* allocation resolves the friend as a beneficiary (via
+  **and** whose _current_ allocation resolves the friend as a beneficiary (via
   `loaders.resolveAllocationShares` — reused, not re-implemented, per `invariants.md` #19) is
   marked `drifted`. An expense the friend paid is not reachable this way today because
-  `SplitwiseExpense.paid_by_person_id` on the *Splitwise* side always maps back to whoever this
+  `SplitwiseExpense.paid_by_person_id` on the _Splitwise_ side always maps back to whoever this
   ledger recorded as payer — cross-payer attribution is out of scope here for the same reason it
   was out of scope for phase 14 (this system observes its own recorded payer, never infers one).
 
@@ -125,8 +125,8 @@ stays as-is (it serves `obligationEvidenceStatus` specifically and returns less 
 
 - **Re-syncing a `stale` `SplitwiseExpense`** (an amount update, or a deletion at net-zero
   `netAmount`, per `domain-model.md`'s "Splitwise implications of a net-zero adjustment"). This
-  needs `updateExpense`/`deleteExpense` port methods, which is a real, separately-scoped *write*
-  capability against Splitwise — categorically different from this phase's *read-and-compare*
+  needs `updateExpense`/`deleteExpense` port methods, which is a real, separately-scoped _write_
+  capability against Splitwise — categorically different from this phase's _read-and-compare_
   scope (`fetchBalances`, never a write). ADR-0040 already named this gap and explicitly did not
   assign it to phase 15; nothing in `data-flow.md` step 9 (the diagram this phase implements)
   mentions writing back to Splitwise either — only step 6a (adjustments) does, and only as a
@@ -137,7 +137,7 @@ stays as-is (it serves `obligationEvidenceStatus` specifically and returns less 
   there."
 - **Resolving/dismissing a discrepancy** (`ReconciliationDiscrepancy.resolvedAt`). The field
   exists on the type already; writing to it is a distinct, later capability (a human confirming a
-  drifted pair is now fine) that this phase's own scope — *detecting and surfacing* drift — does
+  drifted pair is now fine) that this phase's own scope — _detecting and surfacing_ drift — does
   not require. `invariants.md` #18 requires surfacing, not resolution.
 - **Per-expense Splitwise refetch** (comparing `their_snapshot` against a fresh per-expense read).
   `fetchBalances()` is the only new port method `data-flow.md` step 9 names; adding a second,

@@ -7,9 +7,11 @@
  * this repository has real Splitwise credentials, and `CLAUDE.md` forbids connecting one during
  * development; a real adapter is a later, deliberate decision, not a side effect of this phase.
  *
- * `fetchBalances` is deliberately not part of this interface. `data-flow.md` step 9 assigns
- * drift detection to `services.runReconciliation` (phase 15) — adding the method here now would
- * be surface nothing in this phase calls.
+ * `fetchBalances` (phase 15, ADR-0041) is scoped to the connected account's own friends list —
+ * what Splitwise's real "get friends" call actually returns, one reported balance per friend,
+ * relative to the authenticated account. `services.runReconciliation` is its only caller: it
+ * compares each entry against `domain.computeNetBalance(userPersonId, friendId)` and surfaces
+ * any disagreement as a `ReconciliationDiscrepancy` — never a write back to Splitwise.
  *
  * Every id crossing this port is `people.splitwise_user_id` — the mapping already stored on
  * `Person`, never looked up a second way.
@@ -50,6 +52,17 @@ export interface RecordSplitwisePaymentResult {
   readonly theirSnapshot: unknown;
 }
 
+/** One friend's balance with the connected account, as Splitwise currently reports it. */
+export interface SplitwiseFriendBalance {
+  readonly splitwiseUserId: string;
+  /**
+   * Positive: the connected account owes this friend. Negative: this friend owes the connected
+   * account. The same sign convention `domain.computeNetBalance(userPersonId, friendId)` uses,
+   * so a caller can compare the two directly with no sign-flip.
+   */
+  readonly netBalance: Paise;
+}
+
 /**
  * Injected into the services that need it rather than imported, so a test runs against a
  * scripted mock and a real adapter — once one is deliberately wired — is a different injection,
@@ -58,4 +71,6 @@ export interface RecordSplitwisePaymentResult {
 export interface SplitwisePort {
   createExpense(input: CreateSplitwiseExpenseInput): Promise<CreateSplitwiseExpenseResult>;
   recordPayment(input: RecordSplitwisePaymentInput): Promise<RecordSplitwisePaymentResult>;
+  /** Every friend of the connected account, and what Splitwise currently reports owing each. */
+  fetchBalances(): Promise<readonly SplitwiseFriendBalance[]>;
 }

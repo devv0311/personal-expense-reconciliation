@@ -13,6 +13,7 @@ import { captureError, createTestDatabase } from '../support/database.js';
 import type { TestDatabase } from '../support/database.js';
 import { addPayment, AS_USER, seedCast } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
+import { createMockSplitwisePort } from '../support/splitwise.js';
 
 /**
  * Phase 6, end to end: a synthetic CSV becomes an `ImportBatch` plus immutable `Payment`
@@ -556,6 +557,7 @@ describe('imported payments are visible to reconciliation as unexplained outflow
       userPersonId: cast.userPersonId,
       periodStart: new Date('2026-07-01T00:00:00Z'),
       periodEnd: new Date('2026-08-01T00:00:00Z'),
+      splitwise: createMockSplitwisePort(),
       audit: AS_USER,
     });
 
@@ -575,6 +577,7 @@ describe('imported payments are visible to reconciliation as unexplained outflow
       userPersonId: cast.userPersonId,
       periodStart: new Date('2026-07-01T00:00:00Z'),
       periodEnd: new Date('2026-08-01T00:00:00Z'),
+      splitwise: createMockSplitwisePort(),
       audit: AS_USER,
     });
 
@@ -592,6 +595,7 @@ describe('imported payments are visible to reconciliation as unexplained outflow
       userPersonId: cast.userPersonId,
       periodStart: new Date('2026-07-01T00:00:00Z'),
       periodEnd: new Date('2026-08-01T00:00:00Z'),
+      splitwise: createMockSplitwisePort(),
       audit: AS_USER,
     });
 

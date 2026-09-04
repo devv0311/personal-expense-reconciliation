@@ -1,11 +1,14 @@
 /**
- * A path dispatcher, so the API can be exercised — by tests now, by a server later — without a
- * framework in between.
+ * A path dispatcher, so the API can be exercised by a `Request` — from a test, or from
+ * `src/server.ts`, the process that actually runs this dispatcher now (phase 15, ADR-0042) —
+ * without a framework in between.
  *
  * The handlers are the real product here; this is the smallest thing that turns a set of them
- * into something you can send a `Request` to. Next.js does this job from the filesystem when
- * the UI phase arrives, at which point each route becomes a one-line re-export and this file
- * stops being on the path (ADR-0032).
+ * into something you can send a `Request` to. ADR-0032 predicted mounting these directly as
+ * Next.js App Router route handlers once a UI phase arrived; ADR-0042 chose instead to give
+ * `createApi` a real process of its own (`src/server.ts`, no framework) and have the Next.js
+ * app (`web/`) call it over `fetch` like any other client — so this table remains the one place
+ * every route is listed, and stays on the path rather than being replaced by one.
  *
  * Matching is exact-segment with `:name` captures, first match wins. No wildcards, no regex
  * routes, no scoring — a route table this small does not need them, and every one of those
@@ -34,6 +37,11 @@ import {
   postReceiptCorrection,
   postReceiptExtraction,
 } from './receipt-routes.js';
+import {
+  getReconciliationRunRoute,
+  getReconciliationRunsRoute,
+  postReconciliationRun,
+} from './reconciliation-routes.js';
 import {
   getReviewQueue,
   postInferenceDecision,
@@ -145,6 +153,16 @@ export const BALANCE_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/balances/:personAId/:personBId', handler: getBalanceRoute },
 ];
 
+/**
+ * Running a reconciliation and reading its history — `services.runReconciliation`
+ * (phase 15, ADR-0041).
+ */
+export const RECONCILIATION_ROUTES: readonly ApiRoute[] = [
+  { method: 'POST', path: '/api/reconciliation/runs', handler: postReconciliationRun },
+  { method: 'GET', path: '/api/reconciliation/runs', handler: getReconciliationRunsRoute },
+  { method: 'GET', path: '/api/reconciliation/runs/:id', handler: getReconciliationRunRoute },
+];
+
 /** Connecting to, and syncing with, Splitwise for the first time (phase 14, ADR-0040). */
 export const SPLITWISE_ROUTES: readonly ApiRoute[] = [
   {
@@ -179,6 +197,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...EXPENSE_LEDGER_ROUTES,
   ...BALANCE_ROUTES,
   ...SPLITWISE_ROUTES,
+  ...RECONCILIATION_ROUTES,
 ];
 
 export interface Api {

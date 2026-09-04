@@ -16,7 +16,7 @@ Two things are true of the repository as it stands:
    functions, which is precisely a Next.js App Router route handler's signature... Next.js does
    this job from the filesystem when the UI phase arrives, at which point each route becomes a
    one-line re-export and this file stops being on the path (ADR-0032)."_ ADR-0032 itself,
-   choosing to ship the API without a framework, was explicit that this was a *staging* decision,
+   choosing to ship the API without a framework, was explicit that this was a _staging_ decision,
    not a rejection of Next.js.
 2. **There is still no way to run this API as a live process.** `createApi(deps).handle(request)`
    is called directly by tests and by nothing else — there is no `server.ts`, no `bin/`, no
@@ -62,7 +62,7 @@ exists only to give that dispatcher a socket to listen on. It composes real `Api
   false. This phase's UI never exercises either path (no classification, no allocation
   suggestion, no real sync trigger), so the stub only needs to exist and type-check, not behave.
 
-This keeps ADR-0032's actual point intact — *no HTTP framework is added to `src/`* — while
+This keeps ADR-0032's actual point intact — _no HTTP framework is added to `src/`_ — while
 finally giving the dispatcher it already built a process to run in. `router.ts`'s docstring is
 updated in this pass to say so, rather than continuing to describe a hypothetical.
 

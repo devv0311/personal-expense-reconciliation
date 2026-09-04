@@ -23,6 +23,7 @@ import {
 import type { ServiceError } from '../../src/services/index.js';
 import { createTestDatabase } from '../support/database.js';
 import type { TestDatabase } from '../support/database.js';
+import { createMockSplitwisePort } from '../support/splitwise.js';
 import {
   AS_USER,
   addExpense,
@@ -65,6 +66,7 @@ async function reconcileJuly(): Promise<Awaited<ReturnType<typeof runReconciliat
     userPersonId: cast.userPersonId,
     periodStart: JULY.start,
     periodEnd: JULY.end,
+    splitwise: createMockSplitwisePort(),
     audit: AS_USER,
   });
   return totals;
@@ -1163,6 +1165,7 @@ describe('ADR-0016 — every reconciliation term, in one period, end to end', ()
       userPersonId: cast.userPersonId,
       periodStart: JULY.start,
       periodEnd: JULY.end,
+      splitwise: createMockSplitwisePort(),
       audit: AS_USER,
     });
 

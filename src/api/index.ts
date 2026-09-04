@@ -17,6 +17,7 @@ export * from './expense-item-routes.js';
 export * from './expense-ledger-routes.js';
 export * from './http.js';
 export * from './receipt-routes.js';
+export * from './reconciliation-routes.js';
 export * from './review-routes.js';
 export * from './router.js';
 export * from './settlement-routes.js';
