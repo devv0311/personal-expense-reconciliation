@@ -30,7 +30,14 @@ export interface DraftAllocationLine {
   readonly expenseItemId: ExpenseItemId | null;
 }
 
-/** The subset of an `ExpenseItem` allocation arithmetic needs. */
+/**
+ * The subset of an `ExpenseItem` allocation arithmetic needs.
+ *
+ * `amount` is the item's **currently allocatable** cost: its immutable gross
+ * `ExpenseItem.amount` less every refund attributed to it (ADR-0018 (item refunds), 19.5,
+ * and invariants.md #14 in its tightened form). With no attributions the two are the same
+ * figure, which is why callers that predate item refunds need no change.
+ */
 export interface AllocatableItem {
   readonly id: ExpenseItemId;
   readonly amount: Paise;
@@ -301,7 +308,8 @@ export function validateItemBasedLineSums(
       throw new DomainError(
         'ALLOCATION_ITEM_SUM_MISMATCH',
         `Allocation lines for expense item ${expenseItemId} sum to ${allocated} paise but the ` +
-          `item costs ${item.amount} paise (invariants.md #14, checked per item).`,
+          `item's allocatable cost is ${item.amount} paise (invariants.md #14, checked per ` +
+          'item, against the net cost after any attributed refunds — ADR-0018 (item refunds)).',
         {
           expenseItemId,
           allocated: allocated.toString(),
