@@ -14,11 +14,11 @@ export function Nav() {
 
   return (
     <header className="border-b border-rule bg-paper">
-      <div className="mx-auto flex max-w-5xl flex-col gap-4 px-6 py-5 sm:flex-row sm:items-baseline sm:justify-between">
-        <Link href="/" className="text-[15px] font-medium tracking-tight text-ink">
+      <div className="mx-auto flex max-w-5xl flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <Link href="/" className="text-emphasis font-semibold tracking-tight text-ink">
           Ledger
         </Link>
-        <nav aria-label="Main" className="flex gap-6 text-[14px]">
+        <nav aria-label="Main" className="flex gap-6 text-body">
           {SECTIONS.map((section) => {
             const active = pathname?.startsWith(section.href) ?? false;
             return (
@@ -28,7 +28,7 @@ export function Nav() {
                 aria-current={active ? "page" : undefined}
                 className={`border-b-2 pb-1 transition-colors ${
                   active
-                    ? "border-accent text-ink"
+                    ? "border-accent font-medium text-ink"
                     : "border-transparent text-ink-muted hover:text-ink"
                 }`}
               >

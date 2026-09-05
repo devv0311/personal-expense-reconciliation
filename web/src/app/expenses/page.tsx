@@ -3,9 +3,28 @@
 import { useState } from "react";
 import { ExpenseStateTag, sentenceCaseState } from "@/components/expense-state-tag";
 import { Money } from "@/components/money";
-import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/status";
+import { EmptyBlock, ErrorBlock, LoadingStatus, TableSkeleton } from "@/components/status";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useExpenses, usePeople } from "@/lib/queries";
 import { EXPENSE_STATES, type ExpenseState } from "@/lib/types";
+
+const DATE_FORMAT = new Intl.DateTimeFormat("en-IN", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
 
 export default function ExpensesPage() {
   const [state, setState] = useState<ExpenseState | "">("");
@@ -27,21 +46,21 @@ export default function ExpensesPage() {
   return (
     <div className="flex flex-col gap-8">
       <div>
-        <h1 className="text-[20px] font-medium text-ink">Expenses</h1>
-        <p className="mt-1 max-w-prose text-[14px] text-ink-muted">
+        <h1 className="text-h1 font-medium text-ink">Expenses</h1>
+        <p className="mt-1 max-w-prose text-body text-ink-muted">
           Every expense in the ledger, newest first. Net amount is gross minus any refund or
           reimbursement recorded against it.
         </p>
       </div>
 
       <div className="flex flex-wrap items-end gap-4">
-        <label htmlFor="state-filter" className="flex flex-col gap-1 text-[13px] text-ink-muted">
-          State
-          <select
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="state-filter">State</Label>
+          <Select
             id="state-filter"
             value={state}
             onChange={(event) => setState(event.target.value as ExpenseState | "")}
-            className="min-w-[160px] rounded-sm border border-rule bg-panel px-2 py-1.5 text-[14px] text-ink"
+            className="min-w-[160px]"
           >
             <option value="">All states</option>
             {EXPENSE_STATES.map((option) => (
@@ -49,20 +68,17 @@ export default function ExpensesPage() {
                 {sentenceCaseState(option)}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </div>
 
         {peopleQuery.isSuccess && (
-          <label
-            htmlFor="paid-by-filter"
-            className="flex flex-col gap-1 text-[13px] text-ink-muted"
-          >
-            Paid by
-            <select
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="paid-by-filter">Paid by</Label>
+            <Select
               id="paid-by-filter"
               value={paidBy ?? ""}
               onChange={(event) => setPaidBy(event.target.value === "" ? null : event.target.value)}
-              className="min-w-[160px] rounded-sm border border-rule bg-panel px-2 py-1.5 text-[14px] text-ink"
+              className="min-w-[160px]"
             >
               <option value="">Anyone</option>
               {peopleQuery.data.map((person) => (
@@ -71,24 +87,30 @@ export default function ExpensesPage() {
                   {person.isUser ? " (you)" : ""}
                 </option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </div>
         )}
         {peopleQuery.isError && (
-          <p className="text-[13px] text-debit">
+          <p className="text-meta text-debit">
             Couldn&apos;t load people.{" "}
-            <button
+            <Button
               type="button"
+              variant="link"
+              size="sm"
+              className="text-debit"
               onClick={() => void peopleQuery.refetch()}
-              className="underline underline-offset-2"
             >
               Try again
-            </button>
+            </Button>
           </p>
         )}
       </div>
 
-      {expensesQuery.isPending && <LoadingBlock label="Loading expenses…" />}
+      {expensesQuery.isPending && (
+        <LoadingStatus label="Loading expenses…">
+          <TableSkeleton columns={4} />
+        </LoadingStatus>
+      )}
       {expensesQuery.isError && (
         <ErrorBlock
           error={expensesQuery.error}
@@ -104,59 +126,76 @@ export default function ExpensesPage() {
         <EmptyBlock>No expenses match these filters.</EmptyBlock>
       )}
       {expensesQuery.isSuccess && expensesQuery.data.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-[14px]">
-            <caption className="sr-only">Expense ledger</caption>
-            <thead>
-              <tr className="border-b border-rule text-left text-[13px] text-ink-muted">
-                <th scope="col" className="py-2 font-normal">
-                  Description
-                </th>
-                <th scope="col" className="py-2 font-normal">
-                  Paid by
-                </th>
-                <th scope="col" className="py-2 font-normal">
-                  State
-                </th>
-                <th scope="col" className="py-2 text-right font-normal">
+        <>
+          <Table className="hidden min-w-[560px] sm:table">
+            <TableCaption>Expense ledger</TableCaption>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Description</TableHead>
+                <TableHead scope="col">Paid by</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col" className="text-right">
                   Net
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {expensesQuery.data.map((expense) => {
                 const hasAdjustment = expense.netAmount !== expense.grossAmount;
                 return (
-                  <tr key={expense.id} className="border-b border-rule last:border-b-0 align-top">
-                    <td className="py-2.5">
+                  <TableRow key={expense.id} className="align-top">
+                    <TableCell>
                       <div className="text-ink">{expense.description ?? "—"}</div>
-                      <div className="mt-0.5 text-[13px] text-ink-muted">
-                        {new Intl.DateTimeFormat("en-IN", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                          timeZone: "UTC",
-                        }).format(new Date(expense.occurredAt))}
+                      <div className="mt-0.5 text-meta text-ink-muted">
+                        {DATE_FORMAT.format(new Date(expense.occurredAt))}
                       </div>
-                    </td>
-                    <td className="py-2.5">{nameFor(expense.paidByPersonId)}</td>
-                    <td className="py-2.5">
+                    </TableCell>
+                    <TableCell>{nameFor(expense.paidByPersonId)}</TableCell>
+                    <TableCell>
                       <ExpenseStateTag state={expense.state} />
-                    </td>
-                    <td className="py-2.5 text-right">
+                    </TableCell>
+                    <TableCell className="text-right">
                       <Money paise={expense.netAmount} />
                       {hasAdjustment && (
-                        <div className="mt-0.5 text-[12px] text-ink-faint">
+                        <div className="mt-0.5 text-micro text-ink-faint">
                           of <Money paise={expense.grossAmount} />
                         </div>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+
+          <ul className="flex flex-col gap-3 sm:hidden">
+            {expensesQuery.data.map((expense) => {
+              const hasAdjustment = expense.netAmount !== expense.grossAmount;
+              return (
+                <li key={expense.id} className="border-b border-rule pb-3 last:border-b-0">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-ink">{expense.description ?? "—"}</span>
+                    <span className="text-right">
+                      <Money paise={expense.netAmount} />
+                      {hasAdjustment && (
+                        <span className="ml-1 text-micro text-ink-faint">
+                          of <Money paise={expense.grossAmount} />
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-meta text-ink-muted">
+                    <span>
+                      {DATE_FORMAT.format(new Date(expense.occurredAt))} ·{" "}
+                      {nameFor(expense.paidByPersonId)}
+                    </span>
+                    <ExpenseStateTag state={expense.state} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
     </div>
   );

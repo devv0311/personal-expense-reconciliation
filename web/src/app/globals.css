@@ -14,6 +14,9 @@
   --credit-bg: #eaf2ec;
   --accent: #2a3a6b;
   --accent-bg: #ecedf5;
+  --accent-ink: #ffffff;
+  --attention: #8a5a17;
+  --attention-bg: #f7f0e2;
   --focus-ring: #2a3a6b;
 }
 
@@ -32,6 +35,9 @@
     --credit-bg: #1c2921;
     --accent: #8b9be0;
     --accent-bg: #232744;
+    --accent-ink: #14161c;
+    --attention: #d3a24e;
+    --attention-bg: #2b2416;
     --focus-ring: #8b9be0;
   }
 }
@@ -50,8 +56,25 @@
   --color-credit-bg: var(--credit-bg);
   --color-accent: var(--accent);
   --color-accent-bg: var(--accent-bg);
+  --color-accent-ink: var(--accent-ink);
+  --color-attention: var(--attention);
+  --color-attention-bg: var(--attention-bg);
   --font-sans: var(--font-plex-sans);
   --font-mono: var(--font-plex-mono);
+
+  /* Type scale — see web/Design.md "Typography". Named so every screen draws from the same
+     seven sizes instead of ad hoc bracketed values; `display`/`figure` are for the one hero
+     number per page (invariants.md #20's unexplained total; a balance headline amount).
+     Tailwind v4's font-size namespace is `--text-*` (with an optional paired
+     `--text-*--line-height`, deliberately omitted here — call sites set `leading-none`
+     themselves for the two hero sizes, so there's exactly one place line-height is decided). */
+  --text-micro: 0.75rem;
+  --text-meta: 0.8125rem;
+  --text-body: 0.875rem;
+  --text-emphasis: 0.9375rem;
+  --text-h1: 1.5rem;
+  --text-figure: 1.75rem;
+  --text-display: 2.5rem;
 }
 
 * {

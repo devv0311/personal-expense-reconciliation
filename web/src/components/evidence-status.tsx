@@ -20,7 +20,7 @@ const STATUS: Record<
 export function EvidenceStatus({ status }: { status: ObligationEvidenceStatus }) {
   const { label, marker, className } = STATUS[status];
   return (
-    <span className={`inline-flex items-center gap-1.5 text-[13px] ${className}`}>
+    <span className={`inline-flex items-center gap-1.5 text-meta ${className}`}>
       <span aria-hidden="true" className="font-mono">
         {marker}
       </span>
