@@ -19,6 +19,7 @@ export * from './classification-service.js';
 export * from './inference-decision-service.js';
 export * from './review-service.js';
 export * from './evidence-service.js';
+export * from './evidence-enrichment-service.js';
 export * from './receipt-service.js';
 export * from './review-action-service.js';
 export * from './expense-service.js';
