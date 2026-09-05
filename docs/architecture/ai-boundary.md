@@ -162,7 +162,7 @@ carried forward from ADR-0022.
 **Two clarifications this phase forced**, both worth reading against the confidence table above:
 
 - The table's "eligible for auto-progression … typically via a matched `Rule`" describes a
-  mechanism that does not exist yet — `Rule` is phase 16. So **nothing auto-approves**: a
+  mechanism that does not exist yet — `Rule` is unnumbered later work after Phase 21 in the current roadmap. So **nothing auto-approves**: a
   `high`-confidence, immaterial proposal reaches `CLASSIFIED` and waits for a decision exactly
   as a `low`-confidence one does. Confidence changed the friction, which is all invariant #16
   ever promised it would (ADR-0024).

@@ -1,5 +1,14 @@
 # Scenario Analysis — Stress-Testing the Domain Model
 
+> **Current extensions (2026-09-05).** Existing worked scenarios below are retained as
+> historical/legacy behavior. [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md)
+> adds the second account-balance identity without replacing their ADR-0016 outflow totals.
+> [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md) resolves item-specific
+> refund distribution: attribute to the purchased item before recalculating allocation and
+> obligations. Its worked example and acceptance matrix govern the new path; whole-expense
+> proportional examples remain legacy coverage, not permission to spread an identified item
+> refund over unrelated items. See the current roadmap for Phase 16/18 implementation.
+
 Originally twenty-five realistic scenarios, worked through against the model in
 `domain-model.md`, per the brief's instruction to actively attack the design before considering
 it complete. **Extended in a 2026-08 revision** (Part 2, scenarios 26–35) after a

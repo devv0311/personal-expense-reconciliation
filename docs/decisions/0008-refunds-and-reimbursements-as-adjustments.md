@@ -1,5 +1,11 @@
 # 0008. Refunds and reimbursements are linked adjustment events, not new Expenses or mutations
 
+> **Extension (2026-09-05).** [ADR-0018 (item refunds)](0018-item-level-refund-attribution.md)
+> adds `ExpenseAdjustmentItem` and requires item cost reduction before allocation recalculation
+> for item-attributed refunds. The whole-expense proportional default below remains the legacy
+> path, not the rule for a known item refund. Gross history, positive adjustments, full-refund
+> allocation shape and audit requirements remain unchanged.
+
 **Status:** Accepted
 
 ## Context

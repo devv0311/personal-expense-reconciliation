@@ -1,6 +1,12 @@
 # 0015. General inflow/income reconciliation is explicitly out of scope for V1
 
-**Status:** Accepted
+> **Amendment (2026-09-05): partially superseded by
+> [ADR-0017 (cash balance)](0017-pragmatic-cash-balance-reconciliation.md).** The outflow-only
+> boundary below records the original implementation scope. Ordinary credits now participate
+> in pragmatic bank cash reconciliation; general budgeting/tax logic remains outside the core.
+> The new enum, lifecycle and account snapshot design govern Phase 16 onward.
+
+**Status:** Partially superseded by ADR-0017 (cash balance), 2026-09-05
 
 ## Context
 

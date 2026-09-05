@@ -1,5 +1,10 @@
 # 0027. Phase 8 classifies debits; a credit is deliberately left unclassified
 
+> **Scope extension (2026-09-05).** This records Phase 8's shipped classifier.
+> [ADR-0017 (cash balance)](0017-pragmatic-cash-balance-reconciliation.md) accepts a new
+> cash-flow interpretation path for credits as well as debits. Preserve the legacy behavior
+> until that path is implemented; do not treat this ADR as a ban on Phase 16's credit support.
+
 **Status:** Accepted
 
 ## Context

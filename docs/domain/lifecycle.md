@@ -9,7 +9,31 @@ brief's states to where they actually belong, while preserving the underlying di
 brief cares about: **the exact same transaction moves through successive, explicit states, and
 nothing skips a state silently.**
 
-## Payment lifecycle
+## Cash-flow classification lifecycle — accepted Phase 16 extension
+
+[ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md) adds an
+explicit interpretation lifecycle alongside `Payment.state`:
+
+```text
+IMPORTED → NORMALIZED → CASH_FLOW_CLASSIFIED → APPROVED
+```
+
+`IMPORTED` preserves raw facts; `NORMALIZED` resolves available structure and counterparties;
+`CASH_FLOW_CLASSIFIED` records a validated role proposal; `APPROVED` requires an audited human
+or applicable previously approved rule decision. Rejection remains reviewable and a correction
+requires a new decision. A link, category guess or high confidence alone is not approval.
+
+The exact cash categories are `PEER_SETTLEMENT`, `REFUND`, `INTERNAL_TRANSFER`, `EXTERNAL_INFLOW`.
+Keep the existing link/ignore state for compatibility and add explicit classification state in
+Phase 16; do not rename `linked` to `approved` or migrate legacy states by assumption. Ordinary
+purchase/investment debits can have null category and a valid existing approved explanation;
+unknown credits cannot. Mixed movements retain their actual portion links and any remainder.
+
+A transfer/credit remaining `NORMALIZED` in the legacy lifecycle below is not sufficient for
+verified cash reconciliation. Actual statement movements participate regardless of spend scope;
+ignore duplicate representations, not genuine transfer legs or out-of-scope bank activity.
+
+## Payment lifecycle — existing movement/link state
 
 A `Payment` has a short lifecycle — it's a fact about money moving, not something that gets
 "decided."
@@ -55,7 +79,8 @@ IMPORTED ──▶ NORMALIZED ──┬─▶ LINKED     (explained: ≥1 Paymen
   `IGNORED` either.** Staying at `NORMALIZED` indefinitely is valid here too (finalized this
   revision, `domain-model.md`'s `ReconciliationRun` "V1 scope, explicit"). V1 deliberately does
   not classify or reconcile general inflow — this is a scope boundary, not a state the lifecycle
-  fails to represent.
+  fails to represent. **Historical Phase 15 scope only:** ADR-0017 (cash balance) now
+  requires the separate classification/approval path for verified cash reports.
 
 A payment can move from `LINKED` back toward needing attention if a later `Expense` linked to
 it is un-approved (rare, but see scenario §24) — this is handled at the `Expense` level, not by
@@ -199,3 +224,17 @@ pending ──▶ synced ──▶ drifted   (on next reconciliation check, if S
 never auto-resolved (invariant #18) — kept as two distinct statuses rather than one, because
 "Splitwise changed independently" and "we changed and owe Splitwise a fresh proposal" call for
 different next actions and shouldn't be conflated.
+
+## Item-refund attribution and account snapshot extensions
+
+Under [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md), a known
+item refund first records a complete validated `ExpenseAdjustmentItem` set, then computes
+net expense, then creates an approved superseding allocation, then derives obligations.
+Attribution/distribution still pending is visible and must not be labeled current/verified.
+No refund rewrites purchased items, source Payments, earlier allocations or settlements.
+
+A `ReconciliationAccountSnapshot` is created with a new run as `incomplete` (missing coverage
+or boundary evidence), `unreconciled` (complete inputs with a discrepancy), or `verified`
+(ADR-0017's full zero-delta/zero-unexplained and evidence conditions). These are outcomes of
+an immutable run, not permission to edit an old snapshot from incomplete to verified later.
+New evidence produces a new run. Legacy runs without account snapshots remain outflow reports.

@@ -1,5 +1,13 @@
 # Data Flow
 
+> **Current extensions (2026-09-05).** The diagrams below describe the implemented foundation
+> unless marked as new. [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md)
+> adds `IMPORTED → NORMALIZED → CASH_FLOW_CLASSIFIED → APPROVED` alongside the existing
+> Payment link state and produces per-account snapshots from evidenced statement boundaries
+> and all actual movements. The old debit-only classifier remains compatible; it does not
+> prohibit the new credit classification path. [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md)
+> refines the adjustment flow below. Phases 16–21 are scheduled in the current roadmap.
+
 How data actually moves through the layers in `docs/architecture/system-architecture.md`, for
 the full pipeline from `docs/domain/domain-model.md`:
 
@@ -196,7 +204,16 @@ services.approveAllocation ─▶ domain.validateAllocationSums ─▶ db.insert
                                                               ─▶ db.insertAuditEvent
 ```
 
-## 6a. Refund / reimbursement (new, ADR-0008)
+## 6a. Refund / reimbursement (ADR-0008, extended by item refunds)
+
+**Accepted item path (Phase 16 schema, Phase 18 engine):**
+[ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md) requires
+`financial event → adjustment → net expense → allocation → obligation`. Validate complete
+same-expense `ExpenseAdjustmentItem` attribution and cumulative ceilings first, derive net
+item costs, then supersede allocation using approved item ownership and exact rounding.
+Never start by proportioning a known item refund over the entire basket. The existing
+whole-expense path below remains supported for legacy/unitemized adjustments; pending
+item attribution/distribution stays visible and does not certify current obligations.
 
 Independently of the original allocation, `services.recordExpenseAdjustment()` records an
 `ExpenseAdjustment` (`kind = merchant_refund | third_party_reimbursement`) against an existing,

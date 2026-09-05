@@ -1,5 +1,11 @@
 # Domain Model
 
+> **Current extension (2026-09-05).** [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md) and
+> [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md) are accepted designs for Phases 16–18, not yet implemented.
+> Their cash classification, account snapshots and item attribution definitions below supersede
+> older inflow exclusions and refine whole-expense proportional refund behavior. Phase 15's
+> engine and ADR-0016's outflow identity remain valid. Older revision notes describe history.
+
 This document defines the entities of the system. It is deliberately produced _before_ any
 database schema or code, per `docs/roadmap.md` phase order — schema design
 (`docs/architecture/database-design.md`) translates this model, not the other way around.
@@ -44,12 +50,14 @@ A `Payment` is what moved money. An `Expense` is what it was for. `Evidence` sup
 interpretation. `Allocation` divides an `Expense` among beneficiaries. Settlement and
 reconciliation are derived/event-based, not separately entered as new spend.
 
-**Two categories of financial event, not one.** Everything in this model is either a **spend
+**Two expense-related event categories, kept distinct.** A **spend
 event** (an `Expense` — something that was for something, requires an `Allocation`, has
-beneficiaries) or an **adjustment/discharge event** (a `Settlement`, or an `ExpenseAdjustment` —
+beneficiaries) differs from an **adjustment/discharge event** (a `Settlement`, or an `ExpenseAdjustment` —
 something that changes the net picture of an existing spend event or existing obligation,
 without itself being new consumption). Confusing the two was the root cause of most of the
-findings this revision fixes. Concretely:
+findings this revision fixes. Cash-only movements (internal transfers, investment purchases
+and ordinary external inflows) do not need an Expense or Allocation. ADR-0017 (cash balance)
+accounts for those directly through Payment classifications and account snapshots. Concretely:
 
 | It is...                                                          | ...if it                                                                                                                                       |
 | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -215,7 +223,14 @@ spent (see `Expense.paid_by_person_id` and ADR-0006 for how that case is represe
 added per ADR-0011), `counterparty_id` (nullable, polymorphic per `counterparty_type`),
 `external_reference` (nullable — UTR/RRN/bank reference/merchant order ID; added per ADR-0010),
 `reference_type` (nullable, see ADR-0010), `source_system` (nullable, the originating
-app/institution — see ADR-0010), `import_batch_id`, `state` (see `docs/domain/lifecycle.md`).
+app/institution — see ADR-0010), `import_batch_id`, `state` (see `docs/domain/lifecycle.md`),
+**`cash_flow_category`** (nullable: `PEER_SETTLEMENT | REFUND | INTERNAL_TRANSFER | EXTERNAL_INFLOW`,
+ADR-0017 (cash balance)). This is orthogonal to `counterparty_type`: the former describes the
+cash movement's role, the latter identifies its counterparty. `REFUND` and `EXTERNAL_INFLOW`
+require credits; settlements and internal transfers can run either direction. Ordinary purchase
+and investment debits keep their existing explanation with null category. Unknown credits with
+null category remain unexplained. The full direction/evidence matrix and mixed-payment policy
+are in [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md).
 
 **Relationships.** Belongs to one `Account` and one `ImportBatch`. Linked to zero or more
 `Expense`s via `PaymentExpenseLink`, and/or to zero or more `Settlement`s (a payment is one or
@@ -225,15 +240,21 @@ records attached directly (e.g. a UPI notification screenshot for this exact pay
 `Expense` exists). May be referenced by an `ExpenseAdjustment.adjustment_payment_id` if it's a
 refund/reimbursement credit.
 
-**Lifecycle.** `IMPORTED → NORMALIZED → (LINKED | IGNORED)`. See `docs/domain/lifecycle.md`.
-`LINKED` now means "explained" in general — attached to at least one `Expense`
-(`PaymentExpenseLink`) and/or `Settlement` — not "linked to an Expense" specifically (revised
-per ADR-0007). A payment is `IGNORED` when confirmed as a duplicate or as something outside the
-ledger's concern (e.g. a same-bank internal transfer already represented by its paired payment).
-A payment whose `counterparty_type` is `internal_account` or `investment_instrument` is excluded
-from spend by that classification alone and is not required to ever reach `LINKED` or `IGNORED` —
-staying at `NORMALIZED` is a valid terminal state for both (clarified per ADR-0011; this was
-ambiguous for transfers even before this revision).
+**Lifecycle.** Preserve the existing movement/link state
+`IMPORTED → NORMALIZED → (LINKED | IGNORED)` for compatibility. Add an explicit cash-flow
+interpretation lifecycle alongside it:
+
+```text
+IMPORTED → NORMALIZED → CASH_FLOW_CLASSIFIED → APPROVED
+```
+
+Classification is a validated proposal; approval is an audited human or previously approved
+rule decision. `LINKED` does not imply cash-flow approval, and a partial link does not explain
+the remainder. Transfers, investments and plain credits may remain `NORMALIZED` in the legacy
+state machine, but need an approved cash explanation before a new account snapshot can be
+verified. Duplicate evidence may be ignored; the two genuine legs of an internal transfer
+are not duplicates. Cash reconciliation retains actual movements even if legacy spend scope
+marked them `ignored`. See `docs/domain/lifecycle.md` for the two lifecycles and migration boundary.
 
 **Invariants.**
 
@@ -250,7 +271,8 @@ ambiguous for transfers even before this revision).
 
 **Classification.** SOURCE for the immutable fields (`amount`, `occurred_at`,
 `raw_description`, `account_id`); `state`, `counterparty resolution`, `external_reference`
-resolution, and `import_batch_id` are SYSTEM/DERIVED metadata layered on top.
+resolution, and `import_batch_id` are SYSTEM/DERIVED metadata layered on top. Cash-flow
+classification is DERIVED until its audited approval; it never rewrites source fields.
 
 ---
 
@@ -289,7 +311,7 @@ receipt-type evidence.
 
 **Key fields.** `id`, `type`
 (`bank_line | upi_notification | receipt_image | screenshot | email_receipt | manual_note`),
-`note_kind` (`documentation | settlement_claim`, ADR-0018 — required on a `manual_note`,
+`note_kind` (`documentation | settlement_claim`, ADR-0018 (manual-note semantics) — required on a `manual_note`,
 forbidden on every other type; it is what keeps "this documents the expense" and "this claims
 the debt was cleared" from being the same row),
 `storage_ref` (nullable — manual notes have no file), `media_type` and `byte_size` (nullable,
@@ -472,7 +494,10 @@ documenting the money coming back; nullable because evidence-first is valid here
 for a normal `Expense`), `reason` (free text), `occurred_at`.
 
 **Relationships.** Belongs to one `Expense` (`original_expense_id`). Optionally references one
-`Payment` (`adjustment_payment_id`).
+`Payment` (`adjustment_payment_id`). Has zero or more `ExpenseAdjustmentItem`s. For an
+item-attributed refund, those rows must sum exactly to this adjustment's amount and all point
+to this expense's original items. Legacy whole-expense adjustments remain supported without
+item rows; known item refunds must not silently use that fallback.
 
 **Lifecycle.** Created when a refund/reimbursement is recorded (manually, or as an `AIInference`
 proposal off a credit `Payment` that looks like it matches a prior expense — still gated by the
@@ -538,6 +563,39 @@ invariants.md #12a for why this was evaluated and rejected as a design.
 
 ---
 
+## ExpenseAdjustmentItem
+
+**Purpose.** The item-level attribution of a refund/reimbursement event, introduced by
+[ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md). Describes what
+purchase cost was returned, independently of who currently owes whom.
+
+**Key fields.** `id`, `expense_adjustment_id`, `expense_item_id`, `amount` (positive integer
+paise). Required foreign keys to `ExpenseAdjustment` and `ExpenseItem`; unique parent/item pair.
+
+**Relationships.** Each row belongs to one adjustment and one original item. One adjustment
+can cover multiple items, and an item can receive multiple adjustments. The item's `expense_id`
+must equal the adjustment's `original_expense_id`.
+
+**Lifecycle.** Proposed with refund evidence; complete attribution is validated before
+item-refund approval/distribution. A pending set is visible and cannot be used as if current
+obligations were recalculated. Approved rows and original item composition remain historical.
+
+**Invariants.** ADR-0018 (item refunds)'s 19.1–19.6 apply: same expense; attribution sum equals parent amount;
+cumulative item refunds ≤ gross item cost and cumulative expense adjustments ≤ gross expense;
+positive magnitudes; immutable original items; immutable Payments. Cross-row ceilings require
+transactional service validation, including concurrency and duplicate-event handling.
+
+**Calculation.** `net_item_amount = ExpenseItem.amount − sum(item attributions)`; then derive
+net expense, supersede allocation using approved item ownership/method, and derive obligations.
+Never proportion an identified item refund across unrelated basket items. Legacy whole-expense
+reductions remain separately visible and are applied exactly once. Taxes/discounts preserve
+receipt base attribution and the original paid-cost basis; see the ADR for the complete policy.
+
+**Classification.** DERIVED until approved distribution; APPROVED historical attribution
+thereafter, with the parent's approval and `AuditEvent` provenance.
+
+---
+
 ## ExpenseItem
 
 **Purpose.** The allocateable unit within an `Expense` used for item-based or quantity-based
@@ -549,14 +607,19 @@ user may merge/split items, or define items manually when no receipt exists at a
 (nullable — set when derived from a receipt line).
 
 **Relationships.** Belongs to one `Expense`. Optionally sourced from one `ReceiptItem`.
-Referenced by `AllocationLine` when the allocation method is item-based.
+Referenced by `AllocationLine` when the allocation method is item-based, and by
+`ExpenseAdjustmentItem` for later item refunds.
 
 **Lifecycle.** Created when an expense is broken down below the whole-expense level. Not
 required for `equal`/`exact`/`percentage` allocation of a whole expense.
 
 **Invariants.** Sum of `ExpenseItem.amount` for an expense must equal `Expense.amount` (gross —
 `ExpenseItem`s represent the original purchase's composition and are unaffected by later
-adjustments, same as `Expense.amount` itself).
+adjustments, same as `Expense.amount` itself). A refund never changes an approved item's
+`amount`, quantity or identity. Its derived net cost subtracts cumulative item attribution;
+allocations use that net cost after refunds. Original receipt prices/tax/discount components
+remain evidence; `amount` is the approved paid-cost contribution before refunds. See
+ADR-0018 (item refunds) for discounts, shared tax/fees and legacy unattributed reductions.
 
 **Classification.** DERIVED (if receipt-sourced) or APPROVED (if manually defined by the
 user as part of an approved allocation).
@@ -636,9 +699,10 @@ re-derive percentages from floating point. `amount >= 0` (not `> 0` — a zero-a
 valid and expected on a fully refunded/reimbursed expense's current allocation; see
 `ExpenseAdjustment`'s "Full refunds, resolved" and `invariants.md` #12a). For `equal`/
 `percentage` methods, `amount` is computed by the Largest Remainder Method (`invariants.md`
-#12); for `item_based`/`quantity_based` methods, `amount` is copied directly from the
-referenced `ExpenseItem.amount` and the Largest Remainder Method is not invoked at all — there
-is no total being divided, only exact parts being assembled. **A `group`-typed line must have a
+#12). For `item_based`/`quantity_based` methods, use the referenced item's derived net cost
+following item attribution (gross amount when no refunds apply). An individually owned item
+requires no division; an item shared across beneficiaries uses the same Largest Remainder
+Method on its approved shares. Never change the stored gross item amount to fit the result. **A `group`-typed line must have a
 corresponding, fully-distributed `AllocationLineGroupExpansion`** before the parent `Expense`
 can be considered `ALLOCATED` — see below and ADR-0009.
 
@@ -783,7 +847,7 @@ data already in this model, no fabricated `Payment`/`Settlement` involved:
   definition, or it wouldn't still be positive), and no other evidence exists either. The
   default, most common state.
 - **`believed_settled, unconfirmed_by_ledger`** — `NetBalance(X, Y) > 0`, but a manual `Evidence`
-  row (`type = manual_note`, **`note_kind = 'settlement_claim'`** — ADR-0018) referencing one of
+  row (`type = manual_note`, **`note_kind = 'settlement_claim'`** — ADR-0018 (manual-note semantics)) referencing one of
   the contributing `Expense`s (via `Evidence.linked_expense_id`) was recorded claiming the debt
   was cleared some other way, **or**
   the most recent `ReconciliationRun.discrepancies` for this pair shows Splitwise reporting a
@@ -879,33 +943,50 @@ later run supersedes it, it doesn't edit it.
 ledger_transfers_total − ledger_investments_total − ledger_settlements_total −
 ledger_explained_total`, computed by application code, never by AI (invariant #20, revised).
 
-**V1 scope, explicit (finalized this revision — not an oversight, a decision).** This
-reconciliation covers exactly: outflow (`ledger_total_outflow`, debit payments), expenses
-(`ledger_explained_total`, net of adjustments), obligations (via `Balance`, referenced but not
-itself a ledger total column), settlements (`ledger_settlements_total`), refunds/reimbursements
-(folded into `ledger_explained_total` via `domain.netAmount`), transfers
-(`ledger_transfers_total`), and investments (`ledger_investments_total`). **A general
-income/inflow accounting system — categorizing and reconciling ordinary credits that aren't a
-refund, a reimbursement, or a received settlement (salary deposits, ad hoc payments received,
-interest credited, etc.) — is explicitly out of scope for V1.** This is a scope decision, not a
-gap discovered late: see `docs/roadmap.md`'s "Inflow-side reconciliation" boundary for the
-reasoning and for what a future phase would need to add.
-
-**Why the schema doesn't block adding it later.** `payments.direction` already supports
-`credit` — nothing about `Payment`, `Account`, or `ImportBatch` assumes outflow-only. A credit
-`Payment` that is a refund/reimbursement is already fully modeled (`ExpenseAdjustment`); one that
-is a received settlement is already fully modeled (`Settlement`). A credit `Payment` that is
-neither — ordinary, untracked income — simply has no dedicated classification or reconciliation
-bucket yet; it is not required to ever reach `LINKED` (mirroring how `internal_account`/
-`investment_instrument` payments are allowed to stay at `NORMALIZED` indefinitely, invariant #7)
-and is excluded from every current `ledger_*` total by construction (none of them read plain,
-unclassified credits at all). Adding a future inflow phase means adding new columns/tables
-(e.g. an `Income`-analogous classification and a `ledger_unexplained_inflow` total) and new
-`domain`/`services` functions — it does not require restructuring `Payment`, `Account`, or
-anything already built, since `direction = credit` was never treated as an error case anywhere
-in this model.
+**Current scope.** This run retains ADR-0016's outflow identity and adds one
+`ReconciliationAccountSnapshot` per in-scope account under
+[ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md). Ordinary
+credits now require a cash explanation for verified statement reconciliation; budgeting,
+tax accounting and investment performance stay outside the core. A legacy outflow-only run
+has no account snapshots and must not be presented as verified cash reconciliation.
 
 **Classification.** SYSTEM (derived report).
+
+### ReconciliationAccountSnapshot
+
+**Purpose.** Immutable account-level bank reconciliation attached to a run, independently
+checking actual statement balances against gross posted cash movements.
+
+**Key fields.** `id`, `reconciliation_run_id`, `account_id`, `currency`, `period_start`,
+`period_end`, `opening_balance`, `closing_balance`, `opening_balance_evidence_id`,
+`closing_balance_evidence_id`, `total_debits`, `total_credits`, `internal_transfer_debits`,
+`internal_transfer_credits`, `explained_debits`, `unexplained_debits`, `explained_credits`,
+`unexplained_credits`, `expected_ending_balance`, `cash_balance_delta`, `verification_status`
+(`incomplete | unreconciled | verified`), `discrepancies`, `created_at`. Balances/evidence
+references and derived balance values are nullable when the required evidence is absent;
+unknown is not zero. Balances/delta may be signed; movement amounts are non-negative paise.
+
+**Relationships.** One `Account`, one `ReconciliationRun`, unique `(run, account)` pair;
+opening/closing boundaries reference immutable `Evidence`. Retain input payment IDs,
+approved classifications, transfer pair references and source boundary locators as run provenance.
+
+**Lifecycle.** Created with the run; corrections produce a new run/snapshot. Verification
+reflects the inputs as of that run, never a live reinterpretation of history.
+
+**Identities.** `expected_ending_balance = opening_balance + total_credits − total_debits`;
+`cash_balance_delta = closing_balance − expected_ending_balance`. Explained plus unexplained
+amounts equal the corresponding debit/credit total. Internal transfers are subsets of those
+totals, not extra terms. Purchase debits stay gross and refunds enter as credits once each.
+
+**Invariants.** ADR-0017 (cash balance), 17.1–17.7, in full. Same account, INR currency and
+explicit bounded statement interval; every actual movement counted once; unknown transactions
+remain visible; both boundary balances backed by independent statement evidence. Verify only
+with zero cash delta, zero unexplained amounts and complete evidence/transfer coverage for
+**each** account. A consolidated zero cannot hide opposite account errors. Unpaired transfers
+remain discrepancies. No cash Payment is fabricated for externally funded expenses or refunds.
+
+**Classification.** SYSTEM, derived report from SOURCE evidence and APPROVED interpretation.
+The ADR's field table and migration/test requirements are authoritative for Phase 16.
 
 ---
 
@@ -954,7 +1035,7 @@ remains a record of a proposal; the authoritative state lives in the record it p
 
 **Purpose.** A user- or system-defined pattern that pre-empts repetitive review — "payments to
 merchant X are always personal, high confidence" or "Blinkit orders on weekend evenings default
-to a flat/me split." LATER-phase for implementation (`docs/roadmap.md` phase 16) but included
+to a flat/me split." LATER-phase for implementation (`docs/roadmap.md`, unnumbered work after Phase 21) but included
 in the model now since it changes how `AIInference`/`Expense.state` transitions can be
 triggered.
 
@@ -1069,6 +1150,8 @@ Expense ──0:1── Allocation ──*── AllocationLine ──(Person | 
 AllocationLine (group) ──*── AllocationLineGroupExpansion ──1── Person
 Expense ──0:1── ExpenseOccasion
 Expense ──*── ExpenseAdjustment (original_expense_id)
+ExpenseAdjustment ──*── ExpenseAdjustmentItem ──1── ExpenseItem
+Payment.cash_flow_category (orthogonal to Payment.counterparty_type)
 Expense.paid_by_person_id ──1── Person
 Person ──*── GroupMembership ──*── Group
 Payment/Expense ──*── AIInference (proposals)
@@ -1076,6 +1159,9 @@ Expense/Allocation/Settlement/Merchant/... ──*── AuditEvent
 Expense ──0:1── SplitwiseExpense ──*── ExternalIntegration
 Settlement ──0:1── SplitwiseSettlement ──*── ExternalIntegration
 ReconciliationRun (references Balance + SplitwiseExpense + SplitwiseSettlement state)
+ReconciliationRun ──*── ReconciliationAccountSnapshot ──1── Account
+ReconciliationAccountSnapshot ──2 boundary references── Evidence
+ReconciliationAccountSnapshot (retains Payment/classification/transfer provenance)
 Rule ──*── AIInference (as decided_by)
 ```
 

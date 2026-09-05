@@ -1,5 +1,12 @@
 # Architecture Decision Records
 
+> **Numbering exception (2026-09-05).** The product decisions requested as ADR-0017
+> (cash balance) and ADR-0018 (item refunds) share numbers with two older accepted records.
+> Both older files and their historical references remain valid. New references must use
+> the title or full linked filename; a bare 0017/0018 in older code/docs means integration
+> tests/manual-note semantics respectively. Do not substitute one for the other or overwrite
+> either file. Future new ADRs continue after the highest existing number (currently 0043).
+
 This directory records non-trivial technical and domain decisions and why they were made, so
 future sessions (human or Claude) don't silently re-litigate or accidentally reverse them.
 
@@ -20,7 +27,14 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 (`proposed | accepted | superseded by NNNN`), `Context`, `Decision`, `Consequences`, and
 `Alternatives considered`.
 
-## Index
+## Current product extensions
+
+| ADR                                                                  | Decision                                                    | Status                                                                               |
+| -------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [0017 (cash balance)](0017-pragmatic-cash-balance-reconciliation.md) | Pragmatic cash-balance reconciliation, invariants 17.1–17.7 | Accepted; Phase 16 implementation pending; partially supersedes 0015, preserves 0016 |
+| [0018 (item refunds)](0018-item-level-refund-attribution.md)         | Item-level refund attribution, invariants 19.1–19.6         | Accepted; Phases 16/18 implementation pending; refines 0008/0012 for item refunds    |
+
+## Historical and implementation index
 
 | ADR                                                                   | Title                                                                       | Status                                                       |
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ |
@@ -38,7 +52,7 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0012](0012-deterministic-money-rounding.md)                          | Deterministic money rounding — Largest Remainder Method                     | Accepted                                                     |
 | [0013](0013-full-refund-preserves-allocation-shape.md)                | Full refund's current allocation keeps zero-amount lines, not an empty set  | Accepted                                                     |
 | [0014](0014-obligation-evidence-status.md)                            | Non-user settlement observability — `ObligationEvidenceStatus`              | Accepted                                                     |
-| [0015](0015-inflow-reconciliation-out-of-scope-v1.md)                 | Inflow/income reconciliation explicitly out of scope for V1                 | Accepted                                                     |
+| [0015](0015-inflow-reconciliation-out-of-scope-v1.md)                 | Inflow/income reconciliation explicitly out of scope for V1                 | Partially superseded by 0017 (cash balance)                  |
 | [0016](0016-reconciliation-outflow-scoping.md)                        | `ledger_explained_total`/`ledger_settlements_total` scoped to outflow       | Accepted                                                     |
 | [0017](0017-integration-test-database.md)                             | Integration tests: real Postgres in CI, PGlite locally                      | Accepted                                                     |
 | [0018](0018-manual-note-signal-ambiguity.md)                          | `evidence.note_kind` distinguishes documentation from a settlement claim    | Accepted                                                     |

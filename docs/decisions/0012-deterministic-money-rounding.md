@@ -1,5 +1,10 @@
 # 0012. Deterministic money rounding — the Largest Remainder Method, one algorithm everywhere
 
+> **Extension (2026-09-05).** [ADR-0018 (item refunds)](0018-item-level-refund-attribution.md)
+> applies item refunds before deriving allocation. References below to copying an item's
+> amount mean its derived net cost after attribution on that path; sharing an item uses this
+> same Largest Remainder Method. Original gross item amounts remain immutable.
+
 **Status:** Accepted
 
 ## Context
