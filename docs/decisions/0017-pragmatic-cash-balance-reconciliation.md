@@ -1,6 +1,12 @@
 # ADR-0017. Pragmatic cash-balance reconciliation
 
-**Status:** Accepted (2026-09-05); implementation scheduled for Phase 16 onward.
+**Status:** Accepted (2026-09-05); **implemented in Phase 16 (2026-09-06)** — persistence, the
+classification lifecycle, direction/evidence validation and per-account snapshots all ship in
+migration `0007_phase16_cash_flow_and_item_refunds.sql`, `src/domain/cash-flow.ts`,
+`src/domain/cash-balance.ts`, `src/services/cash-flow-service.ts` and `runReconciliation`.
+Phase 17 supplies richer evidence matching; Phase 21 exposes the account waterfall and the way a
+human supplies evidenced statement boundaries, so a run given none produces honestly
+`incomplete` snapshots today.
 
 **Identity:** Cite this ADR by its full filename or as **ADR-0017 (cash balance)**.
 The older [0017 integration-test decision](0017-integration-test-database.md) remains accepted

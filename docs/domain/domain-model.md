@@ -1,10 +1,15 @@
 # Domain Model
 
-> **Current extension (2026-09-05).** [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md) and
-> [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md) are accepted designs for Phases 16–18, not yet implemented.
-> Their cash classification, account snapshots and item attribution definitions below supersede
-> older inflow exclusions and refine whole-expense proportional refund behavior. Phase 15's
-> engine and ADR-0016's outflow identity remain valid. Older revision notes describe history.
+> **Current extension (2026-09-06).** [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md) and
+> [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md) shipped their
+> **schema, domain and validation** in Phase 16: `Payment.cash_flow_category` and its
+> classification lifecycle, `ReconciliationAccountSnapshot` and `ExpenseAdjustmentItem` all
+> exist and are enforced. ADR-0018's **allocation engine** — net item cost to superseding
+> allocation to obligation — is still Phase 18, so an item-attributed refund today records what
+> came back without yet re-versioning the allocation. The cash classification, account snapshot
+> and item attribution definitions below supersede older inflow exclusions and refine
+> whole-expense proportional refund behavior. Phase 15's engine and ADR-0016's outflow identity
+> remain valid and unchanged. Older revision notes describe history.
 
 This document defines the entities of the system. It is deliberately produced _before_ any
 database schema or code, per `docs/roadmap.md` phase order — schema design

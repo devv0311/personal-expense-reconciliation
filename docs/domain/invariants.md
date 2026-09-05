@@ -1,10 +1,18 @@
 # Invariants
 
-> **Current extensions (2026-09-05).** Read the additional cash-balance invariants 17.1–17.7
+> **Current extensions (2026-09-06).** Read the additional cash-balance invariants 17.1–17.7
 > and item-refund invariants 19.1–19.6 at the end of this document. These are ADR-scoped
 > identifiers, not replacements for existing integer-numbered invariants #17 or #19.
 > New item refunds use net item costs before allocation; legacy whole-expense adjustment
 > distribution and ADR-0016's outflow identity remain supported.
+>
+> Phase 16 (2026-09-06) enforces all thirteen: the row-local halves as `CHECK` constraints in
+> `src/db/schema.ts`, the cross-record halves in `src/domain/cash-flow.ts`,
+> `src/domain/cash-balance.ts` and `src/domain/refund-attribution.ts`, called from
+> `services.approvePaymentCashFlow`, `runReconciliation` and `recordExpenseAdjustment`. The one
+> part deferred by design is 19.5's _allocation_ consequence — recomputing beneficiary shares
+> from net item costs is Phase 18's engine; 19.5's immutability half (original items and gross
+> expense never change) holds today.
 
 These are the rules the system must never violate. Each is stated, justified, and — where it
 constrains implementation — pointed at the entity/service responsible for enforcing it. This

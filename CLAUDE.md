@@ -1,11 +1,15 @@
 # CLAUDE.md — Engineering Context for This Repository
 
-> **Current decisions (2026-09-05).** Phase 15 is complete. Next is Phase 16, schema and
-> domain extensions for [ADR-0017 (cash balance)](docs/decisions/0017-pragmatic-cash-balance-reconciliation.md)
-> and [ADR-0018 (item refunds)](docs/decisions/0018-item-level-refund-attribution.md).
-> These accepted designs are not implemented by this documentation update. They supersede
+> **Current decisions (2026-09-06).** Phase 16 is complete. Next is Phase 17, evidence
+> enrichment and context re-attachment. [ADR-0017 (cash balance)](docs/decisions/0017-pragmatic-cash-balance-reconciliation.md)
+> and [ADR-0018 (item refunds)](docs/decisions/0018-item-level-refund-attribution.md) are now
+> **implemented at the schema, domain and service layers**: `Payment.cash_flow_category` with
+> its own classification lifecycle, `ReconciliationAccountSnapshot`, and
+> `ExpenseAdjustmentItem` all exist and are enforced. What remains scheduled is ADR-0018's
+> **allocation engine** — turning net item costs into a superseding allocation and new
+> obligations — which is Phase 18, as that ADR always specified. These decisions supersede
 > older outflow-only scope restrictions and refine whole-expense refund distribution for
-> item-attributed refunds. Preserve the existing engine while adding the new capabilities.
+> item-attributed refunds; the existing engine is preserved alongside them, not replaced.
 > Read these two ADRs and the current roadmap before historical implementation notes.
 >
 > **ADR numbering:** older ADR-0017 (integration tests) and ADR-0018 (manual-note semantics)

@@ -1,12 +1,15 @@
 # Data Flow
 
-> **Current extensions (2026-09-05).** The diagrams below describe the implemented foundation
-> unless marked as new. [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md)
-> adds `IMPORTED → NORMALIZED → CASH_FLOW_CLASSIFIED → APPROVED` alongside the existing
-> Payment link state and produces per-account snapshots from evidenced statement boundaries
-> and all actual movements. The old debit-only classifier remains compatible; it does not
-> prohibit the new credit classification path. [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md)
-> refines the adjustment flow below. Phases 16–21 are scheduled in the current roadmap.
+> **Current extensions (2026-09-06).** The diagrams below describe the implemented foundation.
+> [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md)'s
+> `IMPORTED → NORMALIZED → CASH_FLOW_CLASSIFIED → APPROVED` lifecycle now exists alongside the
+> Payment link state (`services.markPaymentCashFlowNormalized` / `classifyPaymentCashFlow` /
+> `approvePaymentCashFlow` / `rejectPaymentCashFlow`), and `runReconciliation` produces one
+> per-account snapshot per run from all actual movements plus whatever evidenced statement
+> boundaries the caller supplies. The old debit-only classifier remains compatible; it does not
+> prohibit the new credit classification path.
+> [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md)'s attribution is
+> recorded and validated by `services.recordExpenseAdjustment`; its allocation engine is Phase 18. Phases 17–21 are scheduled in the current roadmap.
 
 How data actually moves through the layers in `docs/architecture/system-architecture.md`, for
 the full pipeline from `docs/domain/domain-model.md`:
@@ -206,7 +209,7 @@ services.approveAllocation ─▶ domain.validateAllocationSums ─▶ db.insert
 
 ## 6a. Refund / reimbursement (ADR-0008, extended by item refunds)
 
-**Accepted item path (Phase 16 schema, Phase 18 engine):**
+**Item path (schema and attribution validation shipped in Phase 16; allocation engine is Phase 18):**
 [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md) requires
 `financial event → adjustment → net expense → allocation → obligation`. Validate complete
 same-expense `ExpenseAdjustmentItem` attribution and cumulative ceilings first, derive net

@@ -35,6 +35,7 @@ import (phase 6):
 - `settlement-service.ts` — `recordSettlement`. Imports nothing that could create an
   `Allocation` (invariant #9a).
 - `adjustment-service.ts` — `recordExpenseAdjustment` and `distributeAdjustment`.
+- `cash-flow-service.ts` — the ADR-0017 (cash balance) classification lifecycle.
 - `balance-service.ts` — `getBalance` and `runReconciliation`, both read-then-compute.
 - `expense-ledger-service.ts` — `listExpenses` (phase 13). A thin pass-through over
   `db.listExpenses`, which does the filtering and the batched `domain.netAmount` computation
@@ -112,6 +113,41 @@ import (phase 6):
 - `people-service.ts` — `listPeople` (phase 15): everyone not archived, each flagged with
   whether they're the ledger's user. `db.listPeople`/`getPrimaryUserPerson`'s first
   `src/api` caller — no phase before 15 had a UI needing a name to render.
+
+- `cash-flow-service.ts` — `markPaymentCashFlowNormalized`, `classifyPaymentCashFlow`,
+  `approvePaymentCashFlow`, `rejectPaymentCashFlow` (phase 16, ADR-0017 (cash balance)). The
+  cash-flow _interpretation_ lifecycle, which runs alongside `Payment.state` and never touches
+  it: a `linked` payment is not thereby cash-flow approved, and an approved transfer is still
+  `normalized` in the legacy lifecycle. Classification writes a **proposal** — only the
+  absolute direction rule applies, since ADR-0017 allows an unresolved counterparty during
+  normalization — and approval is where the evidence gates bite, counted from the ledger's own
+  rows (settlements, adjustments, attached evidence, account ownership) rather than supplied by
+  the caller. Rejection clears the category; reclassifying an approved payment drops the
+  approval, because a correction is an audited new decision rather than an edit. `'system'` is
+  deliberately not a valid approver.
+
+- `adjustment-service.ts` (phase 16 extension, ADR-0018 (item refunds)) —
+  `recordExpenseAdjustment` now optionally takes `itemAttributions`, the complete set of
+  `ExpenseAdjustmentItem` rows saying **which items** the refund gave money back for. The set
+  is validated through `domain.validateRefundAttribution` _before_ the adjustment row exists,
+  so a rejected attribution leaves no adjustment behind — the item refund and the financial
+  event it attributes are one decision. `db.lockExpenseForAdjustment` takes a row lock on the
+  parent expense first, which is what stops two concurrent refunds each finding room under the
+  same remaining ceiling (19.3). Omitting `itemAttributions` is the legacy whole-expense path
+  from ADR-0008, unchanged. Turning the resulting net item costs into a superseding allocation
+  is Phase 18; `distributeAdjustment` is still ADR-0008's whole-expense proportional
+  distribution.
+
+- `balance-service.ts` (phase 16 extension, ADR-0017 (cash balance)) — `runReconciliation` now
+  also writes one immutable `ReconciliationAccountSnapshot` per account per run, carrying the
+  **second**, independent identity: `opening + credits - debits` against the statement's actual
+  closing balance. ADR-0016's totals, fields and callers are untouched, and neither number is
+  derived from the other. Transfer legs are paired across every account _before_ any account is
+  computed, because a leg's counter-leg lives on a different account; a leg left over is
+  reported as an `unpaired_internal_transfer` rather than given an invented partner. Evidenced
+  statement boundaries arrive as an optional `accountBoundaries` input — nothing ingests
+  statement _balances_ yet — so a run given none produces honestly `incomplete` snapshots
+  instead of a cosmetic zero.
 
 Not yet implemented: re-sync of a `stale` `SplitwiseExpense`/`SplitwiseSettlement`, and
 resolving a `ReconciliationDiscrepancy` — see `docs/roadmap.md` phase 15's implementation note.
