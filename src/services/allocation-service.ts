@@ -11,6 +11,7 @@ import {
   buildAllocationLines,
   expandGroupAllocationLine,
   isItemSourcedMethod,
+  netItemAmount,
   resolveGroupMembersAsOf,
   validateAllocationLineAmounts,
   validateAllocationSum,
@@ -30,6 +31,7 @@ import {
   insertAllocationWithLines,
   listExpenseItems,
   listGroupMemberships,
+  listItemAttributionTotals,
   supersedeAllocation,
   updateExpenseState,
 } from '../db/index.js';
@@ -196,12 +198,28 @@ function assertAllocatable(expense: ExpenseSnapshot): void {
   }
 }
 
+/**
+ * The items an item-based allocation may draw on, at their **currently allocatable** cost.
+ *
+ * Gross `ExpenseItem.amount` less every refund already attributed to that item: after a
+ * partial refund the item is worth less to allocate even though what it cost has not changed
+ * by a paisa (ADR-0018 (item refunds), 19.5, invariants.md #14). With no attributions the
+ * subtraction is of zero, so an expense that has never been refunded behaves exactly as it
+ * did before Phase 18.
+ */
 async function loadAllocatableItems(
   exec: Executor,
   expenseId: ExpenseId,
 ): Promise<ReadonlyArray<{ id: ExpenseItemId; amount: Paise }>> {
   const items = await listExpenseItems(exec, expenseId);
-  return items.map((item) => ({ id: item.id as ExpenseItemId, amount: item.amount }));
+  const refunded = await listItemAttributionTotals(exec, expenseId);
+  return items.map((item) => {
+    const id = item.id as ExpenseItemId;
+    return {
+      id,
+      amount: netItemAmount(item.amount, [refunded.get(id) ?? (0n as Paise)]),
+    };
+  });
 }
 
 async function buildLines(

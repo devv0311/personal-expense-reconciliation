@@ -322,6 +322,191 @@ describe('POST /api/expenses/:expenseId/adjustments(/distribute)', () => {
   });
 });
 
+/**
+ * The item-refund workflow over HTTP (phase 18, ADR-0018 (item refunds)): itemize, allocate
+ * per item, refund one item, read what that implies, then approve it.
+ */
+describe('item-attributed adjustments over HTTP', () => {
+  let baseFare: string;
+  let tip: string;
+
+  beforeEach(async () => {
+    const items = await json(
+      await api.handle(
+        post(`/api/expenses/${expenseId}/items`, {
+          actor: 'user',
+          items: [
+            { description: 'Base fare', amount: '70000' },
+            { description: 'Airport surcharge (theirs)', amount: '20000' },
+          ],
+        }),
+      ),
+    );
+    const rows = items['items'] as Array<{ id: string; description: string }>;
+    baseFare = rows.find((row) => row.description === 'Base fare')!.id;
+    tip = rows.find((row) => row.description.startsWith('Airport'))!.id;
+
+    await api.handle(
+      post(`/api/expenses/${expenseId}/allocation`, {
+        actor: 'user',
+        method: 'item_based',
+        lines: [
+          { beneficiary: { type: 'person', id: cast.userPersonId }, expenseItemId: baseFare },
+          {
+            beneficiary: { type: 'person', id: cast.person['person_friend_a'] },
+            expenseItemId: tip,
+          },
+        ],
+      }),
+    );
+  });
+
+  it('records a refund against the item it came back for', async () => {
+    const response = await api.handle(
+      post(`/api/expenses/${expenseId}/adjustments`, {
+        actor: 'user',
+        kind: 'merchant_refund',
+        amount: '5000',
+        occurredAt: OCCURRED_AT.toISOString(),
+        itemAttributions: [{ expenseItemId: tip, amount: '5000' }],
+      }),
+    );
+    const body = await json(response);
+
+    expect(response.status).toBe(201);
+    expect(body['netAmountAfter']).toBe('85000');
+    expect(body['itemAttributions']).toEqual([
+      { expenseItemId: tip, amount: '5000', netItemAmount: '15000' },
+    ]);
+  });
+
+  it('distributes it onto that item’s beneficiary alone', async () => {
+    await api.handle(
+      post(`/api/expenses/${expenseId}/adjustments`, {
+        actor: 'user',
+        kind: 'merchant_refund',
+        amount: '5000',
+        occurredAt: OCCURRED_AT.toISOString(),
+        itemAttributions: [{ expenseItemId: tip, amount: '5000' }],
+      }),
+    );
+
+    const body = await json(
+      await api.handle(
+        post(`/api/expenses/${expenseId}/adjustments/distribute`, { actor: 'user' }),
+      ),
+    );
+
+    expect(body['basis']).toBe('item_attributed');
+    expect(body['unattributedReduction']).toBe('0');
+    const lines = body['lines'] as Array<{ amount: string; expenseItemId: string }>;
+    expect(lines.find((line) => line.expenseItemId === baseFare)?.amount).toBe('70000');
+    expect(lines.find((line) => line.expenseItemId === tip)?.amount).toBe('15000');
+  });
+
+  it('422s a weight set for a refund whose attribution already decides the distribution', async () => {
+    await api.handle(
+      post(`/api/expenses/${expenseId}/adjustments`, {
+        actor: 'user',
+        kind: 'merchant_refund',
+        amount: '5000',
+        occurredAt: OCCURRED_AT.toISOString(),
+        itemAttributions: [{ expenseItemId: tip, amount: '5000' }],
+      }),
+    );
+
+    const response = await api.handle(
+      post(`/api/expenses/${expenseId}/adjustments/distribute`, {
+        actor: 'user',
+        customWeights: ['1', '0'],
+      }),
+    );
+    expect(response.status).toBe(422);
+  });
+
+  it('422s an attribution set that does not sum to the adjustment', async () => {
+    const response = await api.handle(
+      post(`/api/expenses/${expenseId}/adjustments`, {
+        actor: 'user',
+        kind: 'merchant_refund',
+        amount: '5000',
+        occurredAt: OCCURRED_AT.toISOString(),
+        itemAttributions: [{ expenseItemId: tip, amount: '4000' }],
+      }),
+    );
+    expect(response.status).toBe(422);
+  });
+
+  it('400s an empty attribution array rather than reading it as a whole-expense refund', async () => {
+    const response = await api.handle(
+      post(`/api/expenses/${expenseId}/adjustments`, {
+        actor: 'user',
+        kind: 'merchant_refund',
+        amount: '5000',
+        occurredAt: OCCURRED_AT.toISOString(),
+        itemAttributions: [],
+      }),
+    );
+    const body = await json(response);
+
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(body)).toMatch(/itemAttributions/);
+  });
+
+  it('400s an attribution amount that is not integer minor units', async () => {
+    const response = await api.handle(
+      post(`/api/expenses/${expenseId}/adjustments`, {
+        actor: 'user',
+        kind: 'merchant_refund',
+        amount: '5000',
+        occurredAt: OCCURRED_AT.toISOString(),
+        itemAttributions: [{ expenseItemId: tip, amount: 50.5 }],
+      }),
+    );
+    expect(response.status).toBe(400);
+  });
+});
+
+describe('GET /api/expenses/:expenseId/refund-allocation', () => {
+  it('reports gross beside net, per item, with nothing pending', async () => {
+    await api.handle(
+      post(`/api/expenses/${expenseId}/items`, {
+        actor: 'user',
+        items: [
+          { description: 'Base fare', amount: '70000' },
+          { description: 'Tip', amount: '20000' },
+        ],
+      }),
+    );
+
+    const response = await api.handle(
+      new Request(`${BASE}/api/expenses/${expenseId}/refund-allocation`),
+    );
+    const body = await json(response);
+
+    expect(response.status).toBe(200);
+    expect(body['basis']).toBe('none');
+    expect(body['grossAmount']).toBe('90000');
+    expect(body['netAmount']).toBe('90000');
+    expect(body['pendingDistribution']).toBe(false);
+    expect(body['items']).toHaveLength(2);
+  });
+
+  it('404s an expense that does not exist', async () => {
+    const response = await api.handle(
+      new Request(`${BASE}/api/expenses/00000000-0000-4000-8000-000000000000/refund-allocation`),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('400s a malformed expense id', async () => {
+    const response = await api.handle(
+      new Request(`${BASE}/api/expenses/not-a-uuid/refund-allocation`),
+    );
+    expect(response.status).toBe(400);
+  });
+});
+
 describe('POST /api/payments/:paymentId/settlements', () => {
   let paymentId: PaymentId;
 
@@ -372,5 +557,10 @@ describe('route table', () => {
     expect(paths).toContain('POST /api/expenses/:expenseId/adjustments');
     expect(paths).toContain('POST /api/expenses/:expenseId/adjustments/distribute');
     expect(paths).toContain('POST /api/payments/:paymentId/settlements');
+  });
+
+  it('exposes the phase-18 refund allocation read', () => {
+    const paths = api.routes.map((route) => `${route.method} ${route.path}`);
+    expect(paths).toContain('GET /api/expenses/:expenseId/refund-allocation');
   });
 });
