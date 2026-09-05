@@ -1,5 +1,14 @@
 import { EvidenceStatus } from "@/components/evidence-status";
 import { Money } from "@/components/money";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import type { BalanceResult, PersonSummary } from "@/lib/types";
 
 function nameFor(people: readonly PersonSummary[], id: string): string {
@@ -26,75 +35,91 @@ export function BalanceView({
   // expenses. Only a fully settled pair (net === 0) earns the credit-green "good news" tone.
   const headline =
     net === 0n ? (
-      <>
-        <span className="font-medium text-ink">{personA}</span> and{" "}
-        <span className="font-medium text-ink">{personB}</span> are{" "}
-        <span className="text-credit">settled</span>.
-      </>
+      <p className="text-figure font-semibold text-ink">
+        {personA} and {personB} are <span className="text-credit">settled</span>.
+      </p>
     ) : net > 0n ? (
-      <>
-        <span className="font-medium text-ink">{personA}</span> owes{" "}
-        <span className="font-medium text-ink">{personB}</span> <Money paise={balance.netBalance} />
-      </>
+      <Owes debtor={personA} creditor={personB} paise={balance.netBalance} />
     ) : (
-      <>
-        <span className="font-medium text-ink">{personB}</span> owes{" "}
-        <span className="font-medium text-ink">{personA}</span> <Money paise={(-net).toString()} />
-      </>
+      <Owes debtor={personB} creditor={personA} paise={(-net).toString()} />
     );
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="rounded-sm border border-rule p-5">
-        <p className="text-[16px]">{headline}</p>
+    <div className="flex flex-col gap-8">
+      <div className="border-t-2 border-double border-rule-strong pt-4">
+        {headline}
         <div className="mt-3">
           <EvidenceStatus status={balance.evidenceStatus} />
         </div>
       </div>
 
       <section aria-labelledby="obligations-heading">
-        <h2 id="obligations-heading" className="mb-3 text-[15px] font-medium text-ink">
+        <h2 id="obligations-heading" className="mb-3 text-emphasis font-medium text-ink">
           From these expenses
         </h2>
         {balance.contributions.length === 0 ? (
-          <p className="text-[14px] text-ink-muted">
+          <p className="text-body text-ink-muted">
             No shared expenses between these two people yet.
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[420px] text-[14px]">
-              <caption className="sr-only">Expenses contributing to this balance</caption>
-              <thead>
-                <tr className="border-b border-rule text-left text-[13px] text-ink-muted">
-                  <th scope="col" className="py-2 font-normal">
-                    Debtor
-                  </th>
-                  <th scope="col" className="py-2 font-normal">
-                    Creditor
-                  </th>
-                  <th scope="col" className="py-2 text-right font-normal">
+          <>
+            <Table className="hidden min-w-[420px] sm:table">
+              <TableCaption>Expenses contributing to this balance</TableCaption>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Debtor</TableHead>
+                  <TableHead scope="col">Creditor</TableHead>
+                  <TableHead scope="col" className="text-right">
                     Amount
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {balance.contributions.map((contribution, index) => (
-                  <tr
-                    key={`${contribution.expenseId}-${index}`}
-                    className="border-b border-rule last:border-b-0"
-                  >
-                    <td className="py-2">{nameFor(people, contribution.debtorId)}</td>
-                    <td className="py-2">{nameFor(people, contribution.creditorId)}</td>
-                    <td className="py-2 text-right">
+                  <TableRow key={`${contribution.expenseId}-${index}`}>
+                    <TableCell>{nameFor(people, contribution.debtorId)}</TableCell>
+                    <TableCell>{nameFor(people, contribution.creditorId)}</TableCell>
+                    <TableCell className="text-right">
                       <Money paise={contribution.amount} />
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+
+            <ul className="flex flex-col gap-2 sm:hidden">
+              {balance.contributions.map((contribution, index) => (
+                <li
+                  key={`${contribution.expenseId}-${index}`}
+                  className="flex items-center justify-between border-b border-rule py-2.5 text-body last:border-b-0"
+                >
+                  <span>
+                    {nameFor(people, contribution.debtorId)}
+                    <span className="text-ink-faint"> owes </span>
+                    {nameFor(people, contribution.creditorId)}
+                  </span>
+                  <Money paise={contribution.amount} />
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </section>
     </div>
+  );
+}
+
+function Owes({ debtor, creditor, paise }: { debtor: string; creditor: string; paise: string }) {
+  return (
+    <p className="text-body">
+      <span className="text-ink">
+        <Money paise={paise} size="figure" />
+      </span>
+      <br />
+      <span className="mt-1 inline-block text-ink-muted">
+        <span className="font-medium text-ink">{debtor}</span> owes{" "}
+        <span className="font-medium text-ink">{creditor}</span>
+      </span>
+    </p>
   );
 }

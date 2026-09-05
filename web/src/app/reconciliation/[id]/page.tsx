@@ -10,7 +10,7 @@ export default async function ReconciliationRunPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <Link href="/reconciliation" className="text-[13px] text-ink-muted hover:text-ink">
+      <Link href="/reconciliation" className="text-meta text-ink-muted hover:text-ink">
         ← History
       </Link>
       <ReconciliationRunDetail id={id} />

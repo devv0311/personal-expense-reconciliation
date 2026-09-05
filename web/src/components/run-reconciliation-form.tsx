@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ErrorBlock } from "@/components/status";
 import { currentMonthPeriod, fromDateInputValue } from "@/lib/dates";
 import { useRunReconciliation } from "@/lib/queries";
@@ -26,35 +29,31 @@ export function RunReconciliationForm({
         );
       }}
     >
-      <label className="flex flex-col gap-1 text-[13px] text-ink-muted">
-        From
-        <input
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="period-start">From</Label>
+        <Input
+          id="period-start"
           type="date"
           value={start}
           max={end}
           onChange={(event) => setStart(event.target.value)}
-          className="rounded-sm border border-rule bg-panel px-2 py-1.5 font-mono text-[13px] text-ink"
           required
         />
-      </label>
-      <label className="flex flex-col gap-1 text-[13px] text-ink-muted">
-        To (exclusive)
-        <input
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="period-end">To (exclusive)</Label>
+        <Input
+          id="period-end"
           type="date"
           value={end}
           min={start}
           onChange={(event) => setEnd(event.target.value)}
-          className="rounded-sm border border-rule bg-panel px-2 py-1.5 font-mono text-[13px] text-ink"
           required
         />
-      </label>
-      <button
-        type="submit"
-        disabled={mutation.isPending}
-        className="rounded-sm bg-accent px-4 py-1.5 text-[14px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-      >
+      </div>
+      <Button type="submit" disabled={mutation.isPending}>
         {mutation.isPending ? "Running…" : "Run reconciliation"}
-      </button>
+      </Button>
       {mutation.isError && (
         <div className="w-full">
           <ErrorBlock error={mutation.error} />

@@ -3,14 +3,31 @@
 import { DiscrepancyList } from "@/components/discrepancy-list";
 import { Money } from "@/components/money";
 import { ReconciliationTotals } from "@/components/reconciliation-totals";
-import { ErrorBlock, LoadingBlock } from "@/components/status";
+import { ErrorBlock, FigureSkeleton, LoadingStatus, TableSkeleton } from "@/components/status";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableRow,
+} from "@/components/ui/table";
 import { formatDateTime, formatPeriod } from "@/lib/dates";
 import { useReconciliationRun } from "@/lib/queries";
 
 export function ReconciliationRunDetail({ id }: { id: string }) {
   const runQuery = useReconciliationRun(id);
 
-  if (runQuery.isPending) return <LoadingBlock label="Loading this run…" />;
+  if (runQuery.isPending) {
+    return (
+      <LoadingStatus label="Loading this run…">
+        <div className="flex flex-col gap-8">
+          <FigureSkeleton />
+          <TableSkeleton rows={2} columns={3} />
+        </div>
+      </LoadingStatus>
+    );
+  }
   if (runQuery.isError) {
     return <ErrorBlock error={runQuery.error} onRetry={() => void runQuery.refetch()} />;
   }
@@ -20,45 +37,42 @@ export function ReconciliationRunDetail({ id }: { id: string }) {
   return (
     <div className="flex flex-col gap-8">
       <div>
-        <h1 className="text-[20px] font-medium text-ink">
+        <h1 className="text-h1 font-medium text-ink">
           {formatPeriod(run.periodStart, run.periodEnd)}
         </h1>
-        <p className="mt-1 text-[13px] text-ink-muted">Run {formatDateTime(run.runAt)}</p>
+        <p className="mt-1 text-meta text-ink-muted">Run {formatDateTime(run.runAt)}</p>
       </div>
 
-      <section
-        aria-labelledby="totals-heading"
-        className="max-w-md rounded-sm border border-rule p-5"
-      >
-        <h2 id="totals-heading" className="mb-3 text-[15px] font-medium text-ink">
+      <section aria-labelledby="totals-heading" className="max-w-md">
+        <h2 id="totals-heading" className="sr-only">
           Totals
         </h2>
         <ReconciliationTotals totals={run.totals} />
       </section>
 
       <section aria-labelledby="discrepancies-heading">
-        <h2 id="discrepancies-heading" className="mb-3 text-[15px] font-medium text-ink">
+        <h2 id="discrepancies-heading" className="mb-3 text-emphasis font-medium text-ink">
           Splitwise
         </h2>
         <DiscrepancyList discrepancies={run.discrepancies} />
         {run.splitwiseBalancesSnapshot !== null && run.splitwiseBalancesSnapshot.length > 0 && (
           <div className="mt-4">
-            <h3 className="text-[13px] text-ink-muted">Reported at the time of this run</h3>
-            <table className="mt-2 w-full max-w-xs text-[14px]">
-              <caption className="sr-only">Splitwise balances at the time of this run</caption>
-              <tbody>
+            <h3 className="text-meta text-ink-muted">Reported at the time of this run</h3>
+            <Table className="mt-2 max-w-xs">
+              <TableCaption>Splitwise balances at the time of this run</TableCaption>
+              <TableBody>
                 {run.splitwiseBalancesSnapshot.map((entry) => (
-                  <tr key={entry.splitwiseUserId} className="border-b border-rule last:border-b-0">
-                    <th scope="row" className="py-1.5 text-left font-normal text-ink-muted">
+                  <TableRow key={entry.splitwiseUserId}>
+                    <TableHead scope="row" className="py-1.5">
                       {entry.splitwiseUserId}
-                    </th>
-                    <td className="py-1.5 text-right">
+                    </TableHead>
+                    <TableCell className="text-right">
                       <Money paise={entry.netBalance} tone="neutral" />
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </section>

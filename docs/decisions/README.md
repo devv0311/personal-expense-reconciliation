@@ -66,3 +66,4 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0040](0040-phase-14-scope-is-first-sync-not-full-lifecycle.md)       | Phase 14 delivers the first Splitwise sync, not the full sync lifecycle     | Accepted                                                     |
 | [0041](0041-reconciliation-drift-detection-scope.md)                  | Reconciliation drift detection: `fetchBalances`, comparison, `drifted`      | Accepted                                                     |
 | [0042](0042-frontend-stack-and-server-bridge.md)                      | Frontend stack (Next.js), and a real process to run the API behind it       | Accepted                                                     |
+| [0043](0043-frontend-design-system-and-component-primitives.md)       | A frontend design system, and hand-owned component primitives without Radix | Accepted                                                     |

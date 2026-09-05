@@ -357,6 +357,29 @@ computeUnexplained` and `services.runReconciliation` (persisting a `Reconciliati
 > and this documentation pass — see
 > `docs/superpowers/specs/2026-09-04-phase-15-reconciliation-design.md` for the full reasoning.
 
+> **Frontend design-quality pass (2026-09-05, ADR-0043) — not a numbered phase.** Requested
+> explicitly, ahead of phase 16: the phase 15 UI was functional but not production-quality, and
+> this pass fixed that before any new capability was added. Redesigned the same four screens
+> (reconciliation list/detail, balances, expenses) and every loading/empty/error/success state;
+> added no product scope. `web/Design.md` is now the authoritative, living design system —
+> tokens, typography, component principles, accessibility/responsive rules. Concretely: a named
+> seven-step type scale replacing ad hoc pixel values, with exactly one `text-display`/`text-
+figure` hero number per screen (previously every figure sat in the same narrow 13–16px band,
+> including `ledgerUnexplainedTotal`, the number the whole reconciliation feature exists to
+> compute); a new `attention` semantic color separating "a Splitwise mismatch, worth a look" from
+> `debit` "this is wrong" (they were both red before, which taught the reader to distrust every
+> red figure); a small hand-owned `src/components/ui/` primitive layer (button, table, alert,
+> skeleton, styled-native select/input/label) in shadcn/ui's authoring style; and a genuine
+> mobile-card fallback (not horizontal scroll) for the three data-dense tables. Lighthouse
+> accessibility is 100 on all four screens, desktop and mobile, as of this pass. Two real bugs
+> were caught and fixed in the process, both documented in ADR-0043 and `web/Design.md`
+> ("Typography"): a dark-mode button using literal `text-white` on a light-in-dark-mode `accent`
+> background (a real contrast failure), and a `tailwind-merge` gotcha where two unrelated custom
+> `text-*` tokens (a font size and a text color) were treated as conflicting and one silently
+> dropped — caught only by reading `getComputedStyle`, not by a screenshot. All 1170 tests (1133
+> backend + 37 frontend) and the full gate (`typecheck`/`lint`/`format:check`/`db:check`/`test`,
+> both packages) pass unchanged.
+
 ## Recommended next phase
 
 **Phase 16, Rules/learning.** `Rule` creation (manual first, AI-proposed later) and
