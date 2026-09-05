@@ -5,7 +5,7 @@
 > Both older files and their historical references remain valid. New references must use
 > the title or full linked filename; a bare 0017/0018 in older code/docs means integration
 > tests/manual-note semantics respectively. Do not substitute one for the other or overwrite
-> either file. Future new ADRs continue after the highest existing number (currently 0043).
+> either file. Future new ADRs continue after the highest existing number (currently 0045).
 
 This directory records non-trivial technical and domain decisions and why they were made, so
 future sessions (human or Claude) don't silently re-litigate or accidentally reverse them.
@@ -32,7 +32,7 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | ADR                                                                  | Decision                                                    | Status                                                                          |
 | -------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | [0017 (cash balance)](0017-pragmatic-cash-balance-reconciliation.md) | Pragmatic cash-balance reconciliation, invariants 17.1–17.7 | Accepted; implemented in Phase 16; partially supersedes 0015, preserves 0016    |
-| [0018 (item refunds)](0018-item-level-refund-attribution.md)         | Item-level refund attribution, invariants 19.1–19.6         | Accepted; schema/attribution shipped in Phase 16, allocation engine is Phase 18 |
+| [0018 (item refunds)](0018-item-level-refund-attribution.md)         | Item-level refund attribution, invariants 19.1–19.6         | Accepted; schema/attribution shipped in Phase 16, allocation engine in Phase 18 |
 
 ## Historical and implementation index
 
@@ -82,3 +82,4 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0042](0042-frontend-stack-and-server-bridge.md)                      | Frontend stack (Next.js), and a real process to run the API behind it          | Accepted                                                     |
 | [0043](0043-frontend-design-system-and-component-primitives.md)       | A frontend design system, and hand-owned component primitives without Radix    | Accepted                                                     |
 | [0044](0044-evidence-observations-and-match-candidates.md)            | Context re-attachment records a reading and explained candidates, never a link | Accepted                                                     |
+| [0045](0045-item-refund-allocation-is-rebuilt-not-decremented.md)     | The item-refund allocation is rebuilt from recorded facts, never decremented   | Accepted                                                     |

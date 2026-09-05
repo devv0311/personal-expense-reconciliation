@@ -38,6 +38,7 @@ belongs in `src/services` instead.
 | `cash-flow.ts`            | Cash-flow direction and approval-evidence gates (ADR-0017 (cash balance), 17.1–17.2)                                     |
 | `cash-balance.ts`         | The account cash identity, verification status, transfer pairing/neutrality (17.3–17.7)                                  |
 | `refund-attribution.ts`   | Item-refund attribution rules and derived net item costs (ADR-0018 (item refunds), 19.1–19.6)                            |
+| `refund-allocation.ts`    | The item-refund allocation engine: net item cost to superseding lines, legacy reduction applied once (ADR-0045)          |
 | `evidence-observation.ts` | The structured reading of one evidence record: notification parsing, reference normalization, dedupe identity (ADR-0044) |
 | `evidence-matching.ts`    | The six context-re-attachment signals, candidate eligibility, strength and ordering (ADR-0044)                           |
 | `evidence-context.ts`     | The re-attached context of a payment: reconstruction beside the narration, disagreements named (ADR-0044)                |
