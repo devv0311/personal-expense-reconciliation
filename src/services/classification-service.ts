@@ -23,6 +23,7 @@ import {
   assertAiInferenceTransition,
   assertExpenseTransition,
   classificationEligibility,
+  deriveReattachedContext,
   findSelfTransferCounterLeg,
   routeClassificationForReview,
 } from '../domain/index.js';
@@ -56,6 +57,7 @@ import {
   getPrimaryUserPerson,
   insertAiInference,
   insertExpense,
+  listEvidenceContextSourcesForPayment,
   listPaymentsAwaitingClassification,
   listPeople,
   recordAiInferenceDecision,
@@ -521,7 +523,20 @@ async function loadPaymentMerchant(
   return getMerchantById(exec, payment.counterpartyId as MerchantId);
 }
 
-/** The already-resolved references a proposal may refer to, rather than raw statement text. */
+/**
+ * The already-resolved references a proposal may refer to, rather than raw statement text.
+ *
+ * Phase 17 added the third source: whatever evidence has been **attached** to this payment now
+ * says about it (`domain.deriveReattachedContext`). That is context re-attachment reaching the
+ * classifier — a statement line that decayed to `UPI-BLINKIT9821PAYTM` is close to
+ * unclassifiable, and the push notification a reviewer linked beside it says `Blinkit`.
+ *
+ * Only the merchant *names* travel: `redactPaymentForInference` takes the hints and nothing
+ * else off the context, and the references, account tails and raw notification text it also
+ * holds stay on this machine (`security-model.md`). A payment with nothing attached gets an
+ * empty hint list, so this changes nothing for a payment that has no evidence — which is still
+ * the ordinary case.
+ */
 async function buildClassificationContext(
   exec: Executor,
   payment: PaymentRow,
@@ -532,10 +547,44 @@ async function buildClassificationContext(
       : null;
   const userPerson = await getPrimaryUserPerson(exec);
   const people = await listPeople(exec);
+  const sources = await listEvidenceContextSourcesForPayment(exec, payment.id);
+
   return {
     merchant,
     // The user is not a candidate counterparty: a settlement is with someone else.
     knownPeople: people.filter((person) => person.id !== userPerson?.personId),
+    reattachedContext:
+      sources.length === 0
+        ? null
+        : deriveReattachedContext(
+            {
+              paymentId: payment.id,
+              amount: payment.amount,
+              direction: payment.direction,
+              occurredAt: payment.occurredAt,
+              rawDescription: payment.rawDescription,
+              externalReference: payment.externalReference,
+              merchantName: merchant?.canonicalName ?? null,
+            },
+            sources.map((source) => ({
+              evidenceId: source.evidence.id,
+              evidenceType: source.evidence.type,
+              capturedAt: source.evidence.capturedAt,
+              observation:
+                source.observation === null
+                  ? null
+                  : {
+                      observedAmount: source.observation.observedAmount,
+                      observedDirection: source.observation.observedDirection,
+                      observedReference: source.observation.observedReference,
+                      observedReferenceType: source.observation.observedReferenceType,
+                      observedAccountHint: source.observation.observedAccountHint,
+                      observedMerchantText: source.observation.observedMerchantText,
+                      observedOccurredAt: source.observation.observedOccurredAt,
+                      derivation: source.observation.derivation,
+                    },
+            })),
+          ),
   };
 }
 

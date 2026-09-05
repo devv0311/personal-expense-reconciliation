@@ -1470,3 +1470,318 @@ describe('reconciliation_account_snapshots (ADR-0017 (cash balance), 17.4-17.7)'
     expect(rows[0]?.count).toBe('0');
   });
 });
+
+/* ============================================ phase 17: observations & match candidates */
+
+describe('evidence observations record a reading, not a guess (ADR-0044)', () => {
+  async function seedEvidence(): Promise<string> {
+    const [row] = await database.db
+      .insert(schema.evidence)
+      .values({
+        type: 'upi_notification',
+        rawText: 'Rs.1,240.00 debited from A/C XX4821 to BLINKIT. UPI Ref no 2607011234.',
+        capturedAt: new Date('2026-07-01T19:04:00Z'),
+      })
+      .returning({ id: schema.evidence.id });
+    return row!.id;
+  }
+
+  function observation(evidenceId: string, overrides: Record<string, unknown> = {}) {
+    return {
+      evidenceId,
+      observedAmount: 124_000n,
+      observedDirection: 'debit',
+      observedReference: '2607011234',
+      observedReferenceNormalized: '2607011234',
+      observedReferenceType: 'upi_utr',
+      observedAccountHint: '4821',
+      observedMerchantText: 'BLINKIT',
+      derivation: 'parsed_from_text',
+      notificationKey: 'upi_notification|2607011234|124000|debit|-',
+      ...overrides,
+    };
+  }
+
+  it('accepts a full reading', async () => {
+    const evidenceId = await seedEvidence();
+    const [row] = await database.db
+      .insert(schema.evidenceObservations)
+      .values(observation(evidenceId))
+      .returning({ derivation: schema.evidenceObservations.derivation });
+
+    expect(row?.derivation).toBe('parsed_from_text');
+  });
+
+  it('accepts a partial reading — most notifications are partial', async () => {
+    const evidenceId = await seedEvidence();
+    const [row] = await database.db
+      .insert(schema.evidenceObservations)
+      .values(
+        observation(evidenceId, {
+          observedReference: null,
+          observedReferenceNormalized: null,
+          observedReferenceType: null,
+          observedAccountHint: null,
+          observedMerchantText: null,
+        }),
+      )
+      .returning({ id: schema.evidenceObservations.id });
+
+    expect(row?.id).toBeDefined();
+  });
+
+  it('rejects a reading that read nothing at all', async () => {
+    const evidenceId = await seedEvidence();
+    const error = await captureError(() =>
+      database.db.insert(schema.evidenceObservations).values(
+        observation(evidenceId, {
+          observedAmount: null,
+          observedDirection: null,
+          observedReference: null,
+          observedReferenceNormalized: null,
+          observedReferenceType: null,
+          observedAccountHint: null,
+          observedMerchantText: null,
+          observedOccurredAt: null,
+        }),
+      ),
+    );
+
+    expect(error.message).toMatch(/evidence_observations_not_empty_check/);
+  });
+
+  it('rejects anything longer than a masked account tail (security-model.md)', async () => {
+    const evidenceId = await seedEvidence();
+    const error = await captureError(() =>
+      database.db
+        .insert(schema.evidenceObservations)
+        .values(observation(evidenceId, { observedAccountHint: '4111111111114821' })),
+    );
+
+    expect(error.message).toMatch(/evidence_observations_account_hint_check/);
+  });
+
+  it('rejects a zero or negative amount — direction carries the sign', async () => {
+    const evidenceId = await seedEvidence();
+    const error = await captureError(() =>
+      database.db
+        .insert(schema.evidenceObservations)
+        .values(observation(evidenceId, { observedAmount: 0n })),
+    );
+
+    expect(error.message).toMatch(/evidence_observations_amount_check/);
+  });
+
+  it('rejects a reference with no normalized form to match on', async () => {
+    const evidenceId = await seedEvidence();
+    const error = await captureError(() =>
+      database.db
+        .insert(schema.evidenceObservations)
+        .values(observation(evidenceId, { observedReferenceNormalized: null })),
+    );
+
+    expect(error.message).toMatch(/evidence_observations_reference_normalized_check/);
+  });
+
+  it('allows one reading per evidence record, never two competing ones', async () => {
+    const evidenceId = await seedEvidence();
+    await database.db.insert(schema.evidenceObservations).values(observation(evidenceId));
+
+    const error = await captureError(() =>
+      database.db
+        .insert(schema.evidenceObservations)
+        .values(observation(evidenceId, { notificationKey: 'different-key' })),
+    );
+
+    expect(error.message).toMatch(/evidence_observations_evidence_id_unique/);
+  });
+
+  it('refuses a second record of the same incoming notification', async () => {
+    const first = await seedEvidence();
+    const second = await seedEvidence();
+    await database.db.insert(schema.evidenceObservations).values(observation(first));
+
+    const error = await captureError(() =>
+      database.db.insert(schema.evidenceObservations).values(observation(second)),
+    );
+
+    expect(error.message).toMatch(/evidence_observations_notification_key_unique/);
+  });
+
+  it('lets two readings with no notification key coexist', async () => {
+    // Two receipts that happen to total the same amount are two readings, not a collision:
+    // a reading of evidence that already exists carries no key at all (ADR-0044).
+    const first = await seedEvidence();
+    const second = await seedEvidence();
+    await database.db
+      .insert(schema.evidenceObservations)
+      .values(observation(first, { notificationKey: null }));
+
+    const [row] = await database.db
+      .insert(schema.evidenceObservations)
+      .values(observation(second, { notificationKey: null }))
+      .returning({ id: schema.evidenceObservations.id });
+
+    expect(row?.id).toBeDefined();
+  });
+});
+
+describe('a match candidate is never approved by anything but a person (ADR-0044)', () => {
+  async function seedCandidateInputs(): Promise<{ evidenceId: string; paymentId: string }> {
+    const paymentId = await seedPayment();
+    const [row] = await database.db
+      .insert(schema.evidence)
+      .values({ type: 'upi_notification', rawText: 'Rs.1,240.00 debited', capturedAt: new Date() })
+      .returning({ id: schema.evidence.id });
+    return { evidenceId: row!.id, paymentId };
+  }
+
+  function candidate(
+    ids: { evidenceId: string; paymentId: string },
+    overrides: Record<string, unknown> = {},
+  ) {
+    return {
+      evidenceId: ids.evidenceId,
+      paymentId: ids.paymentId,
+      strength: 'deterministic',
+      confidence: 'high',
+      matchedSignals: ['reference', 'amount'],
+      conflictingSignals: [],
+      signals: [{ signal: 'reference', verdict: 'matched' }],
+      reviewReasons: ['link_decision_required'],
+      matcherVersion: 'evidence-match/1',
+      ...overrides,
+    };
+  }
+
+  it('defaults to proposed, with no actor and no decision instant', async () => {
+    const ids = await seedCandidateInputs();
+    const [row] = await database.db
+      .insert(schema.evidenceMatchCandidates)
+      .values(candidate(ids))
+      .returning({
+        status: schema.evidenceMatchCandidates.status,
+        decidedAt: schema.evidenceMatchCandidates.decidedAt,
+        decidedBy: schema.evidenceMatchCandidates.decidedBy,
+      });
+
+    expect(row).toEqual({ status: 'proposed', decidedAt: null, decidedBy: null });
+  });
+
+  it('refuses an accepted candidate with nobody behind it', async () => {
+    const ids = await seedCandidateInputs();
+    const error = await captureError(() =>
+      database.db
+        .insert(schema.evidenceMatchCandidates)
+        .values(candidate(ids, { status: 'accepted' })),
+    );
+
+    expect(error.message).toMatch(/evidence_match_candidates_decision_check/);
+  });
+
+  it('refuses a decision instant on a candidate nobody decided', async () => {
+    const ids = await seedCandidateInputs();
+    const error = await captureError(() =>
+      database.db
+        .insert(schema.evidenceMatchCandidates)
+        .values(candidate(ids, { decidedAt: new Date(), decidedBy: 'user' })),
+    );
+
+    expect(error.message).toMatch(/evidence_match_candidates_decision_check/);
+  });
+
+  it('accepts a decided candidate with both', async () => {
+    const ids = await seedCandidateInputs();
+    const [row] = await database.db
+      .insert(schema.evidenceMatchCandidates)
+      .values(candidate(ids, { status: 'accepted', decidedAt: new Date(), decidedBy: 'user:dev' }))
+      .returning({ decidedBy: schema.evidenceMatchCandidates.decidedBy });
+
+    expect(row?.decidedBy).toBe('user:dev');
+  });
+
+  it('refuses an invented strength, confidence or status', async () => {
+    const ids = await seedCandidateInputs();
+    expect(
+      (
+        await captureError(() =>
+          database.db
+            .insert(schema.evidenceMatchCandidates)
+            .values(candidate(ids, { strength: 'certain' })),
+        )
+      ).message,
+    ).toMatch(/evidence_match_candidates_strength_check/);
+    expect(
+      (
+        await captureError(() =>
+          database.db
+            .insert(schema.evidenceMatchCandidates)
+            .values(candidate(ids, { confidence: 'very-high' })),
+        )
+      ).message,
+    ).toMatch(/evidence_match_candidates_confidence_check/);
+    expect(
+      (
+        await captureError(() =>
+          database.db
+            .insert(schema.evidenceMatchCandidates)
+            .values(candidate(ids, { status: 'linked' })),
+        )
+      ).message,
+    ).toMatch(/evidence_match_candidates_status_check/);
+  });
+
+  it('refuses a signal name the domain does not define', async () => {
+    const ids = await seedCandidateInputs();
+    const error = await captureError(() =>
+      database.db
+        .insert(schema.evidenceMatchCandidates)
+        .values(candidate(ids, { matchedSignals: ['vibes'] })),
+    );
+
+    expect(error.message).toMatch(/evidence_match_candidates_signal_names_check/);
+  });
+
+  it('refuses signal provenance that is not a list', async () => {
+    const ids = await seedCandidateInputs();
+    const error = await captureError(() =>
+      database.db
+        .insert(schema.evidenceMatchCandidates)
+        .values(candidate(ids, { signals: { signal: 'reference' } })),
+    );
+
+    expect(error.message).toMatch(/evidence_match_candidates_signals_shape_check/);
+  });
+
+  it('records one offer per evidence/payment pair, not a second opinion about the same two', async () => {
+    const ids = await seedCandidateInputs();
+    await database.db.insert(schema.evidenceMatchCandidates).values(candidate(ids));
+
+    const error = await captureError(() =>
+      database.db
+        .insert(schema.evidenceMatchCandidates)
+        .values(candidate(ids, { strength: 'weak', confidence: 'low' })),
+    );
+
+    expect(error.message).toMatch(/evidence_match_candidates_pair_idx/);
+  });
+});
+
+describe('the audit log can name what phase 17 writes', () => {
+  it('accepts the two new entity types', async () => {
+    const paymentId = await seedPayment();
+    for (const entityType of ['evidence_observation', 'evidence_match_candidate'] as const) {
+      const [row] = await database.db
+        .insert(schema.auditEvents)
+        .values({
+          entityType,
+          entityId: paymentId,
+          action: 'create',
+          newValue: { recorded: true },
+          actor: 'user',
+        })
+        .returning({ entityType: schema.auditEvents.entityType });
+      expect(row?.entityType).toBe(entityType);
+    }
+  });
+});

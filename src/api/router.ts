@@ -22,6 +22,14 @@ import { postDistributeAdjustment, postExpenseAdjustment } from './adjustment-ro
 import { postAllocation } from './allocation-routes.js';
 import { getBalanceRoute } from './balance-routes.js';
 import {
+  getEvidenceMatchesRoute,
+  getPaymentContextRoute,
+  postEvidenceEnrichment,
+  postEvidenceMatchDecision,
+  postEvidenceNotification,
+  postEvidenceObservation,
+} from './evidence-enrichment-routes.js';
+import {
   getEvidenceContent,
   getEvidenceMetadata,
   postEvidenceFile,
@@ -102,12 +110,32 @@ export const REVIEW_ROUTES: readonly ApiRoute[] = [
   },
 ];
 
-/** Ingesting a document, placing it, and reading it back (`docs/roadmap.md` phase 10). */
+/**
+ * Ingesting a document, placing it, and reading it back (`docs/roadmap.md` phase 10), plus
+ * phase 17's notification ingestion, enrichment and match decisions.
+ *
+ * `/api/evidence/files`, `/api/evidence/notes`, `/api/evidence/notifications` and
+ * `/api/evidence/matches/:candidateId/decision` are listed **before** `/api/evidence/:evidenceId`
+ * and its children, which would otherwise read the literal segments as ids.
+ */
 export const EVIDENCE_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/evidence/files', handler: postEvidenceFile },
   { method: 'POST', path: '/api/evidence/notes', handler: postEvidenceNote },
+  { method: 'POST', path: '/api/evidence/notifications', handler: postEvidenceNotification },
+  {
+    method: 'POST',
+    path: '/api/evidence/matches/:candidateId/decision',
+    handler: postEvidenceMatchDecision,
+  },
   { method: 'POST', path: '/api/evidence/:evidenceId/link', handler: postEvidenceLink },
   { method: 'POST', path: '/api/evidence/:evidenceId/receipt', handler: postReceiptExtraction },
+  {
+    method: 'POST',
+    path: '/api/evidence/:evidenceId/observation',
+    handler: postEvidenceObservation,
+  },
+  { method: 'POST', path: '/api/evidence/:evidenceId/enrich', handler: postEvidenceEnrichment },
+  { method: 'GET', path: '/api/evidence/:evidenceId/matches', handler: getEvidenceMatchesRoute },
   { method: 'GET', path: '/api/evidence/:evidenceId', handler: getEvidenceMetadata },
   { method: 'GET', path: '/api/evidence/:evidenceId/content', handler: getEvidenceContent },
 ];
@@ -142,6 +170,14 @@ export const ALLOCATION_ROUTES: readonly ApiRoute[] = [
 /** A manual settlement over a payment, independent of classification (phase 12). */
 export const SETTLEMENT_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/payments/:paymentId/settlements', handler: postSettlement },
+];
+
+/**
+ * What the evidence attached to a payment says about it — `services.getPaymentContext`
+ * (phase 17, ADR-0044). A read: the payment's own narration comes back unchanged beside it.
+ */
+export const PAYMENT_CONTEXT_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/payments/:paymentId/context', handler: getPaymentContextRoute },
 ];
 
 /** The expense ledger, queryable — `services.listExpenses` (`docs/roadmap.md` phase 13). */
@@ -200,6 +236,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...RECEIPT_ROUTES,
   ...ALLOCATION_ROUTES,
   ...SETTLEMENT_ROUTES,
+  ...PAYMENT_CONTEXT_ROUTES,
   ...EXPENSE_LEDGER_ROUTES,
   ...BALANCE_ROUTES,
   ...PEOPLE_ROUTES,

@@ -36,3 +36,34 @@ export class AiContractError extends Error {
 export function isAiContractError(error: unknown): error is AiContractError {
   return error instanceof AiContractError;
 }
+
+/**
+ * The payload built for an external call still contained something that identifies a real
+ * account, card, handle, or person (Phase 17, `security-model.md`).
+ *
+ * Deliberately its own type rather than an `AiContractError`: a contract error is the model
+ * misbehaving on the way *in*, and this is this system misbehaving on the way *out*. It is the
+ * fail-closed half of the redaction boundary — raised **instead of** sending, so an unredacted
+ * identifier never leaves the machine even if a redaction rule was wrong or a new field was
+ * added to a payload without one.
+ *
+ * `details` names the field and the *kind* of identifier found. It never carries the value:
+ * an error about a leak must not itself be the leak, and these messages reach logs, which
+ * `security-model.md` keeps free of raw financial detail.
+ */
+export class SanitizationError extends Error {
+  public readonly code = 'PAYLOAD_NOT_SANITIZED' as const;
+
+  public readonly details: Readonly<Record<string, string>>;
+
+  constructor(message: string, details: Record<string, string> = {}) {
+    super(message);
+    this.name = 'SanitizationError';
+    this.details = Object.freeze({ ...details });
+  }
+}
+
+/** Narrowing helper for `catch` blocks and tests. */
+export function isSanitizationError(error: unknown): error is SanitizationError {
+  return error instanceof SanitizationError;
+}

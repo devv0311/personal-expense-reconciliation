@@ -134,6 +134,27 @@ evidence routes check the same thing at the edge instead — ingestion is not an
 decision, so `parseDecisionActor` does not apply to it, but an upload arriving over HTTP is
 still a person's act and `system` would be an answer nobody can check.
 
+**Implemented (phase 17): context re-attachment.**
+
+| Route                                              | Service                      |
+| -------------------------------------------------- | ---------------------------- |
+| `POST /api/evidence/notifications`                 | `recordEvidenceNotification` |
+| `POST /api/evidence/:evidenceId/observation`       | `recordEvidenceObservation`  |
+| `POST /api/evidence/:evidenceId/enrich`            | `matchEvidenceContext`       |
+| `GET /api/evidence/:evidenceId/matches`            | `listEvidenceMatches`        |
+| `POST /api/evidence/matches/:candidateId/decision` | `decideEvidenceMatch`        |
+| `GET /api/payments/:paymentId/context`             | `getPaymentContext`          |
+
+`POST .../enrich` never produces a link, however strong the match: the only route that reaches
+`evidence.linked_payment_id` besides `POST /api/evidence/:evidenceId/link` is the match decision
+with `accept`, and it fails with the same `EVIDENCE_LINK_IMMUTABLE` (422) when the evidence
+already has a home (ADR-0034/0044). Enrichment is idempotent over HTTP as well — a second call
+answers `outcome: "unchanged"` having written nothing.
+
+`/api/evidence/notifications` and `/api/evidence/matches/:candidateId/decision` are listed before
+`/api/evidence/:evidenceId` in the route table, so the literal segments are not read as ids —
+the same one ordering rule `files` and `notes` already carried.
+
 **Phase 15 (ADR-0041, ADR-0042) added:** `POST`/`GET /api/reconciliation/runs`,
 `GET /api/reconciliation/runs/:id` — `services.runReconciliation`'s first `src/api` caller,
 deferred here since phase 13 — and `GET /api/people` (`services.listPeople`), the roster

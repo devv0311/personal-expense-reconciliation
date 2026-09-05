@@ -48,7 +48,7 @@ import type { Database, EvidenceRow, Executor } from '../db/index.js';
 import { isEvidenceStoreError } from '../integrations/evidence-store/index.js';
 import type { EvidenceStore } from '../integrations/evidence-store/index.js';
 
-import { runAudited, type AuditMeta } from './audit.js';
+import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
 import { ServiceError } from './errors.js';
 
 /**
@@ -272,21 +272,65 @@ export async function linkEvidence(db: Database, input: LinkEvidenceInput): Prom
 
   await assertLinkTargetsExist(db, proposed);
 
-  await runAudited(db, input.audit, async ({ exec, record }) => {
-    await updateEvidenceLinks(exec, current.id, proposed);
-    await record({
-      entityType: 'evidence',
-      entityId: current.id,
-      action: 'update',
-      oldValue: {
-        linkedPaymentId: current.linkedPaymentId,
-        linkedExpenseId: current.linkedExpenseId,
-      },
-      newValue: proposed,
-    });
+  await runAudited(db, input.audit, async (ctx) => {
+    await applyEvidenceLink(ctx, current, proposed);
   });
 
   return { ...current, ...proposed };
+}
+
+/**
+ * The write half of {@link linkEvidence}, inside an already-open audited unit of work.
+ *
+ * Extracted so phase 17's `services.acceptEvidenceMatch` attaches evidence through exactly
+ * this code — the same write-once assertion, the same `UPDATE`, the same audit event — rather
+ * than growing a second path to the one column ADR-0034 governs. Accepting a match has more to
+ * write than a bare link (it also decides the candidate and supersedes its siblings), which is
+ * why it needs the transaction rather than the whole function.
+ *
+ * The caller must have called `domain.assertEvidenceLinkOnce` and checked the link targets
+ * exist; this issues the statement and records what changed.
+ */
+export async function applyEvidenceLink(
+  ctx: AuditContext,
+  current: EvidenceRow,
+  proposed: {
+    readonly linkedPaymentId: PaymentId | null;
+    readonly linkedExpenseId: ExpenseId | null;
+  },
+): Promise<void> {
+  await updateEvidenceLinks(ctx.exec, current.id, proposed);
+  await ctx.record({
+    entityType: 'evidence',
+    entityId: current.id,
+    action: 'update',
+    oldValue: {
+      linkedPaymentId: current.linkedPaymentId,
+      linkedExpenseId: current.linkedExpenseId,
+    },
+    newValue: proposed,
+  });
+}
+
+/**
+ * Refuses a link to something that does not exist — shared with phase 17's match acceptance.
+ *
+ * Exported for the same reason {@link applyEvidenceLink} is: one function that knows how to
+ * say "no payment with that id", rather than two that phrase it differently.
+ */
+export async function assertEvidenceLinkTargetsExist(
+  exec: Executor,
+  links: { readonly linkedPaymentId: PaymentId | null; readonly linkedExpenseId: ExpenseId | null },
+): Promise<void> {
+  return assertLinkTargetsExist(exec, links);
+}
+
+/** One evidence row, or a `ServiceError`. Shared with phase 17's enrichment service. */
+export async function requireEvidenceRow(
+  exec: Executor,
+  evidenceId: EvidenceId,
+): Promise<EvidenceRow> {
+  return requireEvidence(exec, evidenceId);
 }
 
 /** One evidence row. @throws ServiceError `ENTITY_NOT_FOUND` */

@@ -79,3 +79,12 @@ REVOKE UPDATE, DELETE ON TABLE expense_adjustment_items FROM :"app_role";
 -- (cash balance) 17.7 forbids; new evidence produces a new run. Unlike `reconciliation_runs`,
 -- there is no `resolved_at` to grant back — nothing on this row is ever meant to move.
 REVOKE UPDATE, DELETE ON TABLE reconciliation_account_snapshots FROM :"app_role";
+
+-- Deliberately absent: `evidence_observations` and `evidence_match_candidates` (phase 17,
+-- ADR-0044). Both are DERIVED and both are meant to move — a better reading of a notification
+-- replaces the one before it, and a candidate is re-stated when the matcher's view of it
+-- changes. What must not change about them is expressed as a CHECK instead of a grant:
+-- `evidence_match_candidates_decision_check` makes `accepted`/`dismissed` reachable only with a
+-- recorded actor and instant, so a candidate cannot be approved by anything but a person (or an
+-- already-approved Rule) whatever privileges the role holds. The link they can lead to is still
+-- governed here, by the `evidence` grant above.

@@ -82,7 +82,13 @@ export type DomainErrorCode =
   /** One `ExpenseItem` was attributed twice within a single adjustment (ADR-0018). */
   | 'REFUND_ATTRIBUTION_DUPLICATE_ITEM'
   /** Cumulative attributions exceeded an item's original gross cost (19.3). */
-  | 'REFUND_ITEM_CEILING_EXCEEDED';
+  | 'REFUND_ITEM_CEILING_EXCEEDED'
+  /** An `EvidenceObservation` recorded nothing observable about a money movement. */
+  | 'EVIDENCE_OBSERVATION_EMPTY'
+  /** An observed account hint was not the masked trailing digits it claims to be. */
+  | 'EVIDENCE_OBSERVATION_INVALID'
+  /** A match candidate was decided by an actor the audit trail cannot attribute. */
+  | 'EVIDENCE_MATCH_DECISION_INVALID';
 
 /** Thrown by `src/domain` when an input violates a documented invariant. */
 export class DomainError extends Error {

@@ -135,6 +135,40 @@ api ─▶ services.ingestEvidenceDocument ─▶ integrations/evidence-store.pu
 > Re-ingesting the same bytes against the same links returns the row that already holds them
 > rather than a second one. Evidence carries no money, so this is not `invariants.md` #10; it is
 > so that one receipt shared twice is one thing for a person to look at.
+>
+> **Phase 17 (2026-09-06) added the other direction: evidence that arrives as text, and the
+> matching that puts it beside the payment it describes** (ADR-0044).
+>
+> ```
+> services.recordEvidenceNotification ─▶ domain.parseNotificationText
+>                                      ─▶ db.insertEvidence + db.insertEvidenceObservation
+> services.recordEvidenceObservation   ─▶ domain.validateEvidenceObservation ─▶ db (replaces the reading)
+> services.matchEvidenceContext        ─▶ db.listMatchablePayments{Near,ByReference}   (a pre-filter)
+>                                      ─▶ domain.matchEvidenceToPayments              (the rule)
+>                                      ─▶ db (evidence_match_candidates, upserted; stale ones superseded)
+> services.decideEvidenceMatch         ─▶ domain.assertEvidenceLinkOnce
+>                                      ─▶ services.applyEvidenceLink                  (phase 10's own write)
+> services.getPaymentContext           ─▶ domain.deriveReattachedContext              (a read)
+> ```
+>
+> A bank SMS or UPI push notification becomes an `Evidence` row whose text is stored verbatim,
+> plus one DERIVED `EvidenceObservation` — the structured amount, direction, reference, masked
+> account tail, merchant and instant, read by a fixed grammar or supplied by an importer. There
+> is no model on this path (`ai-boundary.md`: deterministic evidence belongs to application
+> code), and a field the grammar cannot read stays `null` rather than being guessed.
+>
+> Matching produces `EvidenceMatchCandidate` rows and **never a link**. Six signals — reference,
+> amount, direction, owned account, time, merchant — each recording `matched`, `conflicted` or
+> `absent`, with both sides of every comparison kept so a reviewer sees what the matcher saw. A
+> re-run over an unchanged ledger writes nothing at all, not even an `updated_at`; a candidate
+> the matcher no longer offers is `superseded`, never deleted. `services.decideEvidenceMatch`
+> with `accept` is the only path to `evidence.linked_payment_id`, and it goes through
+> `domain.assertEvidenceLinkOnce` exactly as `services.linkEvidence` does (ADR-0034/0037/0044).
+>
+> The re-attached context is a pure read over the payment and every evidence record linked to
+> it. The narration comes through verbatim; the reconstruction sits beside it; two sources that
+> disagree are both reported. Its merchant hints — and only those — reach step 3's classifier,
+> sanitized and fail-closed-checked by `src/ai` on the way out.
 
 ## 5. Human review
 

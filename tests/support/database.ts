@@ -43,6 +43,8 @@ const ALL_TABLES = [
   'expense_occasions',
   'receipt_items',
   'receipts',
+  'evidence_match_candidates',
+  'evidence_observations',
   'evidence',
   'payments',
   'import_batches',

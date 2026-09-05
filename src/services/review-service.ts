@@ -41,14 +41,26 @@ import type {
 import { isAiContractError, parseTransactionClassification } from '../ai/index.js';
 import type { TransactionClassification } from '../ai/index.js';
 import {
+  getEvidenceObservationByEvidenceId,
   listDismissedDuplicatePairs,
+  listEvidenceMatchCandidatesForEvidenceIds,
   listPendingClassificationInferences,
   listPossibleDuplicateCandidates,
   listRejectedClassifications,
   listUnmatchedEvidence,
 } from '../db/index.js';
-import type { EvidenceRow, Executor, PaymentRow, PendingClassificationRow } from '../db/index.js';
+import type {
+  EvidenceMatchCandidateRow,
+  EvidenceRow,
+  Executor,
+  PaymentRow,
+  PendingClassificationRow,
+} from '../db/index.js';
 
+import type {
+  EvidenceMatchCandidateView,
+  EvidenceObservationView,
+} from './evidence-enrichment-service.js';
 import { getReceiptViewByEvidenceId } from './receipt-service.js';
 
 /* --------------------------------------------------------------------------- options */
@@ -171,7 +183,7 @@ export interface UnmatchedEvidenceItem {
   readonly kind: 'unmatched_evidence';
   /** The evidence id — one item per document with no home. */
   readonly id: string;
-  /** Zero until a `Receipt.total` exists to report; see the type doc above. */
+  /** Zero until something has established one; see the type doc above. */
   readonly amount: Paise;
   /** When the document was captured, which is the only date this item has. */
   readonly occurredAt: Date;
@@ -186,6 +198,27 @@ export interface UnmatchedEvidenceItem {
   readonly receiptId: ReceiptId | null;
   readonly receiptTotal: Paise | null;
   readonly candidateMatches: readonly UnmatchedEvidenceCandidateMatch[];
+  /**
+   * The structured reading of this evidence, when enrichment has produced one (Phase 17).
+   *
+   * `null` for a document nobody has read: a photograph with no extraction and no text. The
+   * raw evidence itself is not carried here — it stays where it is, and a surface fetches it
+   * through `/api/evidence/:id/content` when a person asks to look.
+   */
+  readonly observation: EvidenceObservationView | null;
+  /**
+   * Recorded match candidates with their signal provenance (Phase 17, ADR-0044).
+   *
+   * Distinct from `candidateMatches` above, and deliberately so. That list is ADR-0037's
+   * read-time shortcut — an exact receipt total against unlinked debits — and it works with no
+   * enrichment run at all. This one is what the general matcher recorded: reference, amount,
+   * direction, account, time and merchant, each with a verdict, plus every reason the
+   * candidate is waiting. Where both are populated they agree by construction, because
+   * enrichment derives a receipt's observation from the same `Receipt.total`.
+   *
+   * Superseded candidates are omitted: they are history, not a question.
+   */
+  readonly matchCandidates: readonly EvidenceMatchCandidateView[];
 }
 
 export type ReviewQueueItem =
@@ -401,23 +434,52 @@ function asCandidate(payment: PaymentRow) {
  */
 async function unmatchedEvidenceItems(exec: Executor): Promise<UnmatchedEvidenceItem[]> {
   const rows = await listUnmatchedEvidence(exec);
-  return Promise.all(rows.map((row: EvidenceRow) => toUnmatchedEvidenceItem(exec, row)));
+  // One read for every row's candidates rather than one per row: the queue is a read a surface
+  // polls, and a per-item query would make it cost a round trip per document.
+  const candidates = await listEvidenceMatchCandidatesForEvidenceIds(
+    exec,
+    rows.map((row: EvidenceRow) => row.id),
+  );
+  const byEvidence = new Map<string, EvidenceMatchCandidateRow[]>();
+  for (const candidate of candidates) {
+    if (candidate.status === 'superseded') continue;
+    const existing = byEvidence.get(candidate.evidenceId);
+    if (existing === undefined) byEvidence.set(candidate.evidenceId, [candidate]);
+    else existing.push(candidate);
+  }
+  return Promise.all(
+    rows.map((row: EvidenceRow) =>
+      toUnmatchedEvidenceItem(exec, row, byEvidence.get(row.id) ?? []),
+    ),
+  );
 }
 
 async function toUnmatchedEvidenceItem(
   exec: Executor,
   row: EvidenceRow,
+  candidates: readonly EvidenceMatchCandidateRow[],
 ): Promise<UnmatchedEvidenceItem> {
   // Extraction (phase 11) may already have read a total off this document — if so, that total
   // is what "materiality" means for this item from now on, and its candidate matches are what
   // `services.linkEvidence` needs a reviewer to confirm (ADR-0037: never linked automatically).
   const view = await getReceiptViewByEvidenceId(exec, row.id);
+  // Phase 17: a notification carries no receipt, but its observation carries an amount, which
+  // is the same materiality signal arriving by the other road.
+  const observation = await getEvidenceObservationByEvidenceId(exec, row.id);
+
+  const proposed = candidates.filter((candidate) => candidate.status === 'proposed');
+  const reasons: ReviewReason[] = ['evidence_unmatched'];
+  if (proposed.length > 1) reasons.push('evidence_match_ambiguous');
+  if (proposed.some((candidate) => candidate.conflictingSignals.length > 0)) {
+    reasons.push('evidence_match_conflicting_signals');
+  }
+
   return {
     kind: 'unmatched_evidence' as const,
     id: row.id,
-    amount: (view?.receipt.total ?? 0n) as Paise,
+    amount: (view?.receipt.total ?? observation?.observedAmount ?? 0n) as Paise,
     occurredAt: row.capturedAt,
-    reasons: ['evidence_unmatched'] as const,
+    reasons,
     evidenceId: row.id,
     evidenceType: row.type,
     storageRef: row.storageRef,
@@ -428,6 +490,36 @@ async function toUnmatchedEvidenceItem(
     receiptId: view?.receipt.id ?? null,
     receiptTotal: view?.receipt.total ?? null,
     candidateMatches: view?.candidateMatches ?? [],
+    observation:
+      observation === null
+        ? null
+        : {
+            evidenceId: observation.evidenceId,
+            observedAmount: observation.observedAmount,
+            observedDirection: observation.observedDirection,
+            observedReference: observation.observedReference,
+            observedReferenceType: observation.observedReferenceType,
+            observedAccountHint: observation.observedAccountHint,
+            observedMerchantText: observation.observedMerchantText,
+            observedOccurredAt: observation.observedOccurredAt,
+            derivation: observation.derivation,
+          },
+    matchCandidates: candidates.map((candidate): EvidenceMatchCandidateView => ({
+      candidateId: candidate.id,
+      evidenceId: candidate.evidenceId,
+      paymentId: candidate.paymentId,
+      strength: candidate.strength,
+      confidence: candidate.confidence,
+      matchedSignals: candidate.matchedSignals,
+      conflictingSignals: candidate.conflictingSignals,
+      signals: candidate.signals,
+      reviewReasons: candidate.reviewReasons,
+      status: candidate.status,
+      decidedAt: candidate.decidedAt,
+      decidedBy: candidate.decidedBy,
+      requiresReview: true,
+      matcherVersion: candidate.matcherVersion,
+    })),
   };
 }
 

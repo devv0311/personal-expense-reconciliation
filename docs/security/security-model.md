@@ -87,6 +87,31 @@ Before any `Payment`/`Evidence`/`Receipt` data is sent to the AI provider
 - This redaction step is a named function in `src/ai` (not inlined ad hoc at each call site),
   so it's implemented once and testable once.
 
+**Fail-closed as of phase 17** (ADR-0044). `ai.assertPayloadSanitized` runs at the end of every
+redaction builder and **throws instead of sending** when an identifier is still present. It is
+deliberately independent of the redactors: those are pattern substitutions over free text
+written by banks, and a payload is a shape somebody can extend without noticing there was a rule
+attached to it — both failures are silent, and both end with an account number at a third party.
+It reports the field and the _kind_ of identifier, never the value, because an error about a leak
+must not itself be the leak.
+
+Per-field profiles keep it usable: a statement description's bare 4+ digit run is refused, a
+receipt's is not (prices, quantities and dates are the signal extraction exists to read), and a
+structural field — an id, an ISO timestamp, an exact minor-unit string — is not scanned at all.
+
+Phase 17 also put _evidence_ text on this path for the first time: the merchant a push
+notification names is what repairs a decayed UPI narration, and it reaches
+`ai.classifyTransaction` as `reattachedMerchantHints`. The reference, the masked account tail and
+the raw notification text sitting beside it in the same evidence do not — there is no field on
+the outgoing payload for them to occupy, and they stay readable locally through
+`services.getPaymentContext`, which is the whole point of keeping them.
+
+`ai.createLocalRedactionMap` is the reversible mapping `CLAUDE.md`'s pillar 6 requires to stay
+local. It is a separate object the caller holds, never a field on a payload, so a serialized
+request cannot carry it by accident; it is scoped per unit of work rather than per process,
+because a long-lived map would accumulate every identifier the system has ever redacted into one
+object — a worse thing to hold than the individual values were.
+
 ## Logging
 
 - No full financial detail (exact amounts tied to a specific person/merchant, raw evidence

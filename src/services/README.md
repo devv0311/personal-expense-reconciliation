@@ -149,5 +149,34 @@ import (phase 6):
   statement _balances_ yet — so a run given none produces honestly `incomplete` snapshots
   instead of a cosmetic zero.
 
+- `evidence-enrichment-service.ts` (phase 17, ADR-0044) — context re-attachment.
+  `recordEvidenceNotification` stores a bank SMS or UPI push notification with its text
+  verbatim plus one DERIVED `EvidenceObservation`, deduplicated on a deterministic key so a
+  forwarded notification is one record. `recordEvidenceObservation` replaces that reading when
+  a person corrects it, and writes nothing when the correction says what is already recorded.
+  `matchEvidenceContext` pre-filters payments in `db` (a date window, plus anything sharing the
+  reference regardless of date) and hands them to `domain.matchEvidenceToPayments`, then
+  **upserts candidates only where something changed** — the whole write plan is computed before
+  the transaction opens, so a re-run over an unchanged ledger returns `unchanged` having
+  written no row, no `updated_at` and no audit event. `decideEvidenceMatch` is the only path
+  from a candidate to a link, and it goes through phase 10's own
+  `domain.assertEvidenceLinkOnce` and `applyEvidenceLink` rather than a second write path to
+  the column ADR-0034 governs; accepting also supersedes the candidate's siblings, and a
+  candidate a person has decided is never rewritten by a later run. `getPaymentContext` is a
+  read: `domain.deriveReattachedContext` over the payment and every evidence record linked to
+  it, narration verbatim and disagreements reported rather than resolved.
+
+  Two things this service deliberately cannot do: change a financial number (no amount, no
+  `raw_description`), and approve a cash-flow interpretation (no `cash_flow_category`, no
+  `cash_flow_state` — matching a refund notification to a credit explains it to a human, it
+  does not classify it).
+
+- `classification-service.ts` (phase 17 extension) — `buildClassificationContext` now also
+  loads whatever evidence is attached to the payment and derives the re-attached context from
+  it, so a decayed UPI narration reaches the model with the merchant a linked notification
+  named. Only the merchant _names_ travel; `ai.redactPaymentForInference` takes those and
+  nothing else off the context, and fails closed if anything identifying is still in the
+  payload (`security-model.md`).
+
 Not yet implemented: re-sync of a `stale` `SplitwiseExpense`/`SplitwiseSettlement`, and
 resolving a `ReconciliationDiscrepancy` — see `docs/roadmap.md` phase 15's implementation note.

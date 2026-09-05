@@ -23,8 +23,11 @@ import type {
   CashFlowCategory,
   CashFlowState,
   ConfidenceLevel,
+  EvidenceMatchStatus,
+  EvidenceMatchStrength,
   EvidenceMediaType,
   EvidenceNoteKind,
+  EvidenceObservationDerivation,
   EvidenceType,
   ExpenseRelationshipType,
   ExpenseState,
@@ -33,6 +36,7 @@ import type {
   PaymentChannel,
   PaymentCounterpartyType,
   PaymentDirection,
+  PaymentReferenceType,
   PaymentState,
   SplitwiseExpenseSyncStatus,
   SplitwiseSettlementSyncStatus,
@@ -47,6 +51,8 @@ import type {
   ExpenseAdjustmentId,
   ExpenseId,
   ExpenseItemId,
+  EvidenceMatchCandidateId,
+  EvidenceObservationId,
   ExternalIntegrationId,
   ImportBatchId,
   GroupId,
@@ -85,6 +91,8 @@ import {
   allocations,
   auditEvents,
   evidence,
+  evidenceMatchCandidates,
+  evidenceObservations,
   expenseAdjustmentItems,
   expenseAdjustments,
   expenseItems,
@@ -2113,12 +2121,24 @@ export async function findEvidenceByStorageRef(
   return rows.map(toEvidenceRow);
 }
 
+/** The evidence types the review queue asks about when they have no home (phase 17). */
+export const UNMATCHED_EVIDENCE_NOTIFICATION_TYPES: readonly EvidenceType[] = [
+  'bank_line',
+  'upi_notification',
+];
+
 /**
- * Stored documents attached to nothing, oldest capture first.
+ * Evidence attached to nothing, oldest capture first.
  *
- * Restricted to evidence with a document. A manual note's links were chosen by the human who
- * typed it, in the same act; a file can arrive from a share sheet with nothing else known
- * about it, and is the case the review queue exists to surface.
+ * Two shapes qualify. A **stored document** can arrive from a share sheet with nothing else
+ * known about it, which is the case phase 10 built this list for. A **bank or UPI
+ * notification** has no file at all and is phase 17's own input: a forwarded SMS is precisely
+ * the record that re-attaches a decayed narration, and leaving it out would hide the evidence
+ * the matcher exists to consume.
+ *
+ * A manual note is still excluded. Its links were chosen by the person who typed it, in the
+ * same act, so a note with none is a note about nothing in particular rather than a document
+ * waiting to be placed.
  */
 export async function listUnmatchedEvidence(
   exec: Executor,
@@ -2129,7 +2149,7 @@ export async function listUnmatchedEvidence(
     .from(evidence)
     .where(
       and(
-        sql`${evidence.storageRef} is not null`,
+        sql`(${evidence.storageRef} is not null or ${inArray(evidence.type, [...UNMATCHED_EVIDENCE_NOTIFICATION_TYPES])})`,
         isNull(evidence.linkedPaymentId),
         isNull(evidence.linkedExpenseId),
       ),
@@ -2174,6 +2194,444 @@ function toEvidenceRow(row: typeof evidence.$inferSelect): EvidenceRow {
     linkedPaymentId: row.linkedPaymentId as PaymentId | null,
     linkedExpenseId: row.linkedExpenseId as ExpenseId | null,
     createdAt: row.createdAt,
+  };
+}
+
+/* =============================================== evidence observations & match candidates */
+
+/** The structured reading of one `Evidence` record. DERIVED, phase 17 (ADR-0044). */
+export interface EvidenceObservationDraft {
+  readonly evidenceId: EvidenceId;
+  readonly observedAmount: Paise | null;
+  readonly observedDirection: PaymentDirection | null;
+  readonly observedReference: string | null;
+  readonly observedReferenceNormalized: string | null;
+  readonly observedReferenceType: PaymentReferenceType | null;
+  readonly observedAccountHint: string | null;
+  readonly observedMerchantText: string | null;
+  readonly observedOccurredAt: Date | null;
+  readonly derivation: EvidenceObservationDerivation;
+  readonly notificationKey: string | null;
+}
+
+export interface EvidenceObservationRow extends EvidenceObservationDraft {
+  readonly id: EvidenceObservationId;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+export async function insertEvidenceObservation(
+  exec: Executor,
+  draft: EvidenceObservationDraft,
+): Promise<EvidenceObservationId> {
+  const [row] = await exec
+    .insert(evidenceObservations)
+    .values({
+      evidenceId: draft.evidenceId,
+      observedAmount: draft.observedAmount,
+      observedDirection: draft.observedDirection,
+      observedReference: draft.observedReference,
+      observedReferenceNormalized: draft.observedReferenceNormalized,
+      observedReferenceType: draft.observedReferenceType,
+      observedAccountHint: draft.observedAccountHint,
+      observedMerchantText: draft.observedMerchantText,
+      observedOccurredAt: draft.observedOccurredAt,
+      derivation: draft.derivation,
+      notificationKey: draft.notificationKey,
+    })
+    .returning({ id: evidenceObservations.id });
+  return requireRow(row, 'evidence_observations').id as EvidenceObservationId;
+}
+
+/**
+ * Replaces the structured reading of one evidence record.
+ *
+ * An observation is DERIVED, so unlike the `evidence` row beneath it a better reading may
+ * replace it — a caller supplying the fields a regex could not read, say. What it never does
+ * is accumulate: one evidence record has one current reading, and a second row would leave the
+ * matcher choosing between them.
+ */
+export async function updateEvidenceObservation(
+  exec: Executor,
+  observationId: EvidenceObservationId,
+  draft: Omit<EvidenceObservationDraft, 'evidenceId'>,
+): Promise<void> {
+  await exec
+    .update(evidenceObservations)
+    .set({
+      observedAmount: draft.observedAmount,
+      observedDirection: draft.observedDirection,
+      observedReference: draft.observedReference,
+      observedReferenceNormalized: draft.observedReferenceNormalized,
+      observedReferenceType: draft.observedReferenceType,
+      observedAccountHint: draft.observedAccountHint,
+      observedMerchantText: draft.observedMerchantText,
+      observedOccurredAt: draft.observedOccurredAt,
+      derivation: draft.derivation,
+      notificationKey: draft.notificationKey,
+      updatedAt: new Date(),
+    })
+    .where(eq(evidenceObservations.id, observationId));
+}
+
+export async function getEvidenceObservationByEvidenceId(
+  exec: Executor,
+  evidenceId: EvidenceId,
+): Promise<EvidenceObservationRow | null> {
+  const [row] = await exec
+    .select()
+    .from(evidenceObservations)
+    .where(eq(evidenceObservations.evidenceId, evidenceId))
+    .limit(1);
+  return row === undefined ? null : toEvidenceObservationRow(row);
+}
+
+/** The idempotency lookup: has this exact notification already been recorded? */
+export async function findEvidenceByNotificationKey(
+  exec: Executor,
+  notificationKey: string,
+): Promise<{ observation: EvidenceObservationRow; evidence: EvidenceRow } | null> {
+  const [row] = await exec
+    .select({ observation: evidenceObservations, evidenceRow: evidence })
+    .from(evidenceObservations)
+    .innerJoin(evidence, eq(evidence.id, evidenceObservations.evidenceId))
+    .where(eq(evidenceObservations.notificationKey, notificationKey))
+    .limit(1);
+  if (row === undefined) return null;
+  return {
+    observation: toEvidenceObservationRow(row.observation),
+    evidence: toEvidenceRow(row.evidenceRow),
+  };
+}
+
+/**
+ * Every evidence record attached to one payment, with whatever structured reading it has.
+ *
+ * The input to `domain.deriveReattachedContext`: several records may enrich one movement, so
+ * this deliberately returns all of them rather than the newest or the most complete.
+ */
+export async function listEvidenceContextSourcesForPayment(
+  exec: Executor,
+  paymentId: PaymentId,
+): Promise<
+  readonly { readonly evidence: EvidenceRow; readonly observation: EvidenceObservationRow | null }[]
+> {
+  const rows = await exec
+    .select({ evidenceRow: evidence, observation: evidenceObservations })
+    .from(evidence)
+    .leftJoin(evidenceObservations, eq(evidenceObservations.evidenceId, evidence.id))
+    .where(eq(evidence.linkedPaymentId, paymentId))
+    .orderBy(asc(evidence.capturedAt), asc(evidence.id));
+  return rows.map((row) => ({
+    evidence: toEvidenceRow(row.evidenceRow),
+    observation: row.observation === null ? null : toEvidenceObservationRow(row.observation),
+  }));
+}
+
+function toEvidenceObservationRow(
+  row: typeof evidenceObservations.$inferSelect,
+): EvidenceObservationRow {
+  return {
+    id: row.id as EvidenceObservationId,
+    evidenceId: row.evidenceId as EvidenceId,
+    observedAmount: row.observedAmount as Paise | null,
+    observedDirection: row.observedDirection as PaymentDirection | null,
+    observedReference: row.observedReference,
+    observedReferenceNormalized: row.observedReferenceNormalized,
+    observedReferenceType: row.observedReferenceType as PaymentReferenceType | null,
+    observedAccountHint: row.observedAccountHint,
+    observedMerchantText: row.observedMerchantText,
+    observedOccurredAt: row.observedOccurredAt,
+    derivation: row.derivation as EvidenceObservationDerivation,
+    notificationKey: row.notificationKey,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/* ------------------------------------------------------------------ matchable payments */
+
+/**
+ * A payment as the matcher needs to see it: its own facts, plus the account and merchant
+ * context the signals compare against.
+ */
+export interface MatchablePaymentRow {
+  readonly id: PaymentId;
+  readonly amount: Paise;
+  readonly direction: PaymentDirection;
+  readonly occurredAt: Date;
+  readonly rawDescription: string;
+  readonly externalReference: string | null;
+  readonly state: PaymentState;
+  readonly accountId: AccountId;
+  readonly accountLast4: string | null;
+  readonly accountOwnerUserId: UserId;
+  readonly merchantName: string | null;
+}
+
+/** Live payments only: an `ignored` row is a discarded duplicate or an out-of-scope movement. */
+const MATCHABLE_PAYMENT_STATES: readonly PaymentState[] = ['imported', 'normalized', 'linked'];
+
+function matchablePaymentSelection() {
+  return {
+    id: payments.id,
+    amount: payments.amount,
+    direction: payments.direction,
+    occurredAt: payments.occurredAt,
+    rawDescription: payments.rawDescription,
+    externalReference: payments.externalReference,
+    state: payments.state,
+    accountId: payments.accountId,
+    accountLast4: accounts.last4,
+    accountOwnerUserId: accounts.ownerUserId,
+    merchantName: merchants.canonicalName,
+  };
+}
+
+function toMatchablePaymentRow(row: {
+  id: string;
+  amount: bigint | null;
+  direction: string;
+  occurredAt: Date;
+  rawDescription: string;
+  externalReference: string | null;
+  state: string;
+  accountId: string;
+  accountLast4: string | null;
+  accountOwnerUserId: string;
+  merchantName: string | null;
+}): MatchablePaymentRow {
+  return {
+    id: row.id as PaymentId,
+    amount: row.amount as Paise,
+    direction: row.direction as PaymentDirection,
+    occurredAt: row.occurredAt,
+    rawDescription: row.rawDescription,
+    externalReference: row.externalReference,
+    state: row.state as PaymentState,
+    accountId: row.accountId as AccountId,
+    accountLast4: row.accountLast4,
+    accountOwnerUserId: row.accountOwnerUserId as UserId,
+    merchantName: row.merchantName,
+  };
+}
+
+/**
+ * Live payments whose instant falls inside a window.
+ *
+ * A **pre-filter, not the rule** — the same pattern `listUnlinkedDebitPaymentsNear` and
+ * `listPaymentsAwaitingClassification` already establish. `domain.matchEvidenceToPayments`
+ * re-checks every window precisely; this query's job is only to avoid handing the matcher
+ * every payment ever imported.
+ */
+export async function listMatchablePaymentsNear(
+  exec: Executor,
+  input: { readonly from: Date; readonly to: Date },
+): Promise<MatchablePaymentRow[]> {
+  const rows = await exec
+    .select(matchablePaymentSelection())
+    .from(payments)
+    .innerJoin(accounts, eq(accounts.id, payments.accountId))
+    .leftJoin(
+      merchants,
+      and(eq(payments.counterpartyType, 'merchant'), eq(merchants.id, payments.counterpartyId)),
+    )
+    .where(
+      and(
+        inArray(payments.state, [...MATCHABLE_PAYMENT_STATES]),
+        sql`${payments.occurredAt} >= ${input.from}`,
+        sql`${payments.occurredAt} <= ${input.to}`,
+      ),
+    )
+    .orderBy(asc(payments.occurredAt), asc(payments.id));
+  return rows.map(toMatchablePaymentRow);
+}
+
+/**
+ * Live payments whose reference identifier overlaps a normalized one.
+ *
+ * Containment in both directions, because a statement's `UPI/2607011234/BLINKIT` and an SMS's
+ * `2607011234` are one UTR wearing different amounts of the bank's packaging — the SQL half of
+ * `domain.referencesMatch`, deliberately looser than it so the domain can be the one that
+ * decides. Outside the date window on purpose: a UTR identifies a transaction regardless of
+ * when the evidence for it was captured, and a notification forwarded weeks later still
+ * belongs to the payment it names.
+ */
+export async function listMatchablePaymentsByReference(
+  exec: Executor,
+  normalizedReference: string,
+): Promise<MatchablePaymentRow[]> {
+  const normalizedColumn = sql`regexp_replace(upper(${payments.externalReference}), '[^A-Z0-9]', '', 'g')`;
+  const rows = await exec
+    .select(matchablePaymentSelection())
+    .from(payments)
+    .innerJoin(accounts, eq(accounts.id, payments.accountId))
+    .leftJoin(
+      merchants,
+      and(eq(payments.counterpartyType, 'merchant'), eq(merchants.id, payments.counterpartyId)),
+    )
+    .where(
+      and(
+        inArray(payments.state, [...MATCHABLE_PAYMENT_STATES]),
+        sql`${payments.externalReference} is not null`,
+        sql`(${normalizedColumn} like ${'%' + normalizedReference + '%'}
+             or ${normalizedReference} like '%' || ${normalizedColumn} || '%')`,
+      ),
+    )
+    .orderBy(asc(payments.occurredAt), asc(payments.id));
+  return rows.map(toMatchablePaymentRow);
+}
+
+/* -------------------------------------------------------------------- match candidates */
+
+export interface EvidenceMatchCandidateDraft {
+  readonly evidenceId: EvidenceId;
+  readonly paymentId: PaymentId;
+  readonly strength: EvidenceMatchStrength;
+  readonly confidence: ConfidenceLevel;
+  readonly matchedSignals: readonly string[];
+  readonly conflictingSignals: readonly string[];
+  readonly signals: unknown;
+  readonly reviewReasons: readonly string[];
+  readonly matcherVersion: string;
+}
+
+export interface EvidenceMatchCandidateRow extends EvidenceMatchCandidateDraft {
+  readonly id: EvidenceMatchCandidateId;
+  readonly status: EvidenceMatchStatus;
+  readonly decidedAt: Date | null;
+  readonly decidedBy: string | null;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+export async function insertEvidenceMatchCandidate(
+  exec: Executor,
+  draft: EvidenceMatchCandidateDraft,
+): Promise<EvidenceMatchCandidateId> {
+  const [row] = await exec
+    .insert(evidenceMatchCandidates)
+    .values({
+      evidenceId: draft.evidenceId,
+      paymentId: draft.paymentId,
+      strength: draft.strength,
+      confidence: draft.confidence,
+      matchedSignals: [...draft.matchedSignals],
+      conflictingSignals: [...draft.conflictingSignals],
+      signals: draft.signals,
+      reviewReasons: [...draft.reviewReasons],
+      matcherVersion: draft.matcherVersion,
+    })
+    .returning({ id: evidenceMatchCandidates.id });
+  return requireRow(row, 'evidence_match_candidates').id as EvidenceMatchCandidateId;
+}
+
+/** Re-states what the matcher now sees, leaving the row's identity and decision alone. */
+export async function updateEvidenceMatchCandidateAssessment(
+  exec: Executor,
+  candidateId: EvidenceMatchCandidateId,
+  draft: Omit<EvidenceMatchCandidateDraft, 'evidenceId' | 'paymentId'>,
+): Promise<void> {
+  await exec
+    .update(evidenceMatchCandidates)
+    .set({
+      strength: draft.strength,
+      confidence: draft.confidence,
+      matchedSignals: [...draft.matchedSignals],
+      conflictingSignals: [...draft.conflictingSignals],
+      signals: draft.signals,
+      reviewReasons: [...draft.reviewReasons],
+      matcherVersion: draft.matcherVersion,
+      status: 'proposed',
+      decidedAt: null,
+      decidedBy: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(evidenceMatchCandidates.id, candidateId));
+}
+
+/**
+ * Moves one candidate to a decided or superseded status.
+ *
+ * `decidedBy`/`decidedAt` are set together with the status, because the database refuses the
+ * combination that would separate them: a candidate is `accepted`/`dismissed` **only** with a
+ * recorded actor (`evidence_match_candidates_decision_check`).
+ */
+export async function updateEvidenceMatchCandidateStatus(
+  exec: Executor,
+  candidateId: EvidenceMatchCandidateId,
+  status: EvidenceMatchStatus,
+  decision: { readonly decidedAt: Date; readonly decidedBy: string } | null,
+): Promise<void> {
+  await exec
+    .update(evidenceMatchCandidates)
+    .set({
+      status,
+      decidedAt: decision?.decidedAt ?? null,
+      decidedBy: decision?.decidedBy ?? null,
+      updatedAt: new Date(),
+    })
+    .where(eq(evidenceMatchCandidates.id, candidateId));
+}
+
+export async function getEvidenceMatchCandidateById(
+  exec: Executor,
+  candidateId: EvidenceMatchCandidateId,
+): Promise<EvidenceMatchCandidateRow | null> {
+  const [row] = await exec
+    .select()
+    .from(evidenceMatchCandidates)
+    .where(eq(evidenceMatchCandidates.id, candidateId))
+    .limit(1);
+  return row === undefined ? null : toEvidenceMatchCandidateRow(row);
+}
+
+/** Every candidate recorded for one evidence record, strongest-first order applied by callers. */
+export async function listEvidenceMatchCandidatesByEvidence(
+  exec: Executor,
+  evidenceId: EvidenceId,
+): Promise<EvidenceMatchCandidateRow[]> {
+  const rows = await exec
+    .select()
+    .from(evidenceMatchCandidates)
+    .where(eq(evidenceMatchCandidates.evidenceId, evidenceId))
+    .orderBy(asc(evidenceMatchCandidates.createdAt), asc(evidenceMatchCandidates.id));
+  return rows.map(toEvidenceMatchCandidateRow);
+}
+
+/** Candidates for many evidence records at once — the review queue's read. */
+export async function listEvidenceMatchCandidatesForEvidenceIds(
+  exec: Executor,
+  evidenceIds: readonly EvidenceId[],
+): Promise<EvidenceMatchCandidateRow[]> {
+  if (evidenceIds.length === 0) return [];
+  const rows = await exec
+    .select()
+    .from(evidenceMatchCandidates)
+    .where(inArray(evidenceMatchCandidates.evidenceId, [...evidenceIds]))
+    .orderBy(asc(evidenceMatchCandidates.createdAt), asc(evidenceMatchCandidates.id));
+  return rows.map(toEvidenceMatchCandidateRow);
+}
+
+function toEvidenceMatchCandidateRow(
+  row: typeof evidenceMatchCandidates.$inferSelect,
+): EvidenceMatchCandidateRow {
+  return {
+    id: row.id as EvidenceMatchCandidateId,
+    evidenceId: row.evidenceId as EvidenceId,
+    paymentId: row.paymentId as PaymentId,
+    strength: row.strength as EvidenceMatchStrength,
+    confidence: row.confidence as ConfidenceLevel,
+    matchedSignals: row.matchedSignals as readonly string[],
+    conflictingSignals: row.conflictingSignals as readonly string[],
+    signals: row.signals,
+    reviewReasons: row.reviewReasons as readonly string[],
+    matcherVersion: row.matcherVersion,
+    status: row.status as EvidenceMatchStatus,
+    decidedAt: row.decidedAt,
+    decidedBy: row.decidedBy,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
