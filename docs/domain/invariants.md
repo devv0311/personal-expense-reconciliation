@@ -1,5 +1,11 @@
 # Invariants
 
+> **Current extensions (2026-09-05).** Read the additional cash-balance invariants 17.1–17.7
+> and item-refund invariants 19.1–19.6 at the end of this document. These are ADR-scoped
+> identifiers, not replacements for existing integer-numbered invariants #17 or #19.
+> New item refunds use net item costs before allocation; legacy whole-expense adjustment
+> distribution and ADR-0016's outflow identity remain supported.
+
 These are the rules the system must never violate. Each is stated, justified, and — where it
 constrains implementation — pointed at the entity/service responsible for enforcing it. This
 list is the primary input to `docs/testing/testing-strategy.md`'s required test coverage.
@@ -237,17 +243,17 @@ domain.netAmount(Expense)` (**revised per ADR-0008** — was `Expense.amount`; s
       later).
     - `AllocationLineGroupExpansion` rows (`w_i = 1` per resolved member, or the user's override
       shares).
-    - `ExpenseAdjustment` distribution — the adjustment amount is the `A` being divided across
+    - Legacy whole-expense `ExpenseAdjustment` distribution — the adjustment amount is the `A` being divided across
       the _current_ `Allocation`'s lines; the default weight set is each line's own pre-
       adjustment `amount` (proportional-to-existing-share); a user may instead choose an
       explicit, non-proportional weight set (e.g. "this refund benefits only Dev" —
       `scenario-analysis.md` §12), subject to invariant #12a below.
 
-    **Where it explicitly does not apply:** item/quantity-based `AllocationLine`s. Their
-    `amount` is copied directly from the referenced `ExpenseItem.amount`, which is already an
-    exact stored integer — there is no total being divided, so the algorithm has nothing to do
-    there. Do not run it on item-based lines "for consistency"; that would silently overwrite an
-    already-exact, user/receipt-sourced figure.
+    **Item refunds (ADR-0018, item refunds).** Compute the item's net cost by subtracting
+    item attribution before deriving allocation. Do not apportion its refund across unrelated
+    items' beneficiaries. An individually owned item supplies an exact net amount without
+    division; a genuinely shared item uses this same Largest Remainder Method with its approved
+    shares. Preserve the original gross `ExpenseItem.amount` and the exact net total.
 
     **Currency scope for V1 (also see `roadmap.md`):** the algorithm and every `domain` function
     built on it assume a single fixed minor-unit exponent (2 decimal places — 100 minor units
@@ -306,9 +312,11 @@ from a percentage and a possibly-stale total.
 
 14. **Item/quantity-based allocation sums must reconcile at both the whole-expense and per-item
     level.** Sum of `ExpenseItem.amount` equals `Expense.amount` (gross). Sum of
-    `AllocationLine.amount` for item-based lines equals the sum of the `ExpenseItem`s they
-    reference **in aggregate, and — revised, tightened — the sum of `AllocationLine.amount`s
-    referencing any single `ExpenseItem` must equal that specific item's `amount`.** _Why
+    `AllocationLine.amount` for item-based lines equals their items' derived net costs
+    **in aggregate and per item**: the sum referencing any single item equals its gross amount
+    less cumulative item refunds (ADR-0018, item refunds). With no adjustments this is the
+    original `ExpenseItem.amount`. Separately recorded legacy whole-expense reductions require
+    their explicit approved distribution and must not be silently omitted or counted twice. _Why
     tightened:_ the aggregate-only version of this invariant would pass even if allocation lines
     were attached to the wrong item (e.g. all lines pointing at a ₹1,160 item while an ₹80 item
     has none, yet the grand total still matches) — a real misallocation the aggregate check
@@ -359,9 +367,9 @@ ledger_investments_total − ledger_settlements_total − ledger_explained_total
     inflated `ledger_unexplained_total` by mistake), where `ledger_explained_total` sums
     `domain.netAmount(expense)` per `APPROVED`+ expense, not gross `Expense.amount` (ADR-0008).
     Computed by deterministic application code on every `ReconciliationRun`, and surfaced even
-    when non-zero (especially when non-zero). This formula is scoped to outflow; a symmetric
-    inflow-side "was every credit explained" reconciliation is not yet modeled — see
-    `domain-model.md`'s `ReconciliationRun` section.
+    when non-zero (especially when non-zero). This formula is scoped to outflow; an independent
+    cash-balance identity and explanation coverage are now specified separately by
+    [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md).
 
     **What "scoped to outflow" means for each term (made explicit per ADR-0016 — this was
     previously stated once, in prose, and then not restated in the term definitions, which
@@ -385,7 +393,7 @@ ledger_investments_total − ledger_settlements_total − ledger_explained_total
       `ledger_total_outflow`, and so is not subtracted from it. Both directions are equally
       "not new spend" (invariant #9) — the direction decides only which one participates in
       _this_ subtraction. A period total of received settlements is an inflow-side figure and
-      is out of scope for V1 (ADR-0015).
+      belongs to ADR-0017 (cash balance)'s new credit totals, not this legacy subtraction.
 
     `ledger_unexplained_total` is stored **whatever it comes to, including negative**. A
     negative figure means the ledger has over-explained its own outflow — a double-linked
@@ -404,3 +412,34 @@ ledger_investments_total − ledger_settlements_total − ledger_explained_total
 22. **`AuditEvent` records are append-only.** Never edited, never deleted, including for data
     the user later decides to correct — the correction is a new event, not a rewrite of
     history.
+
+## Cash-balance reconciliation — ADR-0017 (cash balance), 17.1–17.7
+
+These requirements extend, rather than replace, existing invariants. Full field definitions,
+direction matrix and verification semantics are in
+[ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md).
+
+| ID   | Permanent requirement                                                                                                                                                                                                                                                                               |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 17.1 | Cash-flow role is orthogonal to counterparty identity. Each attributed paise is explained once, with actual expense/settlement/adjustment links and existing ceilings.                                                                                                                              |
+| 17.2 | Refunds and external inflows require credits; settlements allow either direction with person/obligation evidence; transfers require owned-account evidence. Unknown credits remain unexplained until valid approval.                                                                                |
+| 17.3 | Both real internal-transfer legs affect their own accounts once. Matched legs within the same scope are cash-neutral across accounts and never create spend/income/peer debt. Missing/cross-period legs remain visible discrepancies.                                                               |
+| 17.4 | Preserve ADR-0016. Independently compute expected ending cash = opening + credits − debits, and signed cash delta = actual − expected. No net-expense substitution, double-counted refunds, clamping or tolerance.                                                                                  |
+| 17.5 | Opening/closing balances cite immutable statement evidence for the same account, currency and period. Missing evidence is unknown; do not derive actual closing cash from the movements being checked.                                                                                              |
+| 17.6 | Every distinct actual statement movement participates even if excluded from spend. Verification requires complete evidence, zero delta and zero unexplained debits/credits for every account, with no unresolved coverage/transfer discrepancies. Aggregate cancellation cannot prove verification. |
+| 17.7 | Deterministic bigint arithmetic, audited classification decisions and immutable account snapshots preserve payment/input provenance. Enforce identities at persistence and cross-record integrity in transactional services; corrections create new runs.                                           |
+
+## Item-level refund attribution — ADR-0018 (item refunds), 19.1–19.6
+
+The pipeline is **financial event → adjustment → net expense → allocation → obligation**.
+See [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md) for complete
+lifecycle, taxes/discounts, legacy compatibility and scenario requirements.
+
+| ID   | Permanent requirement                                                                                                                                                                                                                                                         |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 19.1 | An attribution's ExpenseItem belongs to its parent adjustment's original expense.                                                                                                                                                                                             |
+| 19.2 | Item attributions sum exactly to the adjustment amount before approval; partial proposals remain pending. Legacy whole-expense adjustments have no item rows and an explicit separate distribution path.                                                                      |
+| 19.3 | Cumulative attributed refunds/reimbursements never exceed original gross item cost; the expense-wide cumulative ceiling also holds. Enforce across concurrent and duplicate requests; no negative net items or allocation lines.                                              |
+| 19.4 | Attribution and adjustment amounts are strictly positive integer paise; no zero, negative or floating-point amounts.                                                                                                                                                          |
+| 19.5 | Original approved ExpenseItem amounts/composition and gross Expense amount never change on refund. Derive net costs and supersede allocations; full refunds keep original beneficiaries at zero.                                                                              |
+| 19.6 | Original and refund Payments are immutable. Observed credit is separate from purchase debit; no fabricated Payment for evidence-first events. Total adjustment portions cannot exceed the refund Payment, and the remainder stays unexplained. Audit the item-first pipeline. |

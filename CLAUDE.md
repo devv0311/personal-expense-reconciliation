@@ -1,5 +1,17 @@
 # CLAUDE.md — Engineering Context for This Repository
 
+> **Current decisions (2026-09-05).** Phase 15 is complete. Next is Phase 16, schema and
+> domain extensions for [ADR-0017 (cash balance)](docs/decisions/0017-pragmatic-cash-balance-reconciliation.md)
+> and [ADR-0018 (item refunds)](docs/decisions/0018-item-level-refund-attribution.md).
+> These accepted designs are not implemented by this documentation update. They supersede
+> older outflow-only scope restrictions and refine whole-expense refund distribution for
+> item-attributed refunds. Preserve the existing engine while adding the new capabilities.
+> Read these two ADRs and the current roadmap before historical implementation notes.
+>
+> **ADR numbering:** older ADR-0017 (integration tests) and ADR-0018 (manual-note semantics)
+> remain in place. Always qualify the new decisions by title/full filename. Historical bare
+> references to 0017/0018 in code and older docs refer to those older decisions; see the ADR index.
+
 This file is persistent context for any Claude Code / Claude session working in this
 repository. Read it before making changes. It summarizes and points to the fuller docs in
 `docs/`; when this file and a doc in `docs/` disagree, the doc is more likely to be current —
@@ -30,13 +42,64 @@ The conceptual pipeline, always in this order and never collapsed:
 PAYMENT → PURPOSE → EVIDENCE → EXPENSE → BENEFICIARIES → ALLOCATION → SETTLEMENT → RECONCILIATION
 ```
 
-Two categories of financial event exist and must never be conflated: a **spend event**
+Two expense-related event categories must never be conflated: a **spend event**
 (`Expense` — requires an `Allocation`, has beneficiaries) and an **adjustment/discharge event**
 (`Settlement`, `ExpenseAdjustment` — references an existing spend event or obligation, never has
 its own `Allocation`). Settlement and reimbursement are _not_ expense purposes; see
-`docs/domain/domain-model.md`'s "two categories" table.
+`docs/domain/domain-model.md`'s event table. Cash-only transfers, investments and ordinary
+external inflows are Payment classifications, with no fabricated Expense or Allocation.
 
 Full entity definitions: `docs/domain/domain-model.md`. Glossary: `docs/domain/terminology.md`.
+
+## The Design Standard — Tier-1 UI/UX
+
+The quality bar is **Linear / Mercury / Ramp / Raycast-level craft**. This is a mandatory
+product standard, not optional decoration. Build high-density information architecture with
+clear hierarchy, exact amounts, aligned numeric columns, accessible contrast and progressive
+disclosure. Preserve room to think without hiding financially important information.
+
+`web/` must support keyboard-first navigation: `Cmd+K` (and `Ctrl+K`) command search,
+discoverable triage shortcuts, predictable focus, selection and escape behavior. Consequential
+approval remains explicit; a shortcut must not silently approve an ambiguous decision. Use
+visual reconciliation waterfalls from evidenced opening cash through credits/debits to actual
+closing cash and the signed delta, with drill-through to contributing records. Show account
+completeness and unexplained amounts alongside the number. Use zero-clutter inspectors for
+source evidence, interpretation, decision and audit history, plus refined micro-interactions
+that communicate selection, progress and completion. Honor reduced motion, loading/error/empty
+states, responsive layouts and keyboard accessibility. Test rendered flows with synthetic data.
+
+The existing frontend and ADRs 0042/0043 are the starting point. Phase 21 carries the complete
+UI overhaul after the domain phases; a prior design pass is not evidence that all six pillars
+or their interactions have shipped.
+
+## The 6 Core Pillars
+
+1. **Context Re-attachment.** Resolve UPI narration decay by matching bank statements to
+   SMS, push notifications and receipts using amount, direction, time, reference and merchant
+   evidence. Keep original narration immutable. Surface match provenance, ambiguity and
+   confidence; multiple evidence sources enrich one Payment, not several cash movements.
+2. **Item-Level Partial Refund Attribution.** Record the actual refund against the purchased
+   items, then derive net expense, new allocation and obligations. Preserve purchase history,
+   tax/discount evidence, cumulative ceilings and prior settlements. See ADR-0018 (item refunds).
+3. **Visual Reconciliation Waterfall.** Reconcile every in-scope account from bank opening
+   balance through all credits/debits to evidenced closing balance. A verified **₹0 Unaccounted
+   Delta** requires complete evidence, zero cash delta and zero unexplained credits/debits;
+   arithmetic closure alone is insufficient. Retain ADR-0016's independent outflow identity.
+4. **Splitwise Drift & Ghost-Debt Auditing.** Compare the canonical local ledger and its
+   item/refund/settlement evidence to Splitwise. Expose stale refund shares, missing or duplicate
+   records and debt unsupported by the current ledger as auditable discrepancies. A pair-level
+   mismatch is a signal, not proof that one particular expense is wrong. Never silently trust
+   an external balance or fabricate a local settlement to clear it.
+5. **One-Click WhatsApp Proof Packs.** Derive concise, recipient-specific summaries of original
+   spend, item refunds, net shares, settlements and remaining balances, with supporting evidence
+   references. Preview/redact before copying or sharing. Packs are derived artifacts, never
+   ledger authority; generation does not authorize sending or change a debt.
+6. **Local PII Sanitization Boundary.** Raw statements, SMS/push content, receipts, account/card
+   numbers, UPI IDs, contact details and identifiers stay behind the local boundary. Sanitize
+   and pseudonymize before any external AI call; keep reversible mappings local, block unsafe
+   payloads, and exclude raw PII from logs, fixtures and Git. Send only minimal task-relevant
+   sanitized context. Proof packs use a separate explicit recipient preview/redaction step;
+   preserving local evidence is not permission to export it.
 
 ## Non-negotiable domain principles
 
@@ -79,6 +142,30 @@ Full entity definitions: `docs/domain/domain-model.md`. Glossary: `docs/domain/t
 (net of adjustments) = unexplained`, and surface that number rather than making it disappear
     through silent assumptions.
 
+11. **Classify cash independently of counterparties.** `Payment.cash_flow_category` has
+    `PEER_SETTLEMENT`, `REFUND`, `INTERNAL_TRANSFER`, `EXTERNAL_INFLOW`; validate directions
+    and evidence per ADR-0017 (cash balance), 17.1–17.2. Ordinary purchase/investment debits
+    retain their existing meaning. Unknown credits remain unexplained, not automatic income.
+12. **Cash reconciliation is evidence-backed and dual.** Preserve ADR-0016 and add
+    `expected_ending_balance = opening_balance + credits - debits` and
+    `cash_balance_delta = actual_ending_balance - expected_ending_balance`. Count gross cash
+    movements once, including refund credits. Missing statement balances are unknown, not zero.
+    Immutable `ReconciliationAccountSnapshot`s preserve inputs, totals and signed residuals;
+    verify each account independently (ADR-0017, 17.4–17.7).
+13. **Internal transfers are cash-neutral across matched owned accounts.** Each real leg
+    affects its own account; paired legs in the same scope cancel on consolidation. Missing or
+    cross-period legs remain visible. Transfers create no expense, income or peer debt, and
+    cannot be ignored merely to make cash close (ADR-0017, 17.3).
+14. **Refund the item before allocating its net cost.** `ExpenseAdjustmentItem` must reference
+    the same expense as its parent adjustment; attribution sums equal the adjustment amount,
+    amounts are positive paise, and cumulative refunds cannot exceed gross item or expense
+    cost. Never mutate original `ExpenseItem.amount` or Payment facts. Create a new allocation
+    only after net costs are known; then derive obligations (ADR-0018, 19.1–19.6).
+15. **Refund history and evidence survive.** Full refunds preserve zero-valued beneficiary
+    lines. Taxes/discounts retain their evidenced purchase basis. Already-paid settlements stay
+    recorded even when a later refund creates a reverse balance. Pending attribution or
+    distribution is visible and blocks claims of current, verified obligations.
+
 Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
 
 ## AI boundary — read this before touching anything AI-related
@@ -113,7 +200,8 @@ Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
   (equal, percentage, group expansion, adjustment distribution) uses the **Largest Remainder
   Method**, one algorithm, finalized and specified in full in `docs/domain/invariants.md` #12 —
   not "to be decided at implementation." Item/quantity-based lines are the one exception: their
-  amount comes directly from an already-exact `ExpenseItem.amount`, no division involved.
+  amount comes from the already-exact derived net item cost after item attribution, no
+  division unless that item is itself shared. Gross `ExpenseItem.amount` remains immutable.
   `AllocationLine.amount` may be zero (never negative) — a fully refunded/reimbursed expense's
   current allocation keeps one zero-amount line per original beneficiary, never an empty line
   set (invariants.md #12a).
@@ -173,15 +261,18 @@ Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
   phase order (repository foundation → domain model → architecture → database model →
   fixtures → import → normalization → classification → human review → receipt ingestion →
   item extraction → beneficiary allocation → expense ledger → Splitwise integration →
-  reconciliation → rules/learning → analytics → natural-language interface).
+  reconciliation → schema/domain extensions → context re-attachment → item refund allocation
+  → Splitwise auditing → proof packs → UI overhaul). Rules/learning, analytics and the
+  natural-language interface remain unnumbered later work after Phase 21.
 - **Do not jump ahead of the current phase.** Building later-phase features before earlier
   ones are solid re-creates the exact "messy, unreconciled" problem this system exists to
   solve, just in code form.
 - Do not connect real bank accounts, real Splitwise accounts, or use real financial
   credentials during development. Build adapters/interfaces now; wire real connections later,
   deliberately, per `docs/security/security-model.md`.
-- Do not invest in UI polish until the domain and financial engine are solid. A placeholder UI
-  is fine when a framework requires one.
+- Deliver Phase 16–20 domain capabilities before the Phase 21 UI overhaul. Apply the Tier-1
+  design standard to every shipped UI change; the existing `web/` application is a real
+  product surface, not a placeholder.
 
 ## Where things live
 

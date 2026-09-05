@@ -1,5 +1,14 @@
 # Security Model
 
+> **Local PII boundary (2026-09-05 product requirement).** Raw statements, SMS/push messages,
+> receipts, account/card numbers, UPI IDs, contact details and re-identification mappings remain
+> local. Before any external AI transport, deterministically sanitize/pseudonymize and minimize
+> the payload; fail closed if sensitive content remains. Do not leak raw evidence into logs,
+> fixtures, Git or model prompts. Keep immutable local evidence for verification. Derived
+> WhatsApp proof packs require a recipient-specific preview and redaction step; generation
+> does not authorize sending. Phase 17 extends the existing AI redaction boundary, and Phase
+> 20 tests export privacy. See `CLAUDE.md` and the current roadmap.
+
 This system processes sensitive personal financial information. This document defines the
 rules for handling it, per `CLAUDE.md`'s security section.
 

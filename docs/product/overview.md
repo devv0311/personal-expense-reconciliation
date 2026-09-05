@@ -137,9 +137,13 @@ investments (not spending), how much is settlement of existing debts (also not n
 how much is explained expense, and how much remains unexplained. It should also be able to
 state whether its own ledger and Splitwise agree, and where they don't. "Unexplained money" is
 a first-class, visible concept — not something the system hides by making optimistic
-assumptions. This reconciliation is deliberately scoped to outflow for V1 — a symmetric
-inflow-side check (general income accounting) is out of scope by design, not an unmodeled gap,
-and the schema doesn't block adding it later — see `docs/roadmap.md`.
+assumptions. [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md)
+now extends the original outflow-only release with full statement cash reconciliation:
+opening balance + all credits − all debits must equal evidenced closing balance per account.
+A verified **₹0 Unaccounted Delta** also requires zero unexplained movements and complete
+statement evidence, not merely a balanced equation. Preserve the existing outflow identity;
+general budgeting/tax logic remains outside the core. See `docs/roadmap.md` for Phases 16–21
+and `CLAUDE.md` for the six pillars and mandatory Tier-1 UI/UX standard.
 
 ## Future: analytics and natural-language interface
 

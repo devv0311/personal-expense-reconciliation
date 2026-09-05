@@ -1,5 +1,10 @@
 # 0016. `ledger_explained_total` and `ledger_settlements_total` are scoped to observed outflow
 
+> **Extension (2026-09-05).** [ADR-0017 (cash balance)](0017-pragmatic-cash-balance-reconciliation.md)
+> adds an independent bank-balance identity. This ADR's outflow formula, field meanings and
+> historical snapshots remain intact. References below to inflows being future/out of scope
+> describe the original release; the new cash path is now accepted for Phase 16.
+
 **Status:** Accepted (2026-08-15). Raised by the Phase 1 implementation and confirmed against
 `invariants.md` #20, `domain-model.md`'s `ReconciliationRun`, and `scenario-analysis.md` §26,
 §29 and the stress-test coverage matrix before acceptance.

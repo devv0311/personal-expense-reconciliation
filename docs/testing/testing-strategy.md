@@ -1,5 +1,15 @@
 # Testing Strategy
 
+> **Accepted extension coverage (2026-09-05).** Phase 16 must test all cash-balance
+> invariants 17.1–17.7 and item-refund structural invariants 19.1–19.6, including database
+> enforcement and concurrent aggregate ceilings. Phase 18 must implement the full item-refund
+> scenario matrix in [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md).
+> Cash boundary/transfer/completeness cases are specified in
+> [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md).
+> Preserve all existing regression cases; whole-expense proportional distribution below
+> remains legacy coverage, while item-attributed refunds require the item-first pipeline.
+> Acceptance of these requirements does not claim the new tests already exist.
+
 Financial calculations require deterministic automated tests — this is not optional polish,
 per `CLAUDE.md`. This document defines what must be tested, at what layer, and with what data,
 before any financial arithmetic ships.

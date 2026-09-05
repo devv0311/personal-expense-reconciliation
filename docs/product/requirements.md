@@ -1,5 +1,13 @@
 # Requirements
 
+> **Current product direction (2026-09-05).** `CLAUDE.md`'s six pillars and Tier-1 UI/UX
+> standard are mandatory requirements. [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md)
+> extends the original release to evidence-backed statement cash reconciliation, including
+> ordinary credits. [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md)
+> adds item-first refund attribution. The current roadmap assigns implementation to Phases
+> 16–21; references below to the foundation phase describe historical scope, not current bans
+> on the UI, migrations or these accepted capabilities. Budgeting/tax logic remains excluded.
+
 Scope: this document lists functional and non-functional requirements at the level needed to
 drive the domain model and architecture. It intentionally does not specify UI layouts or
 implementation details. Requirements are tagged `MUST` (foundation-critical, informs the
@@ -126,11 +134,12 @@ domain model now) or `LATER` (real requirement, but implemented in a later roadm
   distinguish "Splitwise's side changed" (`drifted`) from "our own side changed since the last
   sync" (`stale`) (**added, ADR-0008**).
 - LATER: reconciliation against live bank/card account balances.
-- OUT OF SCOPE FOR V1, explicit boundary (not an open question — **resolved this revision**):
-  symmetric inflow-side reconciliation — was every credit explained (refund, reimbursement,
-  settlement received, or genuinely unexplained income)? The current formula is deliberately
-  outflow-scoped only; nothing in the schema blocks adding this later
-  (`docs/domain/domain-model.md`'s `ReconciliationRun` "V1 scope, explicit", `docs/roadmap.md`).
+- MUST (accepted extension, Phase 16): preserve the legacy outflow formula and add per-account
+  cash snapshots with evidenced opening/closing balances, gross credits/debits, internal
+  transfers and explained/unexplained amounts. Validate every cash category and never label
+  zero arithmetic delta as verified while evidence or movement explanations are incomplete.
+  Ordinary external credits are included without adding budgeting/tax logic; see
+  [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md).
 
 ### Auditability
 
@@ -174,5 +183,5 @@ domain model now) or `LATER` (real requirement, but implemented in a later roadm
   observability boundary, not a modeling gap (`invariants.md` #9b): structurally unobservable by
   this system's own `Payment` data, with `domain.obligationEvidenceStatus` (added this revision)
   as the documented, read-only mitigation; see `docs/domain/scenario-analysis.md` §34.
-- A general income/inflow accounting system (classifying and reconciling ordinary, untracked
-  credits) — see the Reconciliation section above.
+- General budgeting/tax and income-accounting analytics. Ordinary credits themselves now
+  participate in pragmatic cash reconciliation under ADR-0017 (cash balance).

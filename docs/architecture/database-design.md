@@ -1,5 +1,15 @@
 # Database Design
 
+> **Accepted schema extension (2026-09-05; Phase 16 pending).** Add `Payment.cash_flow_category`
+> and explicit cash classification state alongside existing `Payment.state`,
+> `ReconciliationAccountSnapshot`, and `ExpenseAdjustmentItem`. The complete fields, enum,
+> relationships, arithmetic and cross-record validation contracts are in
+> [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md),
+> [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md), and the current
+> domain model. This document's existing tables describe the foundation schema; they are not
+> evidence that these migrations have shipped. Preserve all existing monetary/source data and
+> legacy reconciliation constraints; backfill unknown classifications/attributions as unknown.
+
 Translates `docs/domain/domain-model.md` into a relational schema. **This is a design
 document, not migrations** — per `docs/roadmap.md`, migrations are written only after this is
 reviewed. All tables use PostgreSQL; all monetary `amount` columns are `bigint` minor units
@@ -407,13 +417,9 @@ ledger_explained_total`.
 - Partitioning/archival strategy for `audit_events` and `ai_inferences` — irrelevant at
   personal-project data volume; revisit if either table grows large enough to matter.
 - Full-text search indexes on `payments.raw_description` / `evidence.raw_text` — add when the
-  natural-language interface phase (`docs/roadmap.md`, phase 18) needs it.
-- **Inflow-side reconciliation** (a symmetric `ledger_unexplained_inflow` covering credits that
-  aren't refunds, reimbursements, or settlements received) — an explicit **V1 scope boundary**,
-  finalized this revision, not an open question: `payments.direction = credit` is already fully
-  supported by this schema, so nothing here blocks adding an income classification + inflow
-  reconciliation total later; V1 simply doesn't build it. See `domain-model.md`'s
-  `ReconciliationRun` "V1 scope, explicit" and `docs/roadmap.md`.
+  natural-language interface work (`docs/roadmap.md`, after Phase 21) needs it.
+- General budgeting/tax logic and income analytics. Pragmatic cash reconciliation itself is
+  now scheduled for Phase 16 under ADR-0017 (cash balance), not indefinitely deferred.
 - **A `settlements` row for a debt between two people neither of whom is the current `User`** —
   structurally impossible to back with a `Payment` this ledger can observe (see
   `domain-model.md`'s Obligation/Balance section, "a known, documented limitation"); such debts
