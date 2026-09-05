@@ -14,14 +14,22 @@ design this will implement.
 
 **Implemented.**
 
-- `schema.ts` — all 28 tables from `database-design.md`, with their check constraints, foreign
-  keys, partial unique indexes and `bigint` monetary columns. Enum check-constraint values come
-  from `src/domain/enums.ts`, so the schema and the domain cannot drift.
+- `schema.ts` — the 28 tables from `database-design.md` plus the two Phase 16 added
+  (`expense_adjustment_items`, `reconciliation_account_snapshots`), with their check
+  constraints, foreign keys, partial unique indexes and `bigint` monetary columns. Enum
+  check-constraint values come from `src/domain/enums.ts`, so the schema and the domain cannot
+  drift. `reconciliation_account_snapshots` is the one table that carries its cross-column
+  _arithmetic_ as row `CHECK`s rather than leaving it to `src/domain` — ADR-0017 (cash balance)
+  17.7 asks for exactly that, and every term of its identities lives on one row.
 - `client.ts` — `openDatabase()`, over `node-postgres` or PGlite (ADR-0017). Both are
   configured so `bigint` columns arrive as JavaScript `bigint`, never `number`.
 - `repositories.ts` — data access. No financial arithmetic lives here.
 - `drizzle/0000_initial_financial_schema.sql` and the additive migrations after it, most
-  recently `0006_evidence_ingestion.sql` (phase 10: `evidence` gains `media_type`/`byte_size`
+  recently `0007_phase16_cash_flow_and_item_refunds.sql` (phase 16: `payments` gains
+  `cash_flow_category`/`cash_flow_state` and their approval provenance, and the two new tables
+  arrive — ADR-0017 (cash balance), ADR-0018 (item refunds); every existing row backfills to
+  `cash_flow_state = 'imported'` with no category and no approval, because an approval is never
+  guessed from `linked`), `0006_evidence_ingestion.sql` (phase 10: `evidence` gains `media_type`/`byte_size`
   and the checks pairing them to `storage_ref`, plus `evidence` as an auditable entity type —
   ADR-0033), `0005_expense_rejected_state.sql` (phase 9: `expenses.state` gains the terminal
   `rejected`, where a declined or superseded classification proposal's DERIVED expense ends —

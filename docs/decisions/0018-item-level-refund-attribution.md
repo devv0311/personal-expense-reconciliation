@@ -1,6 +1,10 @@
 # ADR-0018. Item-level refund attribution
 
-**Status:** Accepted (2026-09-05); schema work in Phase 16, allocation engine in Phase 18.
+**Status:** Accepted (2026-09-05); **schema and validation implemented in Phase 16
+(2026-09-06)** — `expense_adjustment_items`, `src/domain/refund-attribution.ts` and
+`services.recordExpenseAdjustment`'s attribution path, including the row lock that makes 19.3's
+cumulative ceilings safe under concurrency. The **allocation engine** — net item cost to
+superseding allocation to obligation — remains Phase 18, as scheduled here.
 
 **Identity:** Cite this ADR by its full filename or as **ADR-0018 (item refunds)**.
 The older [0018 manual-note decision](0018-manual-note-signal-ambiguity.md) remains accepted.

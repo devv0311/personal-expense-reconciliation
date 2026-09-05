@@ -1,14 +1,53 @@
 # Database Design
 
-> **Accepted schema extension (2026-09-05; Phase 16 pending).** Add `Payment.cash_flow_category`
-> and explicit cash classification state alongside existing `Payment.state`,
-> `ReconciliationAccountSnapshot`, and `ExpenseAdjustmentItem`. The complete fields, enum,
+> **Schema extension shipped (2026-09-06, Phase 16).** `Payment.cash_flow_category` and
+> `Payment.cash_flow_state` (plus `cash_flow_approved_at`/`cash_flow_approved_by`),
+> `reconciliation_account_snapshots` and `expense_adjustment_items` now exist, in migration
+> `drizzle/0007_phase16_cash_flow_and_item_refunds.sql`. The complete fields, enum,
 > relationships, arithmetic and cross-record validation contracts are in
 > [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md),
 > [ADR-0018 (item refunds)](../decisions/0018-item-level-refund-attribution.md), and the current
-> domain model. This document's existing tables describe the foundation schema; they are not
-> evidence that these migrations have shipped. Preserve all existing monetary/source data and
-> legacy reconciliation constraints; backfill unknown classifications/attributions as unknown.
+> domain model; the summary of what was actually built is below, and `src/db/schema.ts` is
+> authoritative for the constraint text.
+>
+> The migration is **additive**: no column is dropped, retyped or narrowed. Existing payments
+> backfill to `cash_flow_state = 'imported'` with a null category and no approval provenance —
+> ADR-0017 forbids guessing an approval from `linked` or from model confidence, so a payment
+> this ledger already explained still starts the new lifecycle at the beginning. Existing
+> `reconciliation_runs` gain no account snapshots and existing `expense_adjustments` gain no
+> attribution rows; a legacy outflow-only run is never presented as verified cash
+> reconciliation, and item attribution is never inferred for a legacy whole-expense refund.
+>
+> **`payments`, added columns.** `cash_flow_category` (nullable, `PEER_SETTLEMENT | REFUND |
+INTERNAL_TRANSFER | EXTERNAL_INFLOW`), `cash_flow_state` (`imported | normalized |
+cash_flow_classified | approved`, default `imported`), `cash_flow_approved_at`,
+> `cash_flow_approved_by`. Row-local `CHECK`s: the category is one of the four; the state is one
+> of the four; `REFUND`/`EXTERNAL_INFLOW` require `direction = 'credit'`; a category may only
+> exist at or past `cash_flow_classified`; an approved **credit** must carry a category; an
+> approved `PEER_SETTLEMENT` requires `counterparty_type = 'person'` and an approved
+> `INTERNAL_TRANSFER` requires `internal_account`; and approval timestamp and actor are present
+> exactly when the state is `approved`. `Payment.state` is untouched — the two lifecycles run
+> alongside each other. A partial index on `(cash_flow_state, direction)` where the state is not
+> `approved` serves the review queue.
+>
+> **`expense_adjustment_items`.** `expense_adjustment_id` → `expense_adjustments`,
+> `expense_item_id` → `expense_items`, `amount` (`> 0`), unique on the pair, indexed by item for
+> the cumulative-ceiling lookup. 19.1 — that the item belongs to the adjustment's own expense —
+> spans three tables and so is **not** a `CHECK`; it is enforced in
+> `domain.validateRefundAttribution` inside the transaction that writes these rows.
+>
+> **`reconciliation_account_snapshots`.** One immutable row per `(reconciliation_run_id,
+account_id)`, holding the boundary balances and their `Evidence` references, the gross
+> movement totals, the internal-transfer subsets, direction-specific explained/unexplained
+> coverage, `expected_ending_balance`, `cash_balance_delta`, `verification_status`,
+> `discrepancies` and `provenance`. Unusually for this schema, **every arithmetic identity is a
+> row `CHECK`** — ADR-0017 17.7 asks for exactly that, and every term happens to live on one
+> row. Balances and the delta carry no non-negative constraint (an overdraft is a real balance);
+> movement and explanation totals do. `verified` is itself a constraint: evidenced boundaries, a
+> zero delta, zero unexplained in both directions and an empty `discrepancies` array, so a
+> numeric zero over unidentified transactions cannot be stored as a verified ₹0 Unaccounted
+> Delta by any code path. There is no `updated_at` and no update repository function; a
+> correction is a new run.
 
 Translates `docs/domain/domain-model.md` into a relational schema. **This is a design
 document, not migrations** — per `docs/roadmap.md`, migrations are written only after this is

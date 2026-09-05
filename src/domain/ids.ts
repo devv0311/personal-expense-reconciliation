@@ -33,6 +33,7 @@ export type AllocationLineId = Id<'allocation_line'>;
 export type AllocationLineGroupExpansionId = Id<'allocation_line_group_expansion'>;
 export type SettlementId = Id<'settlement'>;
 export type ExpenseAdjustmentId = Id<'expense_adjustment'>;
+export type ExpenseAdjustmentItemId = Id<'expense_adjustment_item'>;
 export type AiInferenceId = Id<'ai_inference'>;
 export type RuleId = Id<'rule'>;
 export type AuditEventId = Id<'audit_event'>;
@@ -40,6 +41,7 @@ export type ExternalIntegrationId = Id<'external_integration'>;
 export type SplitwiseExpenseId = Id<'splitwise_expense'>;
 export type SplitwiseSettlementId = Id<'splitwise_settlement'>;
 export type ReconciliationRunId = Id<'reconciliation_run'>;
+export type ReconciliationAccountSnapshotId = Id<'reconciliation_account_snapshot'>;
 
 /**
  * Tags a raw string as an `Id` of a given entity type.

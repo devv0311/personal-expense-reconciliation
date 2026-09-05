@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import { DomainError } from './errors.js';
 import {
+  assertCashFlowTransition,
   assertExpenseTransition,
   assertPaymentTransition,
   canEnterReadyToSync,
   canTransitionAdjustment,
   canTransitionAiInference,
+  canTransitionCashFlow,
   canTransitionExpense,
+  isCashFlowApproved,
   isExpenseAmountFrozen,
   canTransitionPayment,
   canTransitionSplitwiseExpenseSync,
@@ -327,5 +330,57 @@ describe('SplitwiseExpense sync status', () => {
 
   it('allows a failed sync to be retried', () => {
     expect(canTransitionSplitwiseExpenseSync('sync_failed', 'synced')).toBe(true);
+  });
+});
+
+describe('the cash-flow interpretation lifecycle (ADR-0017 (cash balance))', () => {
+  it('walks IMPORTED → NORMALIZED → CASH_FLOW_CLASSIFIED → APPROVED', () => {
+    expect(canTransitionCashFlow('imported', 'normalized')).toBe(true);
+    expect(canTransitionCashFlow('normalized', 'cash_flow_classified')).toBe(true);
+    expect(canTransitionCashFlow('cash_flow_classified', 'approved')).toBe(true);
+  });
+
+  it('refuses to classify a row whose structure has not been read yet', () => {
+    expect(canTransitionCashFlow('imported', 'cash_flow_classified')).toBe(false);
+  });
+
+  it('refuses to approve a role nobody has proposed', () => {
+    expect(canTransitionCashFlow('normalized', 'approved')).toBe(false);
+    expect(canTransitionCashFlow('imported', 'approved')).toBe(false);
+  });
+
+  it('returns a declined proposal to review', () => {
+    expect(canTransitionCashFlow('cash_flow_classified', 'normalized')).toBe(true);
+  });
+
+  it('reclassifies an approved payment through the proposal state, never silently', () => {
+    expect(canTransitionCashFlow('approved', 'cash_flow_classified')).toBe(true);
+    expect(canTransitionCashFlow('approved', 'normalized')).toBe(false);
+    expect(canTransitionCashFlow('approved', 'imported')).toBe(false);
+  });
+
+  it('names the entity in the error when a transition is refused', () => {
+    let thrown: unknown;
+    try {
+      assertCashFlowTransition('imported', 'approved');
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(DomainError);
+    expect((thrown as DomainError).code).toBe('INVALID_STATE_TRANSITION');
+    expect((thrown as DomainError).message).toContain('cash-flow');
+  });
+
+  it('treats only the approved state as approved — never a link or a proposal', () => {
+    expect(isCashFlowApproved('approved')).toBe(true);
+    expect(isCashFlowApproved('cash_flow_classified')).toBe(false);
+    expect(isCashFlowApproved('normalized')).toBe(false);
+    expect(isCashFlowApproved('imported')).toBe(false);
+  });
+
+  it('leaves the legacy Payment lifecycle exactly as it was', () => {
+    // The two lifecycles run alongside each other: neither renames nor absorbs the other.
+    expect(canTransitionPayment('normalized', 'linked')).toBe(true);
+    expect(canTransitionPayment('linked', 'ignored')).toBe(false);
   });
 });

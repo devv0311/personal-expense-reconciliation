@@ -9,7 +9,7 @@ brief's states to where they actually belong, while preserving the underlying di
 brief cares about: **the exact same transaction moves through successive, explicit states, and
 nothing skips a state silently.**
 
-## Cash-flow classification lifecycle — accepted Phase 16 extension
+## Cash-flow classification lifecycle — shipped in Phase 16
 
 [ADR-0017 (cash balance)](../decisions/0017-pragmatic-cash-balance-reconciliation.md) adds an
 explicit interpretation lifecycle alongside `Payment.state`:
@@ -24,8 +24,12 @@ or applicable previously approved rule decision. Rejection remains reviewable an
 requires a new decision. A link, category guess or high confidence alone is not approval.
 
 The exact cash categories are `PEER_SETTLEMENT`, `REFUND`, `INTERNAL_TRANSFER`, `EXTERNAL_INFLOW`.
-Keep the existing link/ignore state for compatibility and add explicit classification state in
-Phase 16; do not rename `linked` to `approved` or migrate legacy states by assumption. Ordinary
+The existing link/ignore state is kept for compatibility and the classification state is a
+separate `payments.cash_flow_state` column (Phase 16); `linked` was not renamed to `approved`
+and no legacy state was migrated by assumption — every existing row backfilled to `imported`.
+The transitions are `domain.canTransitionCashFlow`; rejection returns a proposal to `normalized`
+with its category cleared, and reclassifying an approved payment returns it to
+`cash_flow_classified` and drops the approval. Ordinary
 purchase/investment debits can have null category and a valid existing approved explanation;
 unknown credits cannot. Mixed movements retain their actual portion links and any remainder.
 

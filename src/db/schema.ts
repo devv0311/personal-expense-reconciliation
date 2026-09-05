@@ -44,6 +44,8 @@ import {
   AUDITABLE_ENTITY_TYPES,
   AUDIT_ACTIONS,
   BENEFICIARY_TYPES,
+  CASH_FLOW_CATEGORIES,
+  CASH_FLOW_STATES,
   CONFIDENCE_LEVELS,
   EVIDENCE_MEDIA_TYPES,
   EVIDENCE_NOTE_KINDS,
@@ -58,6 +60,7 @@ import {
   PAYMENT_DIRECTIONS,
   PAYMENT_REFERENCE_TYPES,
   PAYMENT_STATES,
+  RECONCILIATION_VERIFICATION_STATUSES,
   RULE_ORIGINS,
   SPLITWISE_EXPENSE_SYNC_STATUSES,
   SPLITWISE_SETTLEMENT_SYNC_STATUSES,
@@ -243,6 +246,20 @@ export const payments = pgTable(
     sourceSystem: text('source_system'),
     state: text('state').notNull().default('imported'),
     ignoredReason: text('ignored_reason'),
+    /**
+     * What role this movement plays in the account's cash — orthogonal to
+     * `counterparty_type`, which says who was on the other side (ADR-0017 (cash balance)).
+     *
+     * DERIVED interpretation layered on immutable SOURCE columns, exactly as `state` is.
+     * Null on an ordinary purchase or investment debit; null on a credit means that credit
+     * is **unexplained**, which is why the checks below refuse to let one reach `approved`.
+     */
+    cashFlowCategory: text('cash_flow_category'),
+    /** The interpretation lifecycle that runs alongside `state`, never instead of it. */
+    cashFlowState: text('cash_flow_state').notNull().default('imported'),
+    cashFlowApprovedAt: timestamp('cash_flow_approved_at', { withTimezone: true }),
+    /** `'user'` or `'rule:<rule_id>'` — never a model, never a confidence (`ai-boundary.md`). */
+    cashFlowApprovedBy: text('cash_flow_approved_by'),
     createdAt: createdAt(),
   },
   (table) => [
@@ -266,6 +283,60 @@ export const payments = pgTable(
       sql`${table.referenceType} is null or ${oneOf('reference_type', PAYMENT_REFERENCE_TYPES)}`,
     ),
     check('payments_state_check', oneOf('state', PAYMENT_STATES)),
+    // The cash-reconciliation review queue: unapproved credits are exactly the rows that
+    // leave an account unable to close, so they are read on every run.
+    index('payments_cash_flow_state_idx')
+      .on(table.cashFlowState, table.direction)
+      .where(sql`${table.cashFlowState} <> 'approved'`),
+    check(
+      'payments_cash_flow_category_check',
+      sql`${table.cashFlowCategory} is null or ${oneOf('cash_flow_category', CASH_FLOW_CATEGORIES)}`,
+    ),
+    check('payments_cash_flow_state_check', oneOf('cash_flow_state', CASH_FLOW_STATES)),
+    // 17.2, absolute and row-local: a debit refund or a debit external inflow is not a
+    // borderline judgement, it is arithmetically impossible.
+    check(
+      'payments_cash_flow_direction_check',
+      sql`${table.cashFlowCategory} is null
+          or ${table.cashFlowCategory} not in ('REFUND', 'EXTERNAL_INFLOW')
+          or ${table.direction} = 'credit'`,
+    ),
+    // Assigning a category *is* the classification, so a category cannot exist on a row that
+    // has not reached the classified state. This is what keeps the lifecycle explicit rather
+    // than something a reader has to infer from which columns happen to be filled in.
+    check(
+      'payments_cash_flow_category_state_check',
+      sql`${table.cashFlowCategory} is null
+          or ${table.cashFlowState} in ('cash_flow_classified', 'approved')`,
+    ),
+    // An unclassified credit is unexplained; EXTERNAL_INFLOW is never the automatic catch-all
+    // that closes a discrepancy (17.2). Debits may be approved with a null category, keeping
+    // their existing spend/investment explanation.
+    check(
+      'payments_cash_flow_approved_credit_check',
+      sql`${table.cashFlowState} <> 'approved'
+          or ${table.direction} = 'debit'
+          or ${table.cashFlowCategory} is not null`,
+    ),
+    // The counterparty requirements ADR-0017's table imposes *before approval* — deliberately
+    // not before classification, because "an unresolved counterparty is allowed during
+    // normalization" and demanding one earlier would make the rows that most need a proposal
+    // impossible to propose for.
+    check(
+      'payments_cash_flow_approved_counterparty_check',
+      sql`${table.cashFlowState} <> 'approved'
+          or ${table.cashFlowCategory} is null
+          or (${table.cashFlowCategory} = 'PEER_SETTLEMENT' and ${table.counterpartyType} = 'person')
+          or (${table.cashFlowCategory} = 'INTERNAL_TRANSFER' and ${table.counterpartyType} = 'internal_account')
+          or ${table.cashFlowCategory} in ('REFUND', 'EXTERNAL_INFLOW')`,
+    ),
+    // Approval provenance is present exactly when the role is approved: an approved role with
+    // no actor is an unattributable financial decision (`invariants.md` #17, #21).
+    check(
+      'payments_cash_flow_approval_provenance_check',
+      sql`(${table.cashFlowState} = 'approved') = (${table.cashFlowApprovedAt} is not null)
+          and (${table.cashFlowState} = 'approved') = (${table.cashFlowApprovedBy} is not null)`,
+    ),
   ],
 );
 
@@ -643,6 +714,48 @@ export const expenseAdjustments = pgTable(
   ],
 );
 
+/**
+ * The item-level attribution of a refund/reimbursement (ADR-0018 (item refunds)).
+ *
+ * Write-once, like every other record of an observed financial event: a correction is a new
+ * adjustment, never an edit of this one. Deliberately carries nothing the parent already
+ * holds — expense identity, kind, date, approval context, the optional credit `Payment` — so
+ * there is no second place for any of them to disagree.
+ *
+ * 19.1 (the item belongs to the adjustment's own expense) is **not** expressible as a row
+ * `CHECK`: it spans three tables. It is enforced in `domain.validateRefundAttribution`, inside
+ * the same transaction that writes these rows, and the foreign keys below deliberately do not
+ * pretend to cover it.
+ */
+export const expenseAdjustmentItems = pgTable(
+  'expense_adjustment_items',
+  {
+    id: id(),
+    expenseAdjustmentId: uuid('expense_adjustment_id')
+      .notNull()
+      .references(() => expenseAdjustments.id),
+    expenseItemId: uuid('expense_item_id')
+      .notNull()
+      .references(() => expenseItems.id),
+    amount: paiseColumn('amount').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    // One row per (adjustment, item): a larger refund of one item is a larger amount on its
+    // single row, not a second row (ADR-0018 (item refunds)).
+    uniqueIndex('expense_adjustment_items_unique').on(
+      table.expenseAdjustmentId,
+      table.expenseItemId,
+    ),
+    // The cumulative-ceiling lookup (19.3): every attribution ever recorded against one item.
+    index('expense_adjustment_items_item_idx').on(table.expenseItemId),
+    // 19.4: strictly positive. `> 0`, not `>= 0` — a zero-amount attribution asserts that an
+    // item was refunded for nothing, and a clawback is new spend under ADR-0008, not a
+    // negative row here.
+    check('expense_adjustment_items_amount_check', sql`${table.amount} > 0`),
+  ],
+);
+
 /* ===================================================================== AI and rules */
 
 export const aiInferences = pgTable(
@@ -850,6 +963,162 @@ export const reconciliationRuns = pgTable(
     check(
       'reconciliation_runs_unexplained_identity_check',
       sql`${table.ledgerUnexplainedTotal} = ${table.ledgerTotalOutflow} - ${table.ledgerTransfersTotal} - ${table.ledgerInvestmentsTotal} - ${table.ledgerSettlementsTotal} - ${table.ledgerExplainedTotal}`,
+    ),
+  ],
+);
+
+/**
+ * One account's evidence-backed bank reconciliation for one run
+ * (ADR-0017 (cash balance), "ReconciliationAccountSnapshot").
+ *
+ * The second, independent identity alongside `reconciliation_runs`' outflow one:
+ *
+ * ```text
+ * expected_ending_balance = opening_balance + total_credits - total_debits
+ * cash_balance_delta      = closing_balance - expected_ending_balance
+ * ```
+ *
+ * Immutable. A later interpretation produces a new run with new snapshots; it never edits an
+ * old one from `incomplete` to `verified`, which is why there is no `updated_at` and no
+ * update path in `repositories.ts` (17.7).
+ *
+ * Two conventions here differ from the rest of this file, both deliberately:
+ *
+ *  - **Balances carry no non-negative check.** An overdraft is a real balance and
+ *    `cash_balance_delta` is a signed disagreement. Only the movement and explanation totals —
+ *    positive magnitudes of what the statement actually posted — are constrained `>= 0`.
+ *  - **Every arithmetic identity is a row `CHECK`.** Unusually for this schema, which normally
+ *    leaves cross-row sums to `src/domain`, all of ADR-0017's identities have every term on
+ *    one row, and 17.7 asks for them "as persistence constraints".
+ */
+export const reconciliationAccountSnapshots = pgTable(
+  'reconciliation_account_snapshots',
+  {
+    id: id(),
+    reconciliationRunId: uuid('reconciliation_run_id')
+      .notNull()
+      .references(() => reconciliationRuns.id),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    currency: text('currency').notNull().default('INR'),
+    /**
+     * The parent run's interval, as an explicit-timezone half-open `[start, end)` range.
+     *
+     * `timestamptz` rather than the run's `date`, per ADR-0017's "use an explicit timezone and
+     * half-open interval for posted movements": which side of midnight a movement posted on
+     * decides which statement it belongs to, and a bare date cannot answer that.
+     */
+    periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+    periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+    /** Actual statement balances. Null when the evidence is missing — never a fabricated zero. */
+    openingBalance: paiseColumn('opening_balance'),
+    closingBalance: paiseColumn('closing_balance'),
+    openingBalanceEvidenceId: uuid('opening_balance_evidence_id').references(() => evidence.id),
+    closingBalanceEvidenceId: uuid('closing_balance_evidence_id').references(() => evidence.id),
+    totalDebits: paiseColumn('total_debits').notNull(),
+    totalCredits: paiseColumn('total_credits').notNull(),
+    /** Subsets of the totals above, not additional terms to add or subtract (17.3). */
+    internalTransferDebits: paiseColumn('internal_transfer_debits').notNull(),
+    internalTransferCredits: paiseColumn('internal_transfer_credits').notNull(),
+    explainedDebits: paiseColumn('explained_debits').notNull(),
+    unexplainedDebits: paiseColumn('unexplained_debits').notNull(),
+    explainedCredits: paiseColumn('explained_credits').notNull(),
+    unexplainedCredits: paiseColumn('unexplained_credits').notNull(),
+    expectedEndingBalance: paiseColumn('expected_ending_balance'),
+    cashBalanceDelta: paiseColumn('cash_balance_delta'),
+    verificationStatus: text('verification_status').notNull(),
+    discrepancies: jsonb('discrepancies')
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /**
+     * The inputs this run actually read — counted payment ids, and the transfer legs it could
+     * not pair — so a later reclassification cannot reinterpret a past run (17.7).
+     */
+    provenance: jsonb('provenance')
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    // One snapshot per account per run: each account is verified independently, and a second
+    // row for the same pair would be a second opinion about one period (17.6).
+    uniqueIndex('reconciliation_account_snapshots_unique').on(
+      table.reconciliationRunId,
+      table.accountId,
+    ),
+    index('reconciliation_account_snapshots_account_idx').on(table.accountId, table.periodEnd),
+    check(
+      'reconciliation_account_snapshots_period_check',
+      sql`${table.periodEnd} > ${table.periodStart}`,
+    ),
+    check(
+      'reconciliation_account_snapshots_status_check',
+      oneOf('verification_status', RECONCILIATION_VERIFICATION_STATUSES),
+    ),
+    // Movement and explanation totals are positive magnitudes of what actually posted.
+    // Balances are deliberately absent from this list.
+    check(
+      'reconciliation_account_snapshots_movement_sign_check',
+      sql`${table.totalDebits} >= 0 and ${table.totalCredits} >= 0
+          and ${table.explainedDebits} >= 0 and ${table.unexplainedDebits} >= 0
+          and ${table.explainedCredits} >= 0 and ${table.unexplainedCredits} >= 0
+          and ${table.internalTransferDebits} >= 0 and ${table.internalTransferCredits} >= 0`,
+    ),
+    // 17.4's coverage identity: partial attribution leaves a visible remainder rather than a
+    // total that quietly stops adding up.
+    check(
+      'reconciliation_account_snapshots_coverage_check',
+      sql`${table.totalDebits} = ${table.explainedDebits} + ${table.unexplainedDebits}
+          and ${table.totalCredits} = ${table.explainedCredits} + ${table.unexplainedCredits}`,
+    ),
+    check(
+      'reconciliation_account_snapshots_transfer_subset_check',
+      sql`${table.internalTransferDebits} <= ${table.totalDebits}
+          and ${table.internalTransferCredits} <= ${table.totalCredits}`,
+    ),
+    // 17.5: a balance and the Evidence it comes from are present together or not at all. A
+    // balance with no evidence is a number somebody typed.
+    check(
+      'reconciliation_account_snapshots_boundary_evidence_check',
+      sql`(${table.openingBalance} is null) = (${table.openingBalanceEvidenceId} is null)
+          and (${table.closingBalance} is null) = (${table.closingBalanceEvidenceId} is null)`,
+    ),
+    // Both derived values exist exactly when both boundaries do.
+    check(
+      'reconciliation_account_snapshots_derived_presence_check',
+      sql`(${table.expectedEndingBalance} is null)
+            = (${table.openingBalance} is null or ${table.closingBalance} is null)
+          and (${table.cashBalanceDelta} is null) = (${table.expectedEndingBalance} is null)`,
+    ),
+    // ADR-0017's two identities, enforceable per row because every term is on this row.
+    check(
+      'reconciliation_account_snapshots_identity_check',
+      sql`${table.expectedEndingBalance} is null
+          or (${table.expectedEndingBalance}
+                = ${table.openingBalance} + ${table.totalCredits} - ${table.totalDebits}
+              and ${table.cashBalanceDelta}
+                = ${table.closingBalance} - ${table.expectedEndingBalance})`,
+    ),
+    // 17.6, as a constraint rather than a convention: `verified` requires evidenced
+    // boundaries, a zero delta, zero unexplained movement in both directions, and no
+    // unresolved discrepancy. A numeric zero over unknown transactions is not a verified
+    // ₹0 Unaccounted Delta, and this is the check that makes claiming otherwise impossible.
+    check(
+      'reconciliation_account_snapshots_verified_check',
+      sql`${table.verificationStatus} <> 'verified'
+          or (${table.cashBalanceDelta} = 0
+              and ${table.unexplainedDebits} = 0
+              and ${table.unexplainedCredits} = 0
+              and ${table.openingBalanceEvidenceId} is not null
+              and ${table.closingBalanceEvidenceId} is not null
+              and jsonb_array_length(${table.discrepancies}) = 0)`,
+    ),
+    // The mirror image: inputs complete enough to disagree cannot be filed as `incomplete`,
+    // which would hide a real disagreement behind "we did not have enough to check".
+    check(
+      'reconciliation_account_snapshots_incomplete_check',
+      sql`${table.verificationStatus} <> 'incomplete' or ${table.cashBalanceDelta} is null`,
     ),
   ],
 );

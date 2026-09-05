@@ -11,6 +11,18 @@
  *
  * Neither ever mutates `Expense.amount`. The gross, historical figure is untouched forever;
  * only the derived `netAmount` and the current allocation move (`invariants.md` #6, #8).
+ *
+ * Phase 16 adds a third fact to step 1, from ADR-0018 (item refunds): **which item** came
+ * back. When `recordExpenseAdjustment` is given an attribution set, it validates and persists
+ * the complete set in the same transaction as the adjustment, under a row lock on the parent
+ * expense so two concurrent refunds cannot each spend the same remaining ceiling. Legacy
+ * whole-expense refunds keep working exactly as before, with no attribution rows (19.2) — but
+ * a refund whose item *is* known must not silently take that path, which is why the caller
+ * passes the attributions rather than this service inferring them.
+ *
+ * Distribution — turning net item costs into a superseding allocation and new obligations —
+ * is Phase 18's work and deliberately absent here. `distributeAdjustment` below is still
+ * ADR-0008's whole-expense proportional distribution, unchanged.
  */
 
 import {
@@ -21,20 +33,32 @@ import {
   validateAdjustmentTotal,
   validateAllocationLineAmounts,
   validateAllocationSum,
+  validateRefundAttribution,
+  netItemAmount,
 } from '../domain/index.js';
 import type {
   DraftAllocationLine,
+  ExpenseAdjustmentId,
   ExpenseAdjustmentKind,
   ExpenseId,
+  ExpenseItemId,
   Paise,
   PaymentId,
   PersonId,
+  RefundAttributionDraft,
+  RefundAttributionItemContext,
 } from '../domain/index.js';
 import {
+  getExpenseItemOwner,
   insertAllocationWithLines,
   insertExpenseAdjustment,
+  insertExpenseAdjustmentItems,
+  listExpenseItemContexts,
   listGroupMemberships,
+  listItemAttributionTotals,
+  lockExpenseForAdjustment,
   markSplitwiseExpenseStale,
+  sumAdjustmentsAgainstPayment,
   supersedeAllocation,
 } from '../db/index.js';
 import type { AllocationLineDraft, Database, Executor } from '../db/index.js';
@@ -66,6 +90,15 @@ export interface RecordExpenseAdjustmentInput {
   readonly adjustmentPaymentId?: PaymentId | null;
   readonly reason?: string | null;
   readonly occurredAt: Date;
+  /**
+   * Which purchased items this refund gave money back for (ADR-0018 (item refunds)).
+   *
+   * Omit for a legacy whole-expense refund, which keeps ADR-0008's documented path. Supply
+   * the **complete** set when the items are known: attributions must sum exactly to `amount`,
+   * and a partial set is refused rather than recorded as a pending remainder, because an
+   * unexplained remainder must never become an approved item refund (19.2).
+   */
+  readonly itemAttributions?: readonly RefundAttributionDraft[];
   readonly audit: AuditMeta;
 }
 
@@ -75,6 +108,12 @@ export interface RecordExpenseAdjustmentResult {
   readonly netAmountAfter: Paise;
   /** True while the current allocation still sums to the pre-adjustment figure. */
   readonly pendingDistribution: boolean;
+  /** Attribution rows written, and each affected item's derived net cost after them. */
+  readonly itemAttributions: readonly {
+    readonly expenseItemId: ExpenseItemId;
+    readonly amount: Paise;
+    readonly netItemAmount: Paise;
+  }[];
 }
 
 /**
@@ -88,6 +127,10 @@ export async function recordExpenseAdjustment(
   input: RecordExpenseAdjustmentInput,
 ): Promise<RecordExpenseAdjustmentResult> {
   return runAudited(db, input.audit, async ({ exec, record }) => {
+    // 19.3's concurrency half. Taken before anything is read, so two refunds against one
+    // expense cannot both observe the same remaining ceiling and both fit under it.
+    await lockExpenseForAdjustment(exec, input.expenseId);
+
     const expense = await requireExpenseSnapshot(exec, input.expenseId);
     if (!ADJUSTABLE_STATES.has(expense.state)) {
       throw new ServiceError(
@@ -114,6 +157,21 @@ export async function recordExpenseAdjustment(
           { paymentId: payment.id, direction: payment.direction },
         );
       }
+    }
+
+    const attributions = input.itemAttributions ?? [];
+    // Validated *before* the adjustment row exists, so a rejected attribution set leaves no
+    // adjustment behind at all: the item refund and the financial event it attributes are one
+    // decision, and half of one is not a smaller version of it (ADR-0018, 19.2).
+    if (attributions.length > 0) {
+      await validateItemAttributions(exec, {
+        expenseId: expense.id,
+        expenseGrossAmount: expense.grossAmount,
+        otherAdjustmentAmounts: expense.adjustmentAmounts,
+        adjustmentAmount: input.amount,
+        attributions,
+        adjustmentPaymentId,
+      });
     }
 
     const adjustmentId = await insertExpenseAdjustment(exec, {
@@ -143,12 +201,144 @@ export async function recordExpenseAdjustment(
         // what the expense cost before and after without implying it was edited.
         expenseGrossAmount: expense.grossAmount.toString(),
         netAmountAfter: netAmountAfter.toString(),
+        attributedItemCount: String(attributions.length),
         state: 'recorded',
       },
     });
 
-    return { adjustmentId, netAmountAfter, pendingDistribution: true };
+    let recordedAttributions: RecordExpenseAdjustmentResult['itemAttributions'] = [];
+    if (attributions.length > 0) {
+      const inserted = await insertExpenseAdjustmentItems(
+        exec,
+        adjustmentId as ExpenseAdjustmentId,
+        attributions.map((attribution) => ({
+          expenseItemId: attribution.expenseItemId,
+          amount: attribution.amount,
+        })),
+      );
+      recordedAttributions = await describeAttributions(exec, expense.id, attributions);
+      const rowIdByItem = new Map(inserted.map((row) => [row.expenseItemId, row.id]));
+
+      // Its own audit entity, not a field on the adjustment's event: an attribution is the
+      // decision about *what was returned*, and a reader asking "why does this item now cost
+      // less?" must be able to find the answer against the item, not only the refund.
+      for (const attribution of recordedAttributions) {
+        const rowId = rowIdByItem.get(attribution.expenseItemId);
+        if (rowId === undefined) continue;
+        await record({
+          entityType: 'expense_adjustment_item',
+          entityId: rowId,
+          action: 'create',
+          newValue: {
+            expenseAdjustmentId: adjustmentId,
+            expenseItemId: attribution.expenseItemId,
+            amount: attribution.amount.toString(),
+            netItemAmount: attribution.netItemAmount.toString(),
+          },
+        });
+      }
+    }
+
+    return {
+      adjustmentId,
+      netAmountAfter,
+      pendingDistribution: true,
+      itemAttributions: recordedAttributions,
+    };
   });
+}
+
+/**
+ * Assembles the ledger's own view of the items and the refund credit, then hands it to
+ * `domain.validateRefundAttribution`.
+ *
+ * Every ceiling input is read here rather than trusted from the caller: an item's gross cost,
+ * what other adjustments have already attributed to it, and what other adjustments already
+ * draw from the same credit. An attribution naming an item of a *different* expense is looked
+ * up on its own, so 19.1 can say "belongs to expense X" rather than the much less useful "no
+ * such item".
+ */
+async function validateItemAttributions(
+  exec: Executor,
+  input: {
+    readonly expenseId: ExpenseId;
+    readonly expenseGrossAmount: Paise;
+    readonly otherAdjustmentAmounts: readonly Paise[];
+    readonly adjustmentAmount: Paise;
+    readonly attributions: readonly RefundAttributionDraft[];
+    readonly adjustmentPaymentId: PaymentId | null;
+  },
+): Promise<void> {
+  const ownItems = await listExpenseItemContexts(exec, input.expenseId);
+  if (ownItems.length === 0) {
+    throw new ServiceError(
+      'PRECONDITION_FAILED',
+      `Expense ${input.expenseId} has no ExpenseItems, so a refund cannot be attributed to one. ` +
+        'Itemize the purchase first, or record this as a legacy whole-expense adjustment ' +
+        '(ADR-0018 (item refunds), 19.2).',
+      { expenseId: input.expenseId },
+    );
+  }
+
+  const attributedSoFar = await listItemAttributionTotals(exec, input.expenseId);
+  const items: RefundAttributionItemContext[] = ownItems.map((item) => ({
+    expenseItemId: item.expenseItemId,
+    expenseId: item.expenseId,
+    grossAmount: item.grossAmount,
+    alreadyAttributed: attributedSoFar.get(item.expenseItemId) ?? (0n as Paise),
+  }));
+
+  // Foreign items, added so the domain reports a cross-expense attribution as exactly that.
+  const known = new Set(items.map((item) => item.expenseItemId));
+  for (const attribution of input.attributions) {
+    if (known.has(attribution.expenseItemId)) continue;
+    const owner = await getExpenseItemOwner(exec, attribution.expenseItemId);
+    if (owner === null) continue;
+    known.add(attribution.expenseItemId);
+    items.push({
+      expenseItemId: attribution.expenseItemId,
+      expenseId: owner.expenseId,
+      grossAmount: owner.grossAmount,
+      alreadyAttributed: 0n as Paise,
+    });
+  }
+
+  const refundPayment =
+    input.adjustmentPaymentId === null
+      ? undefined
+      : {
+          amount: (await requirePayment(exec, input.adjustmentPaymentId)).amount,
+          alreadyAttributed: await sumAdjustmentsAgainstPayment(exec, input.adjustmentPaymentId),
+        };
+
+  validateRefundAttribution({
+    expenseId: input.expenseId,
+    adjustmentAmount: input.adjustmentAmount,
+    attributions: input.attributions,
+    items,
+    expenseGrossAmount: input.expenseGrossAmount,
+    otherAdjustmentAmounts: input.otherAdjustmentAmounts,
+    ...(refundPayment === undefined ? {} : { refundPayment }),
+  });
+}
+
+/** Each written attribution with the item's derived net cost, read back after the insert. */
+async function describeAttributions(
+  exec: Executor,
+  expenseId: ExpenseId,
+  attributions: readonly RefundAttributionDraft[],
+): Promise<RecordExpenseAdjustmentResult['itemAttributions']> {
+  const items = await listExpenseItemContexts(exec, expenseId);
+  const grossById = new Map(items.map((item) => [item.expenseItemId, item.grossAmount]));
+  const attributedNow = await listItemAttributionTotals(exec, expenseId);
+
+  return attributions.map((attribution) => ({
+    expenseItemId: attribution.expenseItemId,
+    amount: attribution.amount,
+    netItemAmount: netItemAmount(grossById.get(attribution.expenseItemId) ?? (0n as Paise), [
+      attributedNow.get(attribution.expenseItemId) ?? (0n as Paise),
+    ]),
+  }));
 }
 
 export interface DistributeAdjustmentInput {
