@@ -47,8 +47,12 @@ import {
   CASH_FLOW_CATEGORIES,
   CASH_FLOW_STATES,
   CONFIDENCE_LEVELS,
+  EVIDENCE_MATCH_SIGNALS,
+  EVIDENCE_MATCH_STATUSES,
+  EVIDENCE_MATCH_STRENGTHS,
   EVIDENCE_MEDIA_TYPES,
   EVIDENCE_NOTE_KINDS,
+  EVIDENCE_OBSERVATION_DERIVATIONS,
   EVIDENCE_TYPES,
   EXPENSE_ADJUSTMENT_KINDS,
   EXPENSE_RELATIONSHIP_TYPES,
@@ -383,12 +387,18 @@ export const evidence = pgTable(
     // The idempotent-ingest lookup: the same bytes arriving twice resolve to the row that
     // already holds them rather than to a second copy of it.
     index('evidence_storage_ref_idx').on(table.storageRef),
-    // Documents with no home, which is what the review queue asks for.
+    // Evidence with no home, which is what the review queue asks for.
+    //
+    // Widened in phase 17 from "a stored document" to "a stored document, or a bank/UPI
+    // notification". A forwarded SMS has no file and is exactly the record that re-attaches a
+    // decayed narration, so leaving it out of the queue would hide the phase's own input.
+    // Manual notes stay out: their links were chosen by the person who typed them.
     index('evidence_unmatched_idx')
       .on(table.capturedAt)
       .where(
         sql.raw(
-          'storage_ref is not null and linked_payment_id is null and linked_expense_id is null',
+          "(storage_ref is not null or type in ('bank_line', 'upi_notification')) and " +
+            'linked_payment_id is null and linked_expense_id is null',
         ),
       ),
     check('evidence_type_check', oneOf('type', EVIDENCE_TYPES)),
@@ -427,6 +437,199 @@ export const evidence = pgTable(
     check(
       'evidence_note_kind_only_on_notes_check',
       sql`(${table.type} = 'manual_note') = (${table.noteKind} is not null)`,
+    ),
+  ],
+);
+
+/**
+ * DERIVED, phase 17 (ADR-0044): the structured reading of one `Evidence` record.
+ *
+ * `evidence` is SOURCE and immutable, so an interpretation of it cannot live on that row —
+ * exactly the reasoning that put `receipts` in its own table. This is the same shape for the
+ * payment-side records a receipt does not cover: a bank SMS, a UPI push notification, and any
+ * document whose amount and reference someone has read into structured form.
+ *
+ * Every column is nullable because partial evidence is the normal case: a notification that
+ * states an amount and a reference but no account tail records exactly those two. What is not
+ * optional is that the row observes *something* — enforced below, and again in
+ * `domain.validateEvidenceObservation`.
+ */
+export const evidenceObservations = pgTable(
+  'evidence_observations',
+  {
+    id: id(),
+    /** One reading per evidence record. A better reading replaces this one; it never doubles it. */
+    evidenceId: uuid('evidence_id')
+      .notNull()
+      .unique()
+      .references(() => evidence.id),
+    observedAmount: paiseColumn('observed_amount'),
+    observedDirection: text('observed_direction'),
+    /** As observed, with the bank's own punctuation intact — kept for display. */
+    observedReference: text('observed_reference'),
+    /** Letters and digits only, upper-cased: the form the matcher compares (ADR-0044). */
+    observedReferenceNormalized: text('observed_reference_normalized'),
+    observedReferenceType: text('observed_reference_type'),
+    /**
+     * Masked trailing digits only.
+     *
+     * The same `~ '^[0-9]{1,4}$'` rule `accounts.last4` carries, and for the same reason: an
+     * SMS is where `A/C XXXX4821` enters this system, so it is where `security-model.md`'s
+     * "no full account or card number is ever stored" has to be enforced.
+     */
+    observedAccountHint: text('observed_account_hint'),
+    observedMerchantText: text('observed_merchant_text'),
+    /** The instant the evidence states, which a date-only statement line does not carry. */
+    observedOccurredAt: timestamp('observed_occurred_at', { withTimezone: true }),
+    /** `caller_supplied` or `parsed_from_text` — both deterministic, neither a model. */
+    derivation: text('derivation').notNull(),
+    /**
+     * The deterministic identity of the **notification** this reading came in on.
+     *
+     * Unique, so the same SMS forwarded twice resolves to the row it already has — the rule
+     * `ingestEvidenceDocument` applies to bytes, applied to text that has no content address of
+     * its own (`domain.notificationDedupeKey`).
+     *
+     * **Null for a reading of an `Evidence` row that already existed** — a receipt's extracted
+     * total, a human's correction — because that row's own id is already its identity.
+     * PostgreSQL's unique indexes ignore nulls, which is exactly the shape wanted: two receipts
+     * that happen to total the same amount are two readings, not a collision.
+     */
+    notificationKey: text('notification_key').unique(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    // The reference lookup the matcher pre-filters on.
+    index('evidence_observations_reference_idx')
+      .on(table.observedReferenceNormalized)
+      .where(sql`${table.observedReferenceNormalized} is not null`),
+    index('evidence_observations_amount_idx').on(table.observedAmount, table.observedOccurredAt),
+    check(
+      'evidence_observations_direction_check',
+      sql`${table.observedDirection} is null or ${oneOf('observed_direction', PAYMENT_DIRECTIONS)}`,
+    ),
+    check(
+      'evidence_observations_reference_type_check',
+      sql`${table.observedReferenceType} is null
+          or ${oneOf('observed_reference_type', PAYMENT_REFERENCE_TYPES)}`,
+    ),
+    check(
+      'evidence_observations_derivation_check',
+      oneOf('derivation', EVIDENCE_OBSERVATION_DERIVATIONS),
+    ),
+    check(
+      'evidence_observations_amount_check',
+      sql`${table.observedAmount} is null or ${table.observedAmount} > 0`,
+    ),
+    // `security-model.md`: never a full account or card number, at the database and not only
+    // by convention — the same check `accounts.last4` already carries.
+    check(
+      'evidence_observations_account_hint_check',
+      sql`${table.observedAccountHint} is null or ${table.observedAccountHint} ~ '^[0-9]{1,4}$'`,
+    ),
+    // A reading that read nothing would enter the matcher, contribute no signal, and assert
+    // forever that this document was understood when it was not.
+    check(
+      'evidence_observations_not_empty_check',
+      sql`${table.observedAmount} is not null
+          or ${table.observedDirection} is not null
+          or ${table.observedReference} is not null
+          or ${table.observedAccountHint} is not null
+          or ${table.observedMerchantText} is not null
+          or ${table.observedOccurredAt} is not null`,
+    ),
+    // The normalized form is present exactly when there is a reference to normalize, so a
+    // matcher pre-filter reading only the normalized column cannot miss a row that has one.
+    check(
+      'evidence_observations_reference_normalized_check',
+      sql`(${table.observedReference} is null) = (${table.observedReferenceNormalized} is null)`,
+    ),
+  ],
+);
+
+/**
+ * DERIVED, phase 17 (ADR-0044): one recorded "this evidence might be about that payment".
+ *
+ * A candidate is **not** a link and can never become one on its own. `evidence` linkage stays
+ * write-once and stays a human act (ADR-0034/0037); what this table adds is that the offer is
+ * recorded with its reasoning, so a reviewer sees the same signals the matcher saw, a re-run
+ * changes nothing unless the ledger changed, and a decision is attributable afterwards.
+ *
+ * The one constraint worth reading twice is `evidence_match_candidates_decision_check`: a
+ * candidate reaches `accepted` or `dismissed` **only** with a recorded actor and instant. That
+ * is what makes "no confidence threshold silently approves an evidence link" a property of the
+ * schema rather than a promise in a service.
+ */
+export const evidenceMatchCandidates = pgTable(
+  'evidence_match_candidates',
+  {
+    id: id(),
+    evidenceId: uuid('evidence_id')
+      .notNull()
+      .references(() => evidence.id),
+    paymentId: uuid('payment_id')
+      .notNull()
+      .references(() => payments.id),
+    strength: text('strength').notNull(),
+    /** A summary of the signal set, in `ai-boundary.md`'s four levels. Never an approval. */
+    confidence: text('confidence').notNull(),
+    /** The signal names that agreed, e.g. `["reference","amount"]`. */
+    matchedSignals: jsonb('matched_signals').notNull(),
+    /** The signal names that disagreed. Empty is not the same as "not checked". */
+    conflictingSignals: jsonb('conflicting_signals').notNull(),
+    /** The full per-signal provenance: verdict, both values, and why (`domain`'s own output). */
+    signals: jsonb('signals').notNull(),
+    /** Every reason this candidate is waiting for a person (`EVIDENCE_MATCH_REVIEW_REASONS`). */
+    reviewReasons: jsonb('review_reasons').notNull(),
+    status: text('status').notNull().default('proposed'),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    /** `'user'` or `'rule:<rule_id>'` — never a model, never `system` (`invariants.md` #17). */
+    decidedBy: text('decided_by'),
+    /**
+     * Which matcher produced this.
+     *
+     * A re-run under a changed matcher legitimately produces different candidates, and without
+     * this the difference would be indistinguishable from the ledger having changed.
+     */
+    matcherVersion: text('matcher_version').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    // One offer per (evidence, payment) pair: a re-run updates the row it already wrote rather
+    // than appending a second opinion about the same two records.
+    uniqueIndex('evidence_match_candidates_pair_idx').on(table.evidenceId, table.paymentId),
+    index('evidence_match_candidates_evidence_idx').on(table.evidenceId, table.status),
+    index('evidence_match_candidates_payment_idx').on(table.paymentId, table.status),
+    check('evidence_match_candidates_strength_check', oneOf('strength', EVIDENCE_MATCH_STRENGTHS)),
+    check('evidence_match_candidates_confidence_check', oneOf('confidence', CONFIDENCE_LEVELS)),
+    check('evidence_match_candidates_status_check', oneOf('status', EVIDENCE_MATCH_STATUSES)),
+    // A decision is attributable or it is not a decision. `proposed`/`superseded` are the
+    // matcher's own states and carry no actor, because nobody decided them.
+    check(
+      'evidence_match_candidates_decision_check',
+      sql`(${table.status} in ('accepted', 'dismissed'))
+            = (${table.decidedAt} is not null)
+          and (${table.status} in ('accepted', 'dismissed'))
+            = (${table.decidedBy} is not null)`,
+    ),
+    check(
+      'evidence_match_candidates_signals_shape_check',
+      sql`jsonb_typeof(${table.matchedSignals}) = 'array'
+          and jsonb_typeof(${table.conflictingSignals}) = 'array'
+          and jsonb_typeof(${table.signals}) = 'array'
+          and jsonb_typeof(${table.reviewReasons}) = 'array'`,
+    ),
+    // Every recorded signal is one of the six the domain defines, so an invented signal name
+    // cannot enter the table even if a caller writes the JSON by hand. `<@` is jsonb array
+    // containment — a plain operator, because a CHECK may not contain a subquery.
+    check(
+      'evidence_match_candidates_signal_names_check',
+      sql.raw(
+        `matched_signals <@ '${JSON.stringify(EVIDENCE_MATCH_SIGNALS)}'::jsonb ` +
+          `and conflicting_signals <@ '${JSON.stringify(EVIDENCE_MATCH_SIGNALS)}'::jsonb`,
+      ),
     ),
   ],
 );

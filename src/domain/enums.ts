@@ -172,6 +172,67 @@ export const EVIDENCE_MEDIA_TYPES = [
 ] as const;
 export type EvidenceMediaType = (typeof EVIDENCE_MEDIA_TYPES)[number];
 
+/**
+ * How an `EvidenceObservation`'s structured facts were arrived at (Phase 17, ADR-0044).
+ *
+ * Both members are deterministic; neither is a model. `caller_supplied` is a notification
+ * importer handing over fields it already had as structured data; `parsed_from_text` is
+ * `domain.parseNotificationText` reading them off the evidence's own immutable raw text with
+ * a fixed grammar. Recorded rather than inferred, because "the bank's own SMS said ₹450" and
+ * "a regex thought it said ₹450" are different claims and a reviewer is entitled to know
+ * which one is in front of them.
+ */
+export const EVIDENCE_OBSERVATION_DERIVATIONS = ['caller_supplied', 'parsed_from_text'] as const;
+export type EvidenceObservationDerivation = (typeof EVIDENCE_OBSERVATION_DERIVATIONS)[number];
+
+/**
+ * The signals context re-attachment compares between one `Evidence` observation and one
+ * `Payment` (Phase 17, ADR-0044).
+ *
+ * A closed set, because every candidate records a verdict per signal and a surface renders
+ * them in this order. Adding one is a schema-visible decision, not a quiet extra heuristic.
+ */
+export const EVIDENCE_MATCH_SIGNALS = [
+  'reference',
+  'amount',
+  'direction',
+  'account',
+  'time',
+  'merchant',
+] as const;
+export type EvidenceMatchSignal = (typeof EVIDENCE_MATCH_SIGNALS)[number];
+
+/**
+ * What one signal said.
+ *
+ * `absent` is not a weak `matched`: it means one side had nothing to compare, which is the
+ * ordinary case for a push notification that carries no account tail. Keeping it distinct
+ * from `conflicted` is what stops "we do not know" from reading as "they disagree".
+ */
+export const EVIDENCE_MATCH_VERDICTS = ['matched', 'conflicted', 'absent'] as const;
+export type EvidenceMatchVerdict = (typeof EVIDENCE_MATCH_VERDICTS)[number];
+
+/**
+ * How strongly a candidate is supported by its signals.
+ *
+ * `deterministic` means a matching reference identifier with nothing contradicting it — the
+ * same class of evidence `invariants.md` #10 already treats as conclusive for deduplication.
+ * It is still not an approval: ADR-0034/0037/0044 keep linking an explicit human act, and a
+ * strength is a description of the evidence, never a permission.
+ */
+export const EVIDENCE_MATCH_STRENGTHS = ['deterministic', 'probable', 'weak'] as const;
+export type EvidenceMatchStrength = (typeof EVIDENCE_MATCH_STRENGTHS)[number];
+
+/**
+ * The lifecycle of one recorded candidate.
+ *
+ * `superseded` rather than deleted: a candidate the matcher no longer offers is part of how
+ * this ledger came to look the way it does, and a re-run that erased its own history would
+ * make "why was this evidence never attached?" unanswerable.
+ */
+export const EVIDENCE_MATCH_STATUSES = ['proposed', 'accepted', 'dismissed', 'superseded'] as const;
+export type EvidenceMatchStatus = (typeof EVIDENCE_MATCH_STATUSES)[number];
+
 export const CONFIDENCE_LEVELS = ['high', 'medium', 'low', 'unknown'] as const;
 export type ConfidenceLevel = (typeof CONFIDENCE_LEVELS)[number];
 
@@ -327,6 +388,8 @@ export const AUDITABLE_ENTITY_TYPES = [
   'expense_adjustment_item',
   'merchant',
   'evidence',
+  'evidence_observation',
+  'evidence_match_candidate',
   'receipt',
   'ai_inference',
   'rule',

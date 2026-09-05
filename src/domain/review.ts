@@ -55,7 +55,20 @@ export type ReviewReason =
   /** The proposal was declined, so this payment is money with no explanation. */
   | 'payment_unexplained'
   /** A stored document attached to nothing — a purchase the ledger may not have seen. */
-  | 'evidence_unmatched';
+  | 'evidence_unmatched'
+  /**
+   * Enrichment found more than one payment this evidence could belong to (Phase 17).
+   *
+   * The same-amount collision, and the reason matching stops at candidates: the evidence does
+   * not distinguish them, so neither may the system (ADR-0044).
+   */
+  | 'evidence_match_ambiguous'
+  /**
+   * At least one recorded candidate has a signal that disagrees — a merchant the payment
+   * resolved differently, an amount the notification states otherwise, a date outside the
+   * window. Surfaced rather than used to hide the candidate.
+   */
+  | 'evidence_match_conflicting_signals';
 
 /* --------------------------------------------------------------------------- ordering */
 
