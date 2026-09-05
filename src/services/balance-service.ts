@@ -7,19 +7,30 @@
  */
 
 import {
+  NO_BOUNDARY_BALANCES,
   compareSplitwiseBalance,
+  computeAccountCashSnapshot,
   computeNetBalance,
   computeObligations,
   computeUnexplained,
   obligationEvidenceStatus,
+  pairInternalTransfers,
+  validateAccountCashSnapshot,
+  validateInternalTransferNeutrality,
   validateReconciliationTotals,
 } from '../domain/index.js';
 import type {
+  AccountBoundaryBalances,
+  AccountCashSnapshotDraft,
+  AccountId,
+  CashMovement,
   ExpenseId,
   ObligationContribution,
   ObligationEvidenceStatus,
   Paise,
+  PaymentId,
   PersonId,
+  ReconciliationAccountSnapshot,
   ReconciliationDiscrepancy,
   ReconciliationRunId,
   ReconciliationTotals,
@@ -30,13 +41,17 @@ import {
   getLatestReconciliationRun,
   getPrimaryUserPerson,
   getReconciliationRunById,
+  insertReconciliationAccountSnapshot,
   insertReconciliationRun,
+  listAccountsForCashReconciliation,
   listPersonsWithSplitwiseUserId,
+  listReconciliationAccountSnapshots,
   listReconciliationRuns,
   listSettlementClaimExpenseIds,
   listSyncedSplitwiseExpensesPaidBy,
   listSyncedSplitwiseSettlementsByCounterparty,
   loadBalanceInput,
+  loadCashReconciliationInput,
   loadReconciliationInput,
   markSplitwiseExpenseDrifted,
   markSplitwiseSettlementDrifted,
@@ -110,6 +125,18 @@ export async function getBalance(
   return { personAId, personBId, netBalance, evidenceStatus, contributions };
 }
 
+/**
+ * One account's evidenced statement boundaries, as a human confirmed them.
+ *
+ * Supplied per run rather than read from a table, because nothing in the ledger ingests
+ * statement *balances* yet — only movements. 17.5 requires each boundary to cite immutable
+ * `Evidence`, so the citation travels with the figure and a run given neither produces
+ * honestly `incomplete` snapshots rather than a cosmetic zero.
+ */
+export interface AccountBoundaryInput extends AccountBoundaryBalances {
+  readonly accountId: AccountId;
+}
+
 export interface RunReconciliationInput {
   readonly userPersonId: PersonId;
   readonly periodStart: Date;
@@ -117,6 +144,12 @@ export interface RunReconciliationInput {
   readonly periodEnd: Date;
   /** No concrete adapter is wired yet (ADR-0025/0040 precedent) — a caller injects one. */
   readonly splitwise: SplitwisePort;
+  /**
+   * Evidenced opening/closing balances, per account. Omit any account — or all of them — and
+   * its snapshot is `incomplete`: unknown is not zero, and a closing balance is never derived
+   * from the movements it exists to check (17.5).
+   */
+  readonly accountBoundaries?: readonly AccountBoundaryInput[];
   readonly audit: AuditMeta;
 }
 
@@ -124,6 +157,8 @@ export interface RunReconciliationResult {
   readonly reconciliationRunId: string;
   readonly totals: ReconciliationTotals;
   readonly discrepancies: readonly ReconciliationDiscrepancy[];
+  /** One per account, ADR-0017's second identity. Empty only when there are no accounts. */
+  readonly accountSnapshots: readonly AccountCashSnapshotDraft[];
 }
 
 /**
@@ -138,6 +173,13 @@ export interface RunReconciliationResult {
  * required, since `CLAUDE.md` forbids a real Splitwise connection in development.
  * `ledger_unexplained_total` is stored whatever it comes to — surfaced especially when non-zero
  * (`invariants.md` #20).
+ *
+ * New in phase 16 (ADR-0017 (cash balance)): the same run also writes one immutable
+ * `ReconciliationAccountSnapshot` per account, carrying the **second** identity —
+ * `opening + credits - debits` against the statement's actual closing balance. The two are
+ * computed independently and neither is derived from the other; ADR-0016's totals, fields and
+ * callers are untouched (17.4). A run given no boundary evidence still writes snapshots, all
+ * `incomplete` — which is the honest report, and the one thing a cosmetic zero would hide.
  */
 export async function runReconciliation(
   db: Database,
@@ -180,6 +222,34 @@ export async function runReconciliation(
       splitwiseBalancesSnapshot,
     });
 
+    const accountSnapshots = await buildAccountCashSnapshots(exec, {
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      boundaries: input.accountBoundaries ?? [],
+    });
+    for (const snapshot of accountSnapshots) {
+      const snapshotId = await insertReconciliationAccountSnapshot(exec, {
+        reconciliationRunId: reconciliationRunId,
+        snapshot,
+      });
+      await record({
+        entityType: 'reconciliation_account_snapshot',
+        entityId: snapshotId,
+        action: 'create',
+        newValue: {
+          accountId: snapshot.accountId,
+          totalDebits: snapshot.totalDebits.toString(),
+          totalCredits: snapshot.totalCredits.toString(),
+          unexplainedDebits: snapshot.unexplainedDebits.toString(),
+          unexplainedCredits: snapshot.unexplainedCredits.toString(),
+          expectedEndingBalance: snapshot.expectedEndingBalance?.toString() ?? null,
+          cashBalanceDelta: snapshot.cashBalanceDelta?.toString() ?? null,
+          verificationStatus: snapshot.verificationStatus,
+          discrepancyCount: String(snapshot.discrepancies.length),
+        },
+      });
+    }
+
     await record({
       entityType: 'reconciliation_run',
       entityId: reconciliationRunId,
@@ -194,11 +264,20 @@ export async function runReconciliation(
         ledgerExplainedTotal: totals.ledgerExplainedTotal.toString(),
         ledgerUnexplainedTotal: totals.ledgerUnexplainedTotal.toString(),
         discrepancyCount: discrepancies.length.toString(),
+        accountSnapshotCount: accountSnapshots.length.toString(),
       },
     });
 
-    return { reconciliationRunId, totals, discrepancies };
+    return { reconciliationRunId, totals, discrepancies, accountSnapshots };
   });
+}
+
+/** The account snapshots belonging to one run — ADR-0017's per-account cash report. */
+export async function getReconciliationAccountSnapshots(
+  db: Executor,
+  reconciliationRunId: ReconciliationRunId,
+): Promise<readonly ReconciliationAccountSnapshot[]> {
+  return listReconciliationAccountSnapshots(db, reconciliationRunId);
 }
 
 /** History, newest first — a reconciliation dashboard's run list. */
@@ -382,4 +461,79 @@ function toDiscrepancies(raw: unknown): ReconciliationDiscrepancy[] {
       },
     ];
   });
+}
+
+/**
+ * Builds one account snapshot per account for a period (ADR-0017 (cash balance), 17.3–17.7).
+ *
+ * The order matters and is the whole of 17.3: transfer legs are paired across **every**
+ * account first, because a leg's counter-leg lives on a different account and a per-account
+ * pass cannot see it. Only then is each account computed independently, each carrying whatever
+ * unpaired legs of its own the pairing left over — never a balancing leg invented to make the
+ * period come out neutral.
+ *
+ * Every snapshot is re-checked through `domain.validateAccountCashSnapshot` before it is
+ * written, so a report assembled by any path still cannot persist inconsistent arithmetic
+ * (17.7). The database carries the same identities as row-local `CHECK`s; this layer is what
+ * names the term that disagrees.
+ */
+async function buildAccountCashSnapshots(
+  exec: Executor,
+  input: {
+    readonly periodStart: Date;
+    readonly periodEnd: Date;
+    readonly boundaries: readonly AccountBoundaryInput[];
+  },
+): Promise<readonly AccountCashSnapshotDraft[]> {
+  const accounts = await listAccountsForCashReconciliation(exec);
+  if (accounts.length === 0) return [];
+
+  const movements = await loadCashReconciliationInput(exec, {
+    start: input.periodStart,
+    end: input.periodEnd,
+  });
+  const pairing = pairInternalTransfers(movements);
+  const unpairedByAccount = groupUnpairedByAccount(movements, pairing.unpaired);
+  const boundariesByAccount = new Map(
+    input.boundaries.map((boundary) => [boundary.accountId, boundary]),
+  );
+
+  const snapshots: AccountCashSnapshotDraft[] = [];
+  for (const account of accounts) {
+    const snapshot = computeAccountCashSnapshot({
+      accountId: account.id,
+      currency: account.currency,
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      movements: movements.filter((movement) => movement.accountId === account.id),
+      boundaries: boundariesByAccount.get(account.id) ?? NO_BOUNDARY_BALANCES,
+      unpairedTransferPaymentIds: unpairedByAccount.get(account.id) ?? [],
+    });
+    validateAccountCashSnapshot(snapshot);
+    snapshots.push(snapshot);
+  }
+
+  // 17.3's consolidated check, asserted only over a fully paired scope: with an unpaired leg
+  // in sight a non-zero net is *correct*, and asserting neutrality anyway would push callers
+  // toward inventing the missing leg to satisfy it.
+  validateInternalTransferNeutrality(snapshots, pairing);
+  return snapshots;
+}
+
+function groupUnpairedByAccount(
+  movements: readonly CashMovement[],
+  unpaired: readonly PaymentId[],
+): ReadonlyMap<AccountId, PaymentId[]> {
+  const accountByPayment = new Map(
+    movements.map((movement) => [movement.paymentId, movement.accountId]),
+  );
+  const grouped = new Map<AccountId, PaymentId[]>();
+  for (const paymentId of unpaired) {
+    const accountId = accountByPayment.get(paymentId);
+    if (accountId === undefined) continue;
+    const bucket = grouped.get(accountId) ?? [];
+    bucket.push(paymentId);
+    grouped.set(accountId, bucket);
+  }
+  return grouped;
 }

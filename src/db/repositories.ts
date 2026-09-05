@@ -20,6 +20,8 @@ import type {
   AiInferenceType,
   AuditAction,
   AuditableEntityType,
+  CashFlowCategory,
+  CashFlowState,
   ConfidenceLevel,
   EvidenceMediaType,
   EvidenceNoteKind,
@@ -30,16 +32,19 @@ import type {
   ExternalIntegrationType,
   PaymentChannel,
   PaymentCounterpartyType,
+  PaymentDirection,
   PaymentState,
   SplitwiseExpenseSyncStatus,
   SplitwiseSettlementSyncStatus,
 } from '../domain/enums.js';
 import type {
+  AccountId,
   AiInferenceId,
   AllocationId,
   AllocationLineId,
   AuditEventId,
   EvidenceId,
+  ExpenseAdjustmentId,
   ExpenseId,
   ExpenseItemId,
   ExternalIntegrationId,
@@ -50,6 +55,8 @@ import type {
   PersonId,
   ReceiptId,
   ReceiptItemId,
+  ExpenseAdjustmentItemId,
+  ReconciliationAccountSnapshotId,
   ReconciliationRunId,
   SettlementId,
   SplitwiseExpenseId,
@@ -62,15 +69,23 @@ import { SETTLEMENT_CLAIM_NOTE_KIND, claimsSettlement } from '../domain/evidence
 import type { BalanceAllocationLine, BalanceExpense, BalanceInput } from '../domain/balance.js';
 import type { GroupMembership } from '../domain/entities.js';
 import type { ReconciliationTotals } from '../domain/reconciliation.js';
+import type { AccountCashSnapshotDraft, CashMovement } from '../domain/cash-balance.js';
+import type {
+  CashDiscrepancyKind,
+  CashReconciliationDiscrepancy,
+  ReconciliationAccountSnapshot,
+} from '../domain/entities.js';
 
 import type { Database } from './client.js';
 import {
+  accounts,
   aiInferences,
   allocationLineGroupExpansions,
   allocationLines,
   allocations,
   auditEvents,
   evidence,
+  expenseAdjustmentItems,
   expenseAdjustments,
   expenseItems,
   expenses,
@@ -84,6 +99,7 @@ import {
   people,
   receiptItems,
   receipts,
+  reconciliationAccountSnapshots,
   reconciliationRuns,
   settlements,
   splitwiseExpenses,
@@ -671,6 +687,196 @@ export async function listAdjustmentAmounts(
   return rows.map((row) => row.amount as Paise);
 }
 
+/* --------------------------------------------------- item-level refund attribution */
+
+export interface ExpenseAdjustmentItemDraft {
+  readonly expenseItemId: ExpenseItemId;
+  readonly amount: Paise;
+}
+
+/**
+ * Writes one adjustment's complete attribution set in a single statement.
+ *
+ * There is no per-row insert and no update path, by design: 19.2's exact-sum rule is a
+ * property of the whole set, and a caller able to write one row at a time could leave a
+ * half-attributed adjustment behind and call it an approved item refund. The caller validates
+ * the set through `domain.validateRefundAttribution` first, inside the same transaction.
+ */
+export async function insertExpenseAdjustmentItems(
+  exec: Executor,
+  expenseAdjustmentId: ExpenseAdjustmentId,
+  drafts: readonly ExpenseAdjustmentItemDraft[],
+): Promise<Array<{ id: ExpenseAdjustmentItemId; expenseItemId: ExpenseItemId }>> {
+  if (drafts.length === 0) return [];
+  const rows = await exec
+    .insert(expenseAdjustmentItems)
+    .values(
+      drafts.map((draft) => ({
+        expenseAdjustmentId,
+        expenseItemId: draft.expenseItemId,
+        amount: draft.amount,
+      })),
+    )
+    .returning({
+      id: expenseAdjustmentItems.id,
+      expenseItemId: expenseAdjustmentItems.expenseItemId,
+    });
+  return rows.map((row) => ({
+    id: row.id as ExpenseAdjustmentItemId,
+    expenseItemId: row.expenseItemId as ExpenseItemId,
+  }));
+}
+
+/**
+ * Takes the row lock that makes 19.3's cumulative ceilings safe under concurrency.
+ *
+ * Two refunds recorded against one expense at the same time would otherwise each read the
+ * same "already attributed" totals, each find room under the ceiling, and together exceed it.
+ * Locking the parent `Expense` row serialises them: the second transaction waits, then reads
+ * the first one's committed attributions and is refused. The expense is the right granularity
+ * because both ceilings 19.3 names — per item and per expense — are scoped to it.
+ */
+export async function lockExpenseForAdjustment(
+  exec: Executor,
+  expenseId: ExpenseId,
+): Promise<void> {
+  await exec.execute(sql`select id from expenses where id = ${expenseId} for update`);
+}
+
+/**
+ * Cumulative attributions per `ExpenseItem` for one expense — the input to 19.3's ceiling.
+ *
+ * Sums across **every** adjustment, never just the newest: three successive refunds of 40
+ * paise against a 100-paise item each pass a newest-row-only check and together exceed what
+ * the item cost.
+ */
+export async function listItemAttributionTotals(
+  exec: Executor,
+  expenseId: ExpenseId,
+  options: { readonly excludeAdjustmentId?: ExpenseAdjustmentId } = {},
+): Promise<Map<ExpenseItemId, Paise>> {
+  const conditions = [eq(expenseItems.expenseId, expenseId)];
+  if (options.excludeAdjustmentId !== undefined) {
+    conditions.push(
+      not(eq(expenseAdjustmentItems.expenseAdjustmentId, options.excludeAdjustmentId)),
+    );
+  }
+  const rows = await exec
+    .select({
+      expenseItemId: expenseAdjustmentItems.expenseItemId,
+      amount: expenseAdjustmentItems.amount,
+    })
+    .from(expenseAdjustmentItems)
+    .innerJoin(expenseItems, eq(expenseAdjustmentItems.expenseItemId, expenseItems.id))
+    .where(and(...conditions));
+
+  const totals = new Map<ExpenseItemId, Paise>();
+  for (const row of rows) {
+    const itemId = row.expenseItemId as ExpenseItemId;
+    const previous = totals.get(itemId) ?? (0n as Paise);
+    totals.set(itemId, (previous + (row.amount as Paise)) as Paise);
+  }
+  return totals;
+}
+
+/** One attribution row, as an API response or a proof pack reads it. */
+export interface ExpenseAdjustmentItemRow {
+  readonly id: string;
+  readonly expenseAdjustmentId: ExpenseAdjustmentId;
+  readonly expenseItemId: ExpenseItemId;
+  readonly amount: Paise;
+}
+
+/** Every attribution recorded against one expense, oldest adjustment first. */
+export async function listExpenseAdjustmentItems(
+  exec: Executor,
+  expenseId: ExpenseId,
+): Promise<ExpenseAdjustmentItemRow[]> {
+  const rows = await exec
+    .select({
+      id: expenseAdjustmentItems.id,
+      expenseAdjustmentId: expenseAdjustmentItems.expenseAdjustmentId,
+      expenseItemId: expenseAdjustmentItems.expenseItemId,
+      amount: expenseAdjustmentItems.amount,
+    })
+    .from(expenseAdjustmentItems)
+    .innerJoin(
+      expenseAdjustments,
+      eq(expenseAdjustmentItems.expenseAdjustmentId, expenseAdjustments.id),
+    )
+    .where(eq(expenseAdjustments.originalExpenseId, expenseId))
+    .orderBy(asc(expenseAdjustments.occurredAt), asc(expenseAdjustmentItems.id));
+
+  return rows.map((row) => ({
+    id: row.id,
+    expenseAdjustmentId: row.expenseAdjustmentId as ExpenseAdjustmentId,
+    expenseItemId: row.expenseItemId as ExpenseItemId,
+    amount: row.amount as Paise,
+  }));
+}
+
+/**
+ * What other adjustments already draw from one refund credit (19.6).
+ *
+ * Excludes the adjustment being validated so a re-validation of an existing row does not
+ * count itself against the credit twice.
+ */
+export async function sumAdjustmentsAgainstPayment(
+  exec: Executor,
+  paymentId: PaymentId,
+  options: { readonly excludeAdjustmentId?: ExpenseAdjustmentId } = {},
+): Promise<Paise> {
+  const conditions = [eq(expenseAdjustments.adjustmentPaymentId, paymentId)];
+  if (options.excludeAdjustmentId !== undefined) {
+    conditions.push(not(eq(expenseAdjustments.id, options.excludeAdjustmentId)));
+  }
+  const rows = await exec
+    .select({ amount: expenseAdjustments.amount })
+    .from(expenseAdjustments)
+    .where(and(...conditions));
+  let total = 0n;
+  for (const row of rows) total += row.amount as Paise;
+  return total as Paise;
+}
+
+/** The items of one expense, with the gross cost and expense identity 19.1/19.3 check against. */
+export async function listExpenseItemContexts(
+  exec: Executor,
+  expenseId: ExpenseId,
+): Promise<Array<{ expenseItemId: ExpenseItemId; expenseId: ExpenseId; grossAmount: Paise }>> {
+  const rows = await exec
+    .select({ id: expenseItems.id, expenseId: expenseItems.expenseId, amount: expenseItems.amount })
+    .from(expenseItems)
+    .where(eq(expenseItems.expenseId, expenseId))
+    .orderBy(asc(expenseItems.id));
+  return rows.map((row) => ({
+    expenseItemId: row.id as ExpenseItemId,
+    expenseId: row.expenseId as ExpenseId,
+    grossAmount: row.amount as Paise,
+  }));
+}
+
+/**
+ * The expense one `ExpenseItem` belongs to, or `null`.
+ *
+ * Read so 19.1 can be enforced against an item the caller named that is **not** among the
+ * parent expense's own items — the cross-expense case. Looking it up by expense first would
+ * simply not find it, and "not found" and "belongs to a different expense" are different
+ * answers a human needs to tell apart.
+ */
+export async function getExpenseItemOwner(
+  exec: Executor,
+  expenseItemId: ExpenseItemId,
+): Promise<{ expenseId: ExpenseId; grossAmount: Paise } | null> {
+  const [row] = await exec
+    .select({ expenseId: expenseItems.expenseId, amount: expenseItems.amount })
+    .from(expenseItems)
+    .where(eq(expenseItems.id, expenseItemId));
+  return row === undefined
+    ? null
+    : { expenseId: row.expenseId as ExpenseId, grossAmount: row.amount as Paise };
+}
+
 /* ========================================================================== payments */
 
 export interface PaymentRow {
@@ -1055,6 +1261,128 @@ export async function updatePaymentState(
   await exec.update(payments).set({ state, ignoredReason }).where(eq(payments.id, paymentId));
 }
 
+/** The cash-flow interpretation columns, as classification and approval read them. */
+export interface PaymentCashFlowRow {
+  readonly id: PaymentId;
+  readonly accountId: AccountId;
+  readonly amount: Paise;
+  readonly currency: string;
+  readonly direction: PaymentDirection;
+  readonly counterpartyType: PaymentCounterpartyType;
+  readonly state: PaymentState;
+  readonly ignoredReason: string | null;
+  readonly externalReference: string | null;
+  readonly occurredAt: Date;
+  readonly cashFlowCategory: CashFlowCategory | null;
+  readonly cashFlowState: CashFlowState;
+  readonly cashFlowApprovedAt: Date | null;
+  readonly cashFlowApprovedBy: string | null;
+}
+
+export async function getPaymentCashFlow(
+  exec: Executor,
+  paymentId: PaymentId,
+): Promise<PaymentCashFlowRow | null> {
+  const [row] = await exec
+    .select({
+      id: payments.id,
+      accountId: payments.accountId,
+      amount: payments.amount,
+      currency: payments.currency,
+      direction: payments.direction,
+      counterpartyType: payments.counterpartyType,
+      state: payments.state,
+      ignoredReason: payments.ignoredReason,
+      externalReference: payments.externalReference,
+      occurredAt: payments.occurredAt,
+      cashFlowCategory: payments.cashFlowCategory,
+      cashFlowState: payments.cashFlowState,
+      cashFlowApprovedAt: payments.cashFlowApprovedAt,
+      cashFlowApprovedBy: payments.cashFlowApprovedBy,
+    })
+    .from(payments)
+    .where(eq(payments.id, paymentId));
+  return row === undefined ? null : (row as PaymentCashFlowRow);
+}
+
+/**
+ * Writes the cash-flow interpretation onto a payment.
+ *
+ * DERIVED metadata layered on immutable SOURCE columns, exactly as `updatePaymentState` is:
+ * `amount`, `occurred_at`, `raw_description` and `account_id` are untouched, and so is
+ * `state` — the two lifecycles run alongside each other and neither renames the other
+ * (ADR-0017 (cash balance), `lifecycle.md`).
+ */
+export async function updatePaymentCashFlow(
+  exec: Executor,
+  paymentId: PaymentId,
+  next: {
+    readonly cashFlowCategory: CashFlowCategory | null;
+    readonly cashFlowState: CashFlowState;
+    readonly cashFlowApprovedAt: Date | null;
+    readonly cashFlowApprovedBy: string | null;
+  },
+): Promise<void> {
+  await exec
+    .update(payments)
+    .set({
+      cashFlowCategory: next.cashFlowCategory,
+      cashFlowState: next.cashFlowState,
+      cashFlowApprovedAt: next.cashFlowApprovedAt,
+      cashFlowApprovedBy: next.cashFlowApprovedBy,
+    })
+    .where(eq(payments.id, paymentId));
+}
+
+/** `Evidence` rows attached directly to one payment — approval evidence for 17.2. */
+export async function countEvidenceForPayment(
+  exec: Executor,
+  paymentId: PaymentId,
+): Promise<number> {
+  const rows = await exec
+    .select({ id: evidence.id })
+    .from(evidence)
+    .where(eq(evidence.linkedPaymentId, paymentId));
+  return rows.length;
+}
+
+/** `Settlement` rows carried by one payment — approval evidence for `PEER_SETTLEMENT`. */
+export async function countSettlementsForPayment(
+  exec: Executor,
+  paymentId: PaymentId,
+): Promise<number> {
+  const rows = await exec
+    .select({ id: settlements.id })
+    .from(settlements)
+    .where(eq(settlements.paymentId, paymentId));
+  return rows.length;
+}
+
+/** `ExpenseAdjustment` rows naming this credit — approval evidence for `REFUND`. */
+export async function countAdjustmentsForPayment(
+  exec: Executor,
+  paymentId: PaymentId,
+): Promise<number> {
+  const rows = await exec
+    .select({ id: expenseAdjustments.id })
+    .from(expenseAdjustments)
+    .where(eq(expenseAdjustments.adjustmentPaymentId, paymentId));
+  return rows.length;
+}
+
+/** Whether the account a payment moved through belongs to this user (17.2's transfer gate). */
+export async function isAccountOwnedByUser(
+  exec: Executor,
+  accountId: AccountId,
+  ownerUserId: UserId,
+): Promise<boolean> {
+  const rows = await exec
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(and(eq(accounts.id, accountId), eq(accounts.ownerUserId, ownerUserId)));
+  return rows.length > 0;
+}
+
 /* =============================================================================== people */
 
 /**
@@ -1359,6 +1687,246 @@ export async function getReconciliationRunById(
 ): Promise<ReconciliationRunRow | null> {
   const [row] = await exec.select().from(reconciliationRuns).where(eq(reconciliationRuns.id, id));
   return row === undefined ? null : toReconciliationRunRow(row);
+}
+
+/* ------------------------------------------------- account cash snapshots (ADR-0017) */
+
+export interface InsertAccountCashSnapshotInput {
+  readonly reconciliationRunId: ReconciliationRunId;
+  readonly snapshot: AccountCashSnapshotDraft;
+}
+
+/**
+ * Writes one immutable account snapshot.
+ *
+ * There is deliberately no update counterpart. A snapshot records what the inputs said when
+ * the run happened; later evidence produces a new run, and editing an old `incomplete`
+ * snapshot into a `verified` one is exactly the retroactive certification 17.7 forbids.
+ */
+export async function insertReconciliationAccountSnapshot(
+  exec: Executor,
+  input: InsertAccountCashSnapshotInput,
+): Promise<ReconciliationAccountSnapshotId> {
+  const snapshot = input.snapshot;
+  const [row] = await exec
+    .insert(reconciliationAccountSnapshots)
+    .values({
+      reconciliationRunId: input.reconciliationRunId,
+      accountId: snapshot.accountId,
+      currency: snapshot.currency,
+      periodStart: snapshot.periodStart,
+      periodEnd: snapshot.periodEnd,
+      openingBalance: snapshot.openingBalance,
+      closingBalance: snapshot.closingBalance,
+      openingBalanceEvidenceId: snapshot.openingBalanceEvidenceId,
+      closingBalanceEvidenceId: snapshot.closingBalanceEvidenceId,
+      totalDebits: snapshot.totalDebits,
+      totalCredits: snapshot.totalCredits,
+      internalTransferDebits: snapshot.internalTransferDebits,
+      internalTransferCredits: snapshot.internalTransferCredits,
+      explainedDebits: snapshot.explainedDebits,
+      unexplainedDebits: snapshot.unexplainedDebits,
+      explainedCredits: snapshot.explainedCredits,
+      unexplainedCredits: snapshot.unexplainedCredits,
+      expectedEndingBalance: snapshot.expectedEndingBalance,
+      cashBalanceDelta: snapshot.cashBalanceDelta,
+      verificationStatus: snapshot.verificationStatus,
+      discrepancies: snapshot.discrepancies.map(toStorableCashDiscrepancy),
+      provenance: snapshot.provenance,
+    })
+    .returning({ id: reconciliationAccountSnapshots.id });
+  return requireRow(row, 'reconciliation_account_snapshots').id as ReconciliationAccountSnapshotId;
+}
+
+/**
+ * JSONB cannot hold a `bigint`, so a discrepancy's amount is stored as exact decimal **text**
+ * and revived on read — the same treatment `reconciliation_runs.discrepancies` already gives
+ * `externalNetBalance`. Never a JavaScript `number`: a paise figure above 2^53 would come back
+ * subtly wrong rather than loudly wrong (`invariants.md` #12).
+ */
+function toStorableCashDiscrepancy(
+  discrepancy: CashReconciliationDiscrepancy,
+): Record<string, unknown> {
+  const { amount, ...rest } = discrepancy;
+  return { ...rest, ...(amount === undefined ? {} : { amount: amount.toString() }) };
+}
+
+function toCashDiscrepancies(raw: unknown): CashReconciliationDiscrepancy[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry): CashReconciliationDiscrepancy[] => {
+    if (typeof entry !== 'object' || entry === null) return [];
+    const record = entry as Record<string, unknown>;
+    if (typeof record.kind !== 'string') return [];
+    return [
+      {
+        kind: record.kind as CashDiscrepancyKind,
+        detail: typeof record.detail === 'string' ? record.detail : '',
+        ...(typeof record.amount === 'string' ? { amount: BigInt(record.amount) as Paise } : {}),
+        ...(typeof record.paymentId === 'string'
+          ? { paymentId: record.paymentId as PaymentId }
+          : {}),
+      },
+    ];
+  });
+}
+
+function toAccountSnapshotRow(
+  row: typeof reconciliationAccountSnapshots.$inferSelect,
+): ReconciliationAccountSnapshot {
+  return {
+    id: row.id as ReconciliationAccountSnapshotId,
+    reconciliationRunId: row.reconciliationRunId as ReconciliationRunId,
+    accountId: row.accountId as AccountId,
+    currency: row.currency,
+    periodStart: row.periodStart,
+    periodEnd: row.periodEnd,
+    openingBalance: row.openingBalance as Paise | null,
+    closingBalance: row.closingBalance as Paise | null,
+    openingBalanceEvidenceId: row.openingBalanceEvidenceId as EvidenceId | null,
+    closingBalanceEvidenceId: row.closingBalanceEvidenceId as EvidenceId | null,
+    totalDebits: row.totalDebits as Paise,
+    totalCredits: row.totalCredits as Paise,
+    internalTransferDebits: row.internalTransferDebits as Paise,
+    internalTransferCredits: row.internalTransferCredits as Paise,
+    explainedDebits: row.explainedDebits as Paise,
+    unexplainedDebits: row.unexplainedDebits as Paise,
+    explainedCredits: row.explainedCredits as Paise,
+    unexplainedCredits: row.unexplainedCredits as Paise,
+    expectedEndingBalance: row.expectedEndingBalance as Paise | null,
+    cashBalanceDelta: row.cashBalanceDelta as Paise | null,
+    verificationStatus:
+      row.verificationStatus as ReconciliationAccountSnapshot['verificationStatus'],
+    discrepancies: toCashDiscrepancies(row.discrepancies),
+    provenance: row.provenance,
+    createdAt: row.createdAt,
+  };
+}
+
+/** Every account snapshot belonging to one run, in a stable account order. */
+export async function listReconciliationAccountSnapshots(
+  exec: Executor,
+  reconciliationRunId: ReconciliationRunId,
+): Promise<ReconciliationAccountSnapshot[]> {
+  const rows = await exec
+    .select()
+    .from(reconciliationAccountSnapshots)
+    .where(eq(reconciliationAccountSnapshots.reconciliationRunId, reconciliationRunId))
+    .orderBy(asc(reconciliationAccountSnapshots.accountId));
+  return rows.map(toAccountSnapshotRow);
+}
+
+/**
+ * Every account the cash identity is computed for.
+ *
+ * Archived accounts are included deliberately: an account closed mid-period still posted real
+ * movements in that period, and dropping it would leave them out of a report whose whole
+ * purpose is that every movement participates (17.6).
+ */
+export async function listAccountsForCashReconciliation(
+  exec: Executor,
+): Promise<Array<{ id: AccountId; currency: string }>> {
+  const rows = await exec
+    .select({ id: accounts.id, currency: accounts.currency })
+    .from(accounts)
+    .orderBy(asc(accounts.id));
+  return rows.map((row) => ({ id: row.id as AccountId, currency: row.currency }));
+}
+
+/**
+ * Every actual posted movement in a period, with what already explains it.
+ *
+ * Deliberately unfiltered by `state`: 17.6 requires every distinct statement movement to
+ * participate "even when unclassified or excluded from spending", and dropping an `ignored`
+ * row here would silently exclude out-of-scope bank activity from a cash identity that only
+ * means something if it is complete. `domain.isDuplicateRepresentation` drops the one class
+ * that genuinely must not be counted — a confirmed duplicate — and only that class.
+ *
+ * The three explanation totals are gathered per payment in three batched selects rather than
+ * one join, because a payment with two expense links and a settlement would otherwise
+ * multiply its own rows and inflate every total it appears in.
+ */
+export async function loadCashReconciliationInput(
+  exec: Executor,
+  period: { readonly start: Date; readonly end: Date },
+): Promise<CashMovement[]> {
+  const paymentRows = await exec
+    .select({
+      id: payments.id,
+      accountId: payments.accountId,
+      direction: payments.direction,
+      amount: payments.amount,
+      currency: payments.currency,
+      counterpartyType: payments.counterpartyType,
+      cashFlowCategory: payments.cashFlowCategory,
+      cashFlowState: payments.cashFlowState,
+      state: payments.state,
+      ignoredReason: payments.ignoredReason,
+      externalReference: payments.externalReference,
+    })
+    .from(payments)
+    .where(
+      and(
+        sql`${payments.occurredAt} >= ${period.start}`,
+        sql`${payments.occurredAt} < ${period.end}`,
+      ),
+    )
+    .orderBy(asc(payments.id));
+
+  if (paymentRows.length === 0) return [];
+  const paymentIds = paymentRows.map((row) => row.id);
+
+  const linkRows = await exec
+    .select({ paymentId: paymentExpenseLinks.paymentId, amount: paymentExpenseLinks.amount })
+    .from(paymentExpenseLinks)
+    .where(inArray(paymentExpenseLinks.paymentId, paymentIds));
+  const settlementRows = await exec
+    .select({ paymentId: settlements.paymentId, amount: settlements.amount })
+    .from(settlements)
+    .where(inArray(settlements.paymentId, paymentIds));
+  const adjustmentRows = await exec
+    .select({
+      paymentId: expenseAdjustments.adjustmentPaymentId,
+      amount: expenseAdjustments.amount,
+    })
+    .from(expenseAdjustments)
+    .where(inArray(expenseAdjustments.adjustmentPaymentId, paymentIds));
+
+  const totalsFor = (
+    rows: Array<{ paymentId: string | null; amount: Paise }>,
+  ): Map<string, Paise> => {
+    const totals = new Map<string, Paise>();
+    for (const row of rows) {
+      if (row.paymentId === null) continue;
+      totals.set(row.paymentId, ((totals.get(row.paymentId) ?? 0n) + row.amount) as Paise);
+    }
+    return totals;
+  };
+  const linkTotals = totalsFor(linkRows as Array<{ paymentId: string | null; amount: Paise }>);
+  const settlementTotals = totalsFor(
+    settlementRows as Array<{ paymentId: string | null; amount: Paise }>,
+  );
+  const adjustmentTotals = totalsFor(
+    adjustmentRows as Array<{ paymentId: string | null; amount: Paise }>,
+  );
+
+  return paymentRows.map((row) => ({
+    paymentId: row.id as PaymentId,
+    accountId: row.accountId as AccountId,
+    direction: row.direction as PaymentDirection,
+    amount: row.amount as Paise,
+    currency: row.currency,
+    counterpartyType: row.counterpartyType as PaymentCounterpartyType,
+    cashFlowCategory: row.cashFlowCategory as CashFlowCategory | null,
+    cashFlowState: row.cashFlowState as CashFlowState,
+    state: row.state as PaymentState,
+    ignoredReason: row.ignoredReason,
+    externalReference: row.externalReference,
+    explanation: {
+      expenseLinkTotal: linkTotals.get(row.id) ?? (0n as Paise),
+      settlementTotal: settlementTotals.get(row.id) ?? (0n as Paise),
+      adjustmentTotal: adjustmentTotals.get(row.id) ?? (0n as Paise),
+    },
+  }));
 }
 
 /** The `ExpenseItem`s an item-based allocation draws its amounts from. */
