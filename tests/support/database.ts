@@ -24,12 +24,14 @@ import type { Database, DatabaseHandle } from '../../src/db/client.js';
 /** Every table the migration creates, in an order safe to truncate together. */
 const ALL_TABLES = [
   'audit_events',
+  'reconciliation_account_snapshots',
   'reconciliation_runs',
   'splitwise_settlements',
   'splitwise_expenses',
   'external_integrations',
   'rules',
   'ai_inferences',
+  'expense_adjustment_items',
   'expense_adjustments',
   'settlements',
   'allocation_line_group_expansions',

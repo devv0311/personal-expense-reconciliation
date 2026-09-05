@@ -62,7 +62,27 @@ export type DomainErrorCode =
   /** A referenced entity was absent from the input set handed to a pure function. */
   | 'UNKNOWN_REFERENCE'
   /** A `parseReceipt`/`extractReceiptItems` draft carried no figure worth recording. */
-  | 'RECEIPT_DRAFT_INVALID';
+  | 'RECEIPT_DRAFT_INVALID'
+  /** A cash-flow category was paired with a direction it cannot describe (17.2). */
+  | 'CASH_FLOW_DIRECTION_INVALID'
+  /** A credit reached cash-flow approval with no category — unexplained, not inflow (17.2). */
+  | 'CASH_FLOW_CATEGORY_REQUIRED'
+  /** A cash-flow category was approved without the evidence its role requires (17.2). */
+  | 'CASH_FLOW_EVIDENCE_INSUFFICIENT'
+  /** A cash snapshot's stored totals contradict ADR-0017 (cash balance)'s identities (17.4, 17.7). */
+  | 'CASH_BALANCE_IDENTITY_MISMATCH'
+  /** A cash snapshot's shape is impossible — a balance with no evidence, an inverted period. */
+  | 'CASH_SNAPSHOT_SHAPE_INVALID'
+  /** Matched internal-transfer legs failed to cancel across a consolidated scope (17.3). */
+  | 'INTERNAL_TRANSFER_NOT_NEUTRAL'
+  /** An attribution named an `ExpenseItem` belonging to a different expense (19.1). */
+  | 'REFUND_ATTRIBUTION_CROSS_EXPENSE'
+  /** Item attributions did not sum exactly to their parent adjustment's amount (19.2). */
+  | 'REFUND_ATTRIBUTION_SUM_MISMATCH'
+  /** One `ExpenseItem` was attributed twice within a single adjustment (ADR-0018). */
+  | 'REFUND_ATTRIBUTION_DUPLICATE_ITEM'
+  /** Cumulative attributions exceeded an item's original gross cost (19.3). */
+  | 'REFUND_ITEM_CEILING_EXCEEDED';
 
 /** Thrown by `src/domain` when an input violates a documented invariant. */
 export class DomainError extends Error {

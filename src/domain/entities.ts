@@ -22,6 +22,8 @@ import type {
   AuditAction,
   AuditableEntityType,
   BeneficiaryType,
+  CashFlowCategory,
+  CashFlowState,
   ConfidenceLevel,
   EvidenceNoteKind,
   EvidenceType,
@@ -35,6 +37,7 @@ import type {
   PaymentDirection,
   PaymentReferenceType,
   PaymentState,
+  ReconciliationVerificationStatus,
   RuleOrigin,
   SplitwiseExpenseSyncStatus,
   SplitwiseSettlementSyncStatus,
@@ -48,6 +51,7 @@ import type {
   AuditEventId,
   EvidenceId,
   ExpenseAdjustmentId,
+  ExpenseAdjustmentItemId,
   ExpenseId,
   ExpenseItemId,
   ExpenseOccasionId,
@@ -61,6 +65,7 @@ import type {
   PersonId,
   ReceiptId,
   ReceiptItemId,
+  ReconciliationAccountSnapshotId,
   ReconciliationRunId,
   RuleId,
   SettlementId,
@@ -187,6 +192,24 @@ export interface Payment {
   readonly sourceSystem: string | null;
   readonly state: PaymentState;
   readonly ignoredReason: string | null;
+  /**
+   * What role this movement plays in the account's cash, orthogonal to `counterpartyType`
+   * (ADR-0017 (cash balance)).
+   *
+   * `null` on an ordinary purchase or investment debit, which keeps its existing
+   * explanation. `null` on a credit means the credit is **unexplained** — never that it was
+   * income.
+   */
+  readonly cashFlowCategory: CashFlowCategory | null;
+  /**
+   * Where this payment stands in the cash-flow *interpretation* lifecycle, alongside — never
+   * instead of — `state` (`lifecycle.md`, "Cash-flow classification lifecycle").
+   */
+  readonly cashFlowState: CashFlowState;
+  /** When the cash-flow role was approved; `null` until it is. */
+  readonly cashFlowApprovedAt: Date | null;
+  /** `'user'` or `'rule:<rule_id>'` — never `'ai'` and never a model's confidence. */
+  readonly cashFlowApprovedBy: string | null;
 }
 
 /** Any document or information supporting an interpretation. SOURCE, immutable. */
@@ -373,6 +396,26 @@ export interface ExpenseAdjustment {
   readonly occurredAt: Date;
 }
 
+/**
+ * Which purchased item a refund/reimbursement actually gave money back for
+ * (ADR-0018 (item refunds)).
+ *
+ * A cost reduction, never a beneficiary share: whole-expense proportional distribution
+ * cannot express that the friend's ₹400 item was the one returned, and would quietly reduce
+ * a debt owed by someone whose item was never refunded. Deliberately carries none of the
+ * parent's context — expense identity, kind, date, approval and the optional credit
+ * `Payment` all live on the `ExpenseAdjustment`, and duplicating them here would create two
+ * places for them to disagree.
+ */
+export interface ExpenseAdjustmentItem {
+  readonly id: ExpenseAdjustmentItemId;
+  readonly expenseAdjustmentId: ExpenseAdjustmentId;
+  /** The original purchased item. Its `expenseId` must equal the parent's `originalExpenseId` (19.1). */
+  readonly expenseItemId: ExpenseItemId;
+  /** Strictly positive integer paise. There is no zero, negative or signed attribution (19.4). */
+  readonly amount: Paise;
+}
+
 /* ================================================================== audit and AI */
 
 /** Append-only. Never edited, never deleted (`invariants.md` #22). */
@@ -491,4 +534,90 @@ export interface ReconciliationDiscrepancy {
   /** What Splitwise reports A owes B, when this discrepancy is a balance disagreement. */
   readonly externalNetBalance?: Paise;
   readonly resolvedAt?: Date | null;
+}
+
+/**
+ * One gap surfaced by an account's cash reconciliation (ADR-0017 (cash balance), 17.6).
+ *
+ * Deliberately its own type rather than a reuse of {@link ReconciliationDiscrepancy}: that one
+ * describes a disagreement with Splitwise between two *people*, this one describes a
+ * disagreement about one *account's* cash, and the fields that explain each have nothing in
+ * common. Sharing a shape would make both halves optional on every row and force every reader
+ * to guess which kind it was holding.
+ */
+export interface CashReconciliationDiscrepancy {
+  readonly kind: CashDiscrepancyKind;
+  readonly detail: string;
+  /** The signed or positive-magnitude figure the discrepancy is about, when there is one. */
+  readonly amount?: Paise;
+  /** The movement a transfer-pairing or coverage discrepancy points at. */
+  readonly paymentId?: PaymentId;
+}
+
+/**
+ * The gaps an account snapshot can surface.
+ *
+ * A closed set, unlike {@link ReconciliationDiscrepancy}'s loose `kind` — every value here is
+ * produced by one branch of `domain.computeAccountCashSnapshot` and read by the verification
+ * rule, so an unrecognised value would mean a snapshot nothing can classify.
+ */
+export type CashDiscrepancyKind =
+  /** No evidenced opening balance, so the identity cannot be computed at all (17.5). */
+  | 'missing_opening_balance'
+  /** No evidenced closing balance, so there is nothing to check the arithmetic against (17.5). */
+  | 'missing_closing_balance'
+  /** `actual_ending_balance` and `expected_ending_balance` disagree (17.4). */
+  | 'cash_balance_delta_nonzero'
+  /** Debits this account cannot explain from approved links, settlements or categories (17.6). */
+  | 'unexplained_debits'
+  /** Credits this account cannot explain — including every unclassified credit (17.2, 17.6). */
+  | 'unexplained_credits'
+  /** An internal-transfer leg whose counter-leg is missing, out of scope, or in another period (17.3). */
+  | 'unpaired_internal_transfer';
+
+/**
+ * One account's evidence-backed bank reconciliation for one run (ADR-0017 (cash balance)).
+ *
+ * SYSTEM, immutable, and deliberately **not** an editable balance authority: it records what
+ * the inputs said at the moment the run happened. Later evidence produces a new run, never an
+ * edit that certifies an old one (17.7).
+ *
+ * Balances and `cashBalanceDelta` are signed — an overdraft is a real balance — so the
+ * non-negative money rule applies to the movement and explanation totals only, never to these.
+ */
+export interface ReconciliationAccountSnapshot {
+  readonly id: ReconciliationAccountSnapshotId;
+  readonly reconciliationRunId: ReconciliationRunId;
+  readonly accountId: AccountId;
+  readonly currency: CurrencyCode;
+  /** The parent run's interval, half-open `[start, end)` for posted movements. */
+  readonly periodStart: Date;
+  readonly periodEnd: Date;
+  /** Actual statement balances. `null` when the evidence is missing — never fabricated as zero. */
+  readonly openingBalance: Paise | null;
+  readonly closingBalance: Paise | null;
+  readonly openingBalanceEvidenceId: EvidenceId | null;
+  readonly closingBalanceEvidenceId: EvidenceId | null;
+  /** Positive-magnitude totals of every distinct posted movement, gross and counted once. */
+  readonly totalDebits: Paise;
+  readonly totalCredits: Paise;
+  /** Subsets of the totals above, not additional terms to add or subtract (17.3). */
+  readonly internalTransferDebits: Paise;
+  readonly internalTransferCredits: Paise;
+  readonly explainedDebits: Paise;
+  readonly unexplainedDebits: Paise;
+  readonly explainedCredits: Paise;
+  readonly unexplainedCredits: Paise;
+  /** `opening + credits - debits`, and `closing - expected`. Both `null` until both boundaries are evidenced. */
+  readonly expectedEndingBalance: Paise | null;
+  readonly cashBalanceDelta: Paise | null;
+  readonly verificationStatus: ReconciliationVerificationStatus;
+  readonly discrepancies: readonly CashReconciliationDiscrepancy[];
+  /**
+   * The inputs this run actually read — payment ids, the classification behind each
+   * explanation, and transfer pair references — so a later reclassification cannot
+   * reinterpret a past run (17.7).
+   */
+  readonly provenance: unknown;
+  readonly createdAt: Date;
 }

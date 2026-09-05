@@ -57,6 +57,74 @@ export type PaymentReferenceType = (typeof PAYMENT_REFERENCE_TYPES)[number];
 export const PAYMENT_STATES = ['imported', 'normalized', 'linked', 'ignored'] as const;
 export type PaymentState = (typeof PAYMENT_STATES)[number];
 
+/**
+ * What role a cash movement plays, independently of who is on the other side of it
+ * (ADR-0017 (cash balance), 17.1).
+ *
+ * Deliberately **not** a replacement expense taxonomy, and deliberately orthogonal to
+ * {@link PAYMENT_COUNTERPARTY_TYPES}: `counterparty_type` answers *who*, this answers *what
+ * the movement is for*. Uppercase because the ADR's table names these exact values; the
+ * lowercase convention elsewhere in this file follows the older columns' own value lists.
+ *
+ * `null` is a valid category for an ordinary purchase or investment debit, which keeps its
+ * existing explanation. It is not valid for an approved credit — an unclassified credit is
+ * unexplained, and `EXTERNAL_INFLOW` must never become the catch-all that closes a
+ * discrepancy (ADR-0017 (cash balance), "Payment classification").
+ */
+export const CASH_FLOW_CATEGORIES = [
+  'PEER_SETTLEMENT',
+  'REFUND',
+  'INTERNAL_TRANSFER',
+  'EXTERNAL_INFLOW',
+] as const;
+export type CashFlowCategory = (typeof CASH_FLOW_CATEGORIES)[number];
+
+/**
+ * The categories that can only ever describe money coming *in* (ADR-0017 (cash balance), 17.2).
+ *
+ * A debit refund or a debit external inflow is not a borderline judgement call — it is
+ * arithmetically impossible, which is why the rule is a row-local database `CHECK` as well as
+ * a domain function.
+ */
+export const CREDIT_ONLY_CASH_FLOW_CATEGORIES = ['REFUND', 'EXTERNAL_INFLOW'] as const;
+export type CreditOnlyCashFlowCategory = (typeof CREDIT_ONLY_CASH_FLOW_CATEGORIES)[number];
+
+/**
+ * The cash-flow **interpretation** lifecycle, alongside — never replacing — `Payment.state`
+ * (ADR-0017 (cash balance), `lifecycle.md`).
+ *
+ * ```text
+ * IMPORTED -> NORMALIZED -> CASH_FLOW_CLASSIFIED -> APPROVED
+ * ```
+ *
+ * `linked` in the legacy lifecycle does not imply `approved` here, and this lifecycle never
+ * renames or migrates the legacy states. Two lifecycles, two questions: "is this movement
+ * explained by a link?" and "has a human approved what this movement *is*?"
+ */
+export const CASH_FLOW_STATES = [
+  'imported',
+  'normalized',
+  'cash_flow_classified',
+  'approved',
+] as const;
+export type CashFlowState = (typeof CASH_FLOW_STATES)[number];
+
+/**
+ * The outcome of one account's cash reconciliation for one run (ADR-0017 (cash balance), 17.6).
+ *
+ * `incomplete` means the inputs themselves are missing (a statement boundary with no
+ * evidence); `unreconciled` means the inputs are complete and disagree. Only the full
+ * zero-delta, zero-unexplained, fully-evidenced condition is `verified` — a numeric zero over
+ * unknown transactions is not a verified ₹0 Unaccounted Delta.
+ */
+export const RECONCILIATION_VERIFICATION_STATUSES = [
+  'incomplete',
+  'unreconciled',
+  'verified',
+] as const;
+export type ReconciliationVerificationStatus =
+  (typeof RECONCILIATION_VERIFICATION_STATUSES)[number];
+
 /* ------------------------------------------------------------------------- evidence */
 
 export const EVIDENCE_TYPES = [
@@ -256,6 +324,7 @@ export const AUDITABLE_ENTITY_TYPES = [
   'allocation_line_group_expansion',
   'settlement',
   'expense_adjustment',
+  'expense_adjustment_item',
   'merchant',
   'evidence',
   'receipt',
@@ -264,6 +333,7 @@ export const AUDITABLE_ENTITY_TYPES = [
   'splitwise_expense',
   'splitwise_settlement',
   'reconciliation_run',
+  'reconciliation_account_snapshot',
 ] as const;
 export type AuditableEntityType = (typeof AUDITABLE_ENTITY_TYPES)[number];
 
@@ -315,4 +385,38 @@ export function isItemSourcedMethod(
   method: AllocationMethod,
 ): method is ItemSourcedAllocationMethod {
   return (ITEM_SOURCED_ALLOCATION_METHODS as readonly string[]).includes(method);
+}
+
+/** True when this cash-flow category can only ever describe a credit (17.2). */
+export function isCreditOnlyCashFlowCategory(
+  category: CashFlowCategory,
+): category is CreditOnlyCashFlowCategory {
+  return (CREDIT_ONLY_CASH_FLOW_CATEGORIES as readonly string[]).includes(category);
+}
+
+/**
+ * The `counterparty_type` a cash-flow category requires before it can be **approved**, or
+ * `null` when the category constrains no particular counterparty.
+ *
+ * A peer settlement is between people and an internal transfer is between the user's own
+ * accounts, so each names one. A refund can come back from a merchant (`merchant_refund`) or
+ * from a person (`third_party_reimbursement`), and an external inflow's payer is routinely
+ * an employer or a bank that this ledger has no `Person` for — inventing one to satisfy a
+ * constraint is exactly what ADR-0017 (cash balance) forbids, so neither names a type.
+ *
+ * This is a requirement at **approval**, not at classification: "An unresolved counterparty is
+ * allowed during normalization" (ADR-0017 (cash balance), "Payment classification").
+ */
+export function requiredCounterpartyTypeForCashFlow(
+  category: CashFlowCategory,
+): PaymentCounterpartyType | null {
+  switch (category) {
+    case 'PEER_SETTLEMENT':
+      return 'person';
+    case 'INTERNAL_TRANSFER':
+      return 'internal_account';
+    case 'REFUND':
+    case 'EXTERNAL_INFLOW':
+      return null;
+  }
 }

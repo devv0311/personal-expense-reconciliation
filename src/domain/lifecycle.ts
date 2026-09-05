@@ -10,6 +10,7 @@
 import { createsObligation, isNonSpendCounterparty } from './enums.js';
 import type {
   AiInferenceStatus,
+  CashFlowState,
   ExpenseAdjustmentState,
   ExpenseRelationshipType,
   ExpenseState,
@@ -72,6 +73,54 @@ export function isPaymentTerminalWithoutLinking(
   if (state !== 'normalized') return false;
   if (isNonSpendCounterparty(counterpartyType)) return true;
   return direction === 'credit';
+}
+
+/**
+ * The cash-flow **interpretation** lifecycle, which runs alongside `PAYMENT_TRANSITIONS`
+ * rather than replacing it (ADR-0017 (cash balance), `lifecycle.md`).
+ *
+ * ```text
+ * IMPORTED -> NORMALIZED -> CASH_FLOW_CLASSIFIED -> APPROVED
+ * ```
+ *
+ * Two states are reachable backwards, and both are deliberate:
+ *
+ *  - `cash_flow_classified -> normalized` is **rejection**. A declined proposal returns the
+ *    payment to review with no category, rather than being stamped with a role nobody agreed
+ *    to.
+ *  - `approved -> cash_flow_classified` is **reclassification**. ADR-0017 requires "an audited
+ *    new decision", not a silent edit, so correcting an approved role means re-entering the
+ *    proposal state and being approved again.
+ *
+ * There is no path from `imported` straight to `cash_flow_classified`: classifying a movement
+ * whose counterparty and reference have not been extracted yet would be a guess about a row
+ * nobody has read.
+ */
+const CASH_FLOW_TRANSITIONS: Transitions<CashFlowState> = {
+  imported: ['normalized'],
+  normalized: ['cash_flow_classified'],
+  cash_flow_classified: ['approved', 'normalized'],
+  approved: ['cash_flow_classified'],
+};
+
+export function canTransitionCashFlow(from: CashFlowState, to: CashFlowState): boolean {
+  return CASH_FLOW_TRANSITIONS[from].includes(to);
+}
+
+export function assertCashFlowTransition(from: CashFlowState, to: CashFlowState): void {
+  assertTransition('Payment cash-flow classification', from, to, canTransitionCashFlow(from, to));
+}
+
+/**
+ * True when a payment's cash-flow role has been approved by an explicit decision.
+ *
+ * The gate every cash-explanation read goes through. A `linked` legacy state, a category
+ * written by a proposal, and a model's confidence are all deliberately absent from it:
+ * "`LINKED` does not imply cash-flow approval" and "a link, category guess or high confidence
+ * alone is not approval" (`lifecycle.md`).
+ */
+export function isCashFlowApproved(state: CashFlowState): boolean {
+  return state === 'approved';
 }
 
 /* ------------------------------------------------------------------------- expenses */

@@ -31,7 +31,10 @@ REVOKE UPDATE, DELETE ON TABLE import_batches FROM :"app_role";
 -- immutable SOURCE columns, so those specific columns are granted back explicitly. Postgres
 -- has no column-level REVOKE, only column-level GRANT, which is exactly the shape wanted
 -- here: everything else on the table stays unwritable.
-GRANT UPDATE (state, ignored_reason) ON TABLE payments TO :"app_role";
+-- `cash_flow_*` joins them: ADR-0017 (cash balance)'s interpretation lifecycle is DERIVED
+-- metadata layered on the same immutable SOURCE row, exactly as `state` is.
+GRANT UPDATE (state, ignored_reason, cash_flow_category, cash_flow_state, cash_flow_approved_at, cash_flow_approved_by)
+  ON TABLE payments TO :"app_role";
 GRANT UPDATE (linked_payment_id, linked_expense_id) ON TABLE evidence TO :"app_role";
 
 -- Append-only audit log: never edited, never deleted, including for data the user later
@@ -64,3 +67,15 @@ REVOKE UPDATE, DELETE ON TABLE expense_adjustments FROM :"app_role";
 -- A reconciliation run is a snapshot; a later run supersedes it rather than editing it.
 REVOKE UPDATE, DELETE ON TABLE reconciliation_runs FROM :"app_role";
 GRANT UPDATE (resolved_at) ON TABLE reconciliation_runs TO :"app_role";
+
+-- An item attribution records what a refund actually gave money back for. Like the
+-- adjustment it belongs to, it is a record of an observed event: a correction is a new
+-- adjustment with its own attributions, never an edit of these rows
+-- (ADR-0018 (item refunds), 19.5).
+REVOKE UPDATE, DELETE ON TABLE expense_adjustment_items FROM :"app_role";
+
+-- An account snapshot records what the inputs said when the run happened. Editing an old
+-- `incomplete` snapshot into a `verified` one is the retroactive certification ADR-0017
+-- (cash balance) 17.7 forbids; new evidence produces a new run. Unlike `reconciliation_runs`,
+-- there is no `resolved_at` to grant back — nothing on this row is ever meant to move.
+REVOKE UPDATE, DELETE ON TABLE reconciliation_account_snapshots FROM :"app_role";
