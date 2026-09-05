@@ -38,7 +38,7 @@ desaturated, already off-black/off-white) are correct and stay. Two additions:
   needs a look but isn't wrong — a Splitwise mismatch, an expense in `review_required`. `debit`
   keeps its narrower, more serious meaning: a figure that is bad news in this specific context.
 
-### A hand-owned `src/components/ui/` primitive layer, in shadcn's *style*, without its stack
+### A hand-owned `src/components/ui/` primitive layer, in shadcn's _style_, without its stack
 
 `Button`, `Table`/`TableHeader`/`TableBody`/`TableRow`/`TableHead`/`TableCell`/`TableCaption`,
 `Alert` (`destructive` | `attention`), `Skeleton`, `Label`, and styled-native `Select`/`Input`
@@ -102,7 +102,7 @@ custom `text-*` token is added to `globals.css` and this config in the same chan
 - No change to `src/` (the backend) or to any financial computation — every number rendered is
   still exactly what the API already computed (`web/README.md`'s own invariant, unchanged).
 - All 37 existing frontend tests pass unmodified; no test needed to change because component
-  *behavior* (props, DOM roles, `selectOptions` compatibility) was preserved even where internal
+  _behavior_ (props, DOM roles, `selectOptions` compatibility) was preserved even where internal
   markup was rewritten.
 
 ## Alternatives considered
@@ -112,7 +112,7 @@ custom `text-*` token is added to `globals.css` and this config in the same chan
   documented (in the `vercel:shadcn` skill itself) to sometimes break `next/font` integration by
   emitting a circular `--font-sans: var(--font-sans)`. This app's existing paper/ink/debit/credit
   tokens are the actual distinctive part of the design; hand-authoring the primitives against
-  them, in the CLI's *style*, preserved that and avoided the rewrite risk entirely.
+  them, in the CLI's _style_, preserved that and avoided the rewrite risk entirely.
 - **Keep the Radix-based `Select`.** Rejected per "Decision" above — no control in this app's
   current scope needs a headless state machine, and the concrete cost (rewriting passing
   interaction tests) bought no real capability.

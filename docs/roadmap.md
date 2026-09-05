@@ -364,7 +364,7 @@ computeUnexplained` and `services.runReconciliation` (persisting a `Reconciliati
 > added no product scope. `web/Design.md` is now the authoritative, living design system —
 > tokens, typography, component principles, accessibility/responsive rules. Concretely: a named
 > seven-step type scale replacing ad hoc pixel values, with exactly one `text-display`/`text-
-> figure` hero number per screen (previously every figure sat in the same narrow 13–16px band,
+figure` hero number per screen (previously every figure sat in the same narrow 13–16px band,
 > including `ledgerUnexplainedTotal`, the number the whole reconciliation feature exists to
 > compute); a new `attention` semantic color separating "a Splitwise mismatch, worth a look" from
 > `debit` "this is wrong" (they were both red before, which taught the reader to distrust every
