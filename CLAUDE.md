@@ -1,7 +1,15 @@
 # CLAUDE.md — Engineering Context for This Repository
 
-> **Current decisions (2026-09-06).** Phase 16 is complete. Next is Phase 17, evidence
-> enrichment and context re-attachment. [ADR-0017 (cash balance)](docs/decisions/0017-pragmatic-cash-balance-reconciliation.md)
+> **Current decisions (2026-09-06).** Phases 16 and 17 are complete. Next is Phase 18, the
+> item-level refund **allocation engine**.
+> [Phase 17](docs/roadmap.md) shipped context re-attachment
+> ([ADR-0044](docs/decisions/0044-evidence-observations-and-match-candidates.md)):
+> `EvidenceObservation` records the structured reading of a bank SMS or UPI push notification
+> beside the immutable source, `EvidenceMatchCandidate` records each explained
+> evidence↔payment offer with every signal's verdict, and **nothing auto-links** — ADR-0034's
+> write-once linkage and ADR-0037's candidates-only rule are reused, not relaxed. The
+> sanitization boundary is now fail-closed (`ai.assertPayloadSanitized`) with a local-only
+> reversible mapping. [ADR-0017 (cash balance)](docs/decisions/0017-pragmatic-cash-balance-reconciliation.md)
 > and [ADR-0018 (item refunds)](docs/decisions/0018-item-level-refund-attribution.md) are now
 > **implemented at the schema, domain and service layers**: `Payment.cash_flow_category` with
 > its own classification lifecycle, `ReconciliationAccountSnapshot`, and

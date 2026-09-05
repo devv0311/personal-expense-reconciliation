@@ -240,6 +240,52 @@ expenses" case, via `receipt_items → expense_items → expenses`.
 numeric(10,3) not null default 1`, `unit_price bigint`, `line_total bigint not null`,
 `suggested_category`.
 
+### evidence_observations — DERIVED — **new table, phase 17, ADR-0044**
+
+`id`, `evidence_id references evidence(id) not null unique`, `observed_amount bigint check
+(observed_amount is null or observed_amount > 0)`, `observed_direction text check (… in
+('debit','credit'))`, `observed_reference text`, `observed_reference_normalized text`,
+`observed_reference_type text`, `observed_account_hint text check (… ~ '^[0-9]{1,4}$')`,
+`observed_merchant_text text`, `observed_occurred_at timestamptz`, `derivation text not null
+check (derivation in ('caller_supplied','parsed_from_text'))`, `notification_key text unique`,
+`updated_at`.
+
+The structured reading of one piece of evidence — what a bank SMS or UPI push notification says
+about a movement. A separate table for the same reason `receipts` is one: `evidence` is SOURCE
+and immutable, so an interpretation of it cannot live on its row. Every observed column is
+nullable because partial evidence is the ordinary case; `evidence_observations_not_empty_check`
+requires that the row observes _something_, and `…_reference_normalized_check` requires the
+matchable form to be present exactly when there is a reference to normalize.
+
+`observed_account_hint` carries the same masked-tail check `accounts.last4` does — this is where
+`A/C XXXX4821` enters the system, so it is where `security-model.md`'s "no full account or card
+number is ever stored" has to hold. `notification_key` is unique so a notification forwarded
+twice resolves to the record it already is — and **nullable**, because a reading of evidence that
+already exists (a receipt's extracted total, a human's correction) has that row's own id as its
+identity; a movement-shaped key there would make two receipts for the same amount collide. `derivation` is `parsed_from_text` or `caller_supplied`;
+neither is a model (`ai-boundary.md` gives deterministic evidence to application code).
+
+### evidence_match_candidates — DERIVED — **new table, phase 17, ADR-0044**
+
+`id`, `evidence_id references evidence(id) not null`, `payment_id references payments(id) not
+null`, `strength text not null check (… in ('deterministic','probable','weak'))`, `confidence
+text not null check (… in ('high','medium','low','unknown'))`, `matched_signals jsonb not null`,
+`conflicting_signals jsonb not null`, `signals jsonb not null`, `review_reasons jsonb not null`,
+`status text not null default 'proposed' check (… in
+('proposed','accepted','dismissed','superseded'))`, `decided_at timestamptz`, `decided_by text`,
+`matcher_version text not null`, `updated_at`. Unique on `(evidence_id, payment_id)`.
+
+One recorded "this evidence might be about that payment", with the reasoning kept: `signals`
+holds every signal's verdict plus both sides of the comparison, so a reviewer sees what the
+matcher saw. A candidate is **not** a link and cannot become one on its own — `evidence`
+linkage stays write-once and stays a human act (ADR-0034/0037).
+
+`evidence_match_candidates_decision_check` is the load-bearing one:
+`accepted`/`dismissed` is possible **only** with a recorded `decided_at` and `decided_by`, which
+is what makes "no confidence threshold silently approves an evidence link" a property of the
+schema rather than a promise in a service. `…_signal_names_check` uses jsonb array containment
+(`<@`) rather than a subquery, because a `CHECK` may not contain one.
+
 ### expenses — gross `amount` is SOURCE-immutable once APPROVED; rest DERIVED until approved, then APPROVED
 
 `id`, `description`, `amount bigint not null check (amount > 0)` — **gross, historical, never

@@ -25,7 +25,13 @@ design this will implement.
   configured so `bigint` columns arrive as JavaScript `bigint`, never `number`.
 - `repositories.ts` — data access. No financial arithmetic lives here.
 - `drizzle/0000_initial_financial_schema.sql` and the additive migrations after it, most
-  recently `0007_phase16_cash_flow_and_item_refunds.sql` (phase 16: `payments` gains
+  recently `0008_phase17_evidence_enrichment.sql` (phase 17: `evidence_observations` and
+  `evidence_match_candidates` — the DERIVED structured reading of one piece of evidence, and the
+  explained candidates the matcher offers for it. Both hang off the immutable `evidence` row the
+  way `receipts` does, because an interpretation of a source never lives on the source. Also
+  widens the `audit_events` entity-type check for the two new types and the
+  `evidence_unmatched_idx` predicate to cover text-only bank/UPI notifications — ADR-0044),
+  `0007_phase16_cash_flow_and_item_refunds.sql` (phase 16: `payments` gains
   `cash_flow_category`/`cash_flow_state` and their approval provenance, and the two new tables
   arrive — ADR-0017 (cash balance), ADR-0018 (item refunds); every existing row backfills to
   `cash_flow_state = 'imported'` with no category and no approval, because an approval is never
@@ -37,6 +43,15 @@ design this will implement.
   constrained to the nine operations `ai-boundary.md` defines, so an invented inference type is
   rejected by the database as well as by the code about to write it). Regenerate with
   `npm run db:generate`; `npm run db:check` verifies they still match.
+
+**Derived tables beside the immutable ones.** `evidence_observations` and
+`evidence_match_candidates` (phase 17) are DERIVED and do move: a better reading replaces the
+one before it, and a candidate is re-stated when the matcher's view of it changes. Neither is
+listed in `drizzle/security/immutable-table-grants.sql`, and that is the decision rather than an
+omission — what must not change about them is enforced by `CHECK` instead. In particular,
+`evidence_match_candidates_decision_check` makes `accepted`/`dismissed` reachable only with a
+recorded actor and instant, which is what keeps "no confidence threshold silently approves an
+evidence link" a property of the schema (ADR-0044).
 
 **Immutability.** There is no update path here for `payments.amount/occurred_at/
 raw_description/account_id`, `evidence.type/note_kind/storage_ref/media_type/byte_size/raw_text/
