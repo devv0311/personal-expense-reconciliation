@@ -10,9 +10,12 @@
 import type {
   CreateSplitwiseExpenseInput,
   CreateSplitwiseExpenseResult,
+  FetchSplitwiseLedgerEntriesInput,
+  FetchSplitwiseLedgerEntriesResult,
   RecordSplitwisePaymentInput,
   RecordSplitwisePaymentResult,
   SplitwiseFriendBalance,
+  SplitwiseLedgerEntry,
   SplitwisePort,
 } from '../../src/integrations/splitwise/index.js';
 
@@ -21,6 +24,8 @@ export interface MockSplitwisePort extends SplitwisePort {
   readonly createdExpenses: readonly CreateSplitwiseExpenseInput[];
   /** Every `recordPayment` call this port received, in order. */
   readonly recordedPayments: readonly RecordSplitwisePaymentInput[];
+  /** Every `fetchLedgerEntries` call, so a test can prove a read happened — or did not. */
+  readonly ledgerReads: readonly FetchSplitwiseLedgerEntriesInput[];
 }
 
 /**
@@ -35,20 +40,33 @@ export function createMockSplitwisePort(): MockSplitwisePort & {
   failNextCreateExpense: (message: string) => void;
   failNextRecordPayment: (message: string) => void;
   failNextFetchBalances: (message: string) => void;
+  failNextFetchLedgerEntries: (message: string) => void;
   setFriendBalances: (balances: readonly SplitwiseFriendBalance[]) => void;
+  setLedgerEntries: (
+    friendSplitwiseUserId: string,
+    entries: readonly SplitwiseLedgerEntry[],
+    options?: { readonly complete?: boolean; readonly incompleteReason?: string },
+  ) => void;
 } {
   const createdExpenses: CreateSplitwiseExpenseInput[] = [];
   const recordedPayments: RecordSplitwisePaymentInput[] = [];
+  const ledgerReads: FetchSplitwiseLedgerEntriesInput[] = [];
   let expenseCounter = 0;
   let paymentCounter = 0;
   let nextCreateExpenseFailure: string | null = null;
   let nextRecordPaymentFailure: string | null = null;
   let nextFetchBalancesFailure: string | null = null;
+  let nextFetchLedgerEntriesFailure: string | null = null;
   let friendBalances: readonly SplitwiseFriendBalance[] = [];
+  const ledgerEntries = new Map<
+    string,
+    { entries: readonly SplitwiseLedgerEntry[]; complete: boolean; incompleteReason?: string }
+  >();
 
   return {
     createdExpenses,
     recordedPayments,
+    ledgerReads,
 
     failNextCreateExpense: (message: string) => {
       nextCreateExpenseFailure = message;
@@ -59,8 +77,47 @@ export function createMockSplitwisePort(): MockSplitwisePort & {
     failNextFetchBalances: (message: string) => {
       nextFetchBalancesFailure = message;
     },
+    failNextFetchLedgerEntries: (message: string) => {
+      nextFetchLedgerEntriesFailure = message;
+    },
     setFriendBalances: (balances: readonly SplitwiseFriendBalance[]) => {
       friendBalances = balances;
+    },
+    setLedgerEntries: (
+      friendSplitwiseUserId: string,
+      entries: readonly SplitwiseLedgerEntry[],
+      options: { complete?: boolean; incompleteReason?: string } = {},
+    ) => {
+      ledgerEntries.set(friendSplitwiseUserId, {
+        entries,
+        complete: options.complete ?? true,
+        ...(options.incompleteReason === undefined
+          ? {}
+          : { incompleteReason: options.incompleteReason }),
+      });
+    },
+
+    fetchLedgerEntries(
+      input: FetchSplitwiseLedgerEntriesInput,
+    ): Promise<FetchSplitwiseLedgerEntriesResult> {
+      ledgerReads.push(input);
+      if (nextFetchLedgerEntriesFailure !== null) {
+        const message = nextFetchLedgerEntriesFailure;
+        nextFetchLedgerEntriesFailure = null;
+        return Promise.reject(new Error(message));
+      }
+      const scripted = ledgerEntries.get(input.friendSplitwiseUserId);
+      return Promise.resolve(
+        scripted === undefined
+          ? { entries: [], complete: true }
+          : {
+              entries: scripted.entries,
+              complete: scripted.complete,
+              ...(scripted.incompleteReason === undefined
+                ? {}
+                : { incompleteReason: scripted.incompleteReason }),
+            },
+      );
     },
 
     fetchBalances(): Promise<readonly SplitwiseFriendBalance[]> {
@@ -116,4 +173,24 @@ function toJsonSafe(value: unknown): unknown {
     );
   }
   return value;
+}
+
+/**
+ * A port with **no** `fetchLedgerEntries` at all — an adapter that cannot list a pair's
+ * entries.
+ *
+ * The point of the optional method (ADR-0046): "the capability does not exist" has to be
+ * representable, so the audit can record `unsupported` instead of reading a silent adapter as
+ * a Splitwise holding nothing.
+ */
+export function createAggregateOnlySplitwisePort(): SplitwisePort & {
+  setFriendBalances: (balances: readonly SplitwiseFriendBalance[]) => void;
+} {
+  const full = createMockSplitwisePort();
+  return {
+    createExpense: full.createExpense.bind(full),
+    recordPayment: full.recordPayment.bind(full),
+    fetchBalances: full.fetchBalances.bind(full),
+    setFriendBalances: full.setFriendBalances,
+  };
 }

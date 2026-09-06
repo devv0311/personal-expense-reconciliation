@@ -13,6 +13,10 @@
  * compares each entry against `domain.computeNetBalance(userPersonId, friendId)` and surfaces
  * any disagreement as a `ReconciliationDiscrepancy` — never a write back to Splitwise.
  *
+ * `fetchLedgerEntries` (phase 19, ADR-0046) is the finer read beside it, and is **optional**:
+ * an adapter that cannot list a pair's entries omits it, and the audit records `unsupported`
+ * rather than treating a capability it does not have as agreement.
+ *
  * Every id crossing this port is `people.splitwise_user_id` — the mapping already stored on
  * `Person`, never looked up a second way.
  */
@@ -64,6 +68,56 @@ export interface SplitwiseFriendBalance {
 }
 
 /**
+ * One entry as Splitwise currently holds it, scoped to one friend of the connected account
+ * (phase 19, ADR-0046).
+ *
+ * Read-only, like `fetchBalances`. Splitwise's own two kinds are modelled directly: an
+ * `expense` is a shared cost, a `payment` is a settlement between two people.
+ */
+export interface SplitwiseLedgerEntry {
+  /** Splitwise's own id — the same value `splitwise_expenses.splitwise_expense_id` stores. */
+  readonly splitwiseEntryId: string;
+  readonly kind: 'expense' | 'payment';
+  readonly description: string | null;
+  /** The entry's own total cost, exact minor units. */
+  readonly totalAmount: Paise;
+  readonly currency: string;
+  /** True when Splitwise holds the entry but has it marked deleted. */
+  readonly deleted: boolean;
+  readonly occurredAt: Date | null;
+  /**
+   * This entry's own contribution to the balance between the connected account and the friend
+   * the read was scoped to, in `SplitwiseFriendBalance`'s sign convention: positive means the
+   * connected account owes the friend.
+   *
+   * Splitwise's friends-list balance is the sum of these over the friend's non-deleted
+   * entries, so comparing entry by entry and comparing the reported total are the same
+   * arithmetic at two granularities — which is what lets an audit check its own completeness
+   * (`domain.auditSplitwisePair`) rather than assume it.
+   */
+  readonly pairNetBalance: Paise;
+}
+
+export interface FetchSplitwiseLedgerEntriesInput {
+  /** `people.splitwise_user_id` of the friend whose shared entries to read. */
+  readonly friendSplitwiseUserId: string;
+}
+
+export interface FetchSplitwiseLedgerEntriesResult {
+  readonly entries: readonly SplitwiseLedgerEntry[];
+  /**
+   * Whether this is every entry Splitwise holds for the pair.
+   *
+   * `false` — a truncated page, a window the adapter could not widen — makes the read a
+   * **partial** one, under which the absence of an entry proves nothing. The audit will not
+   * report anything as missing from a partial listing (ADR-0046).
+   */
+  readonly complete: boolean;
+  /** Why the read was incomplete, when it was. Recorded verbatim on the finding. */
+  readonly incompleteReason?: string;
+}
+
+/**
  * Injected into the services that need it rather than imported, so a test runs against a
  * scripted mock and a real adapter — once one is deliberately wired — is a different injection,
  * not a different code path.
@@ -73,4 +127,21 @@ export interface SplitwisePort {
   recordPayment(input: RecordSplitwisePaymentInput): Promise<RecordSplitwisePaymentResult>;
   /** Every friend of the connected account, and what Splitwise currently reports owing each. */
   fetchBalances(): Promise<readonly SplitwiseFriendBalance[]>;
+  /**
+   * The finer, per-entry read phase 19's auditing engine attributes drift with — **optional
+   * by design** (ADR-0046).
+   *
+   * `fetchBalances` alone is aggregate: it can say the two ledgers disagree about a pair, and
+   * never which record caused it. Naming a culprit — a missing external expense, a duplicated
+   * one, a settlement Splitwise never received — needs the entries themselves. An adapter that
+   * cannot provide them simply omits this method, and `services.runSplitwiseAudit` records the
+   * audit as `unsupported`: findings stay at aggregate scope and say so, rather than the
+   * missing capability quietly reading as agreement.
+   *
+   * Read-only. Nothing in phase 19 writes to Splitwise; re-sync of a `stale` row remains
+   * separately scoped work (ADR-0040, ADR-0041).
+   */
+  fetchLedgerEntries?(
+    input: FetchSplitwiseLedgerEntriesInput,
+  ): Promise<FetchSplitwiseLedgerEntriesResult>;
 }

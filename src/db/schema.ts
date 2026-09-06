@@ -66,7 +66,12 @@ import {
   PAYMENT_STATES,
   RECONCILIATION_VERIFICATION_STATUSES,
   RULE_ORIGINS,
+  SPLITWISE_AUDIT_FINDING_CLASSES,
+  SPLITWISE_AUDIT_FINDING_KINDS,
+  SPLITWISE_AUDIT_FINDING_SCOPES,
+  SPLITWISE_AUDIT_REVIEW_STATUSES,
   SPLITWISE_EXPENSE_SYNC_STATUSES,
+  SPLITWISE_EXTERNAL_READ_STATUSES,
   SPLITWISE_SETTLEMENT_SYNC_STATUSES,
 } from '../domain/enums.js';
 import { SETTLEMENT_CLAIM_NOTE_KIND } from '../domain/evidence.js';
@@ -1322,6 +1327,198 @@ export const reconciliationAccountSnapshots = pgTable(
     check(
       'reconciliation_account_snapshots_incomplete_check',
       sql`${table.verificationStatus} <> 'incomplete' or ${table.cashBalanceDelta} is null`,
+    ),
+  ],
+);
+
+/* ============================================ Splitwise drift & ghost-debt auditing */
+
+/**
+ * One invocation of the Splitwise auditing engine (phase 19, ADR-0046).
+ *
+ * SYSTEM, immutable. Its whole job is provenance: which comparison produced which findings,
+ * against how much of Splitwise this ledger could actually see. `external_read_status` is
+ * the field that keeps a failed or unsupported read from ever reading as agreement — a run
+ * that saw nothing says so on its own row, and every finding it wrote points back here.
+ *
+ * `reconciliation_run_id` is set when the audit ran as part of a `ReconciliationRun` and null
+ * when it was invoked on its own, so a finding can always name the reconciliation it belongs
+ * to when there is one, without inventing one when there is not.
+ */
+export const splitwiseAuditRuns = pgTable(
+  'splitwise_audit_runs',
+  {
+    id: id(),
+    runAt: timestamp('run_at', { withTimezone: true }).notNull().defaultNow(),
+    reconciliationRunId: uuid('reconciliation_run_id').references(() => reconciliationRuns.id),
+    externalIntegrationId: uuid('external_integration_id').references(
+      () => externalIntegrations.id,
+    ),
+    /** The worst status across every pair audited — `complete` only when all of them were. */
+    externalReadStatus: text('external_read_status').notNull(),
+    /** Why the read was not complete, when it was not. Never summarised into "fine". */
+    externalReadDetail: text('external_read_detail'),
+    pairsAudited: integer('pairs_audited').notNull().default(0),
+    /** Pairs whose external side could not be read or was not reported at all. */
+    pairsUnchecked: integer('pairs_unchecked').notNull().default(0),
+    findingsCreated: integer('findings_created').notNull().default(0),
+    findingsReobserved: integer('findings_reobserved').notNull().default(0),
+    findingsSuperseded: integer('findings_superseded').notNull().default(0),
+    /** `fetchBalances()`'s reply, verbatim — the same "keep what they said" rule as sync rows. */
+    externalBalancesSnapshot: jsonb('external_balances_snapshot'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('splitwise_audit_runs_run_at_idx').on(table.runAt),
+    index('splitwise_audit_runs_reconciliation_idx').on(table.reconciliationRunId),
+    check(
+      'splitwise_audit_runs_read_status_check',
+      oneOf('external_read_status', SPLITWISE_EXTERNAL_READ_STATUSES),
+    ),
+    check(
+      'splitwise_audit_runs_counts_check',
+      sql`${table.pairsAudited} >= 0 and ${table.pairsUnchecked} >= 0
+          and ${table.pairsUnchecked} <= ${table.pairsAudited}
+          and ${table.findingsCreated} >= 0 and ${table.findingsReobserved} >= 0
+          and ${table.findingsSuperseded} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * One durable, reviewable audit finding (phase 19, ADR-0046).
+ *
+ * DERIVED and user-facing, so every review writes an `AuditEvent` (`invariants.md` #21) and
+ * the row itself is never rewritten by a later comparison: a materially different answer
+ * **supersedes** this row and inserts a new one, which is what keeps the original evidence and
+ * both compared snapshots exactly as they were recorded (#22's spirit applied to findings).
+ *
+ * Two columns carry the idempotency contract:
+ *
+ *  - `fingerprint` is the finding's identity — cause plus subject, no amounts. It is unique
+ *    among rows that have not been superseded, so an unchanged rerun finds its own predecessor
+ *    instead of appending a second opinion about the same record.
+ *  - `comparison_digest` is its materiality — a hash over the compared snapshots and figures.
+ *    Same digest, same comparison: the run only touches `last_observed_*`. Different digest:
+ *    supersede and insert.
+ *
+ * Nothing here authorizes a write back to Splitwise. Reviewing a finding records what a person
+ * concluded; re-syncing a `stale` row remains separate, explicitly approved work (ADR-0040/41).
+ */
+export const splitwiseAuditFindings = pgTable(
+  'splitwise_audit_findings',
+  {
+    id: id(),
+    /** The run that first produced this finding — its provenance, never rewritten. */
+    auditRunId: uuid('audit_run_id')
+      .notNull()
+      .references(() => splitwiseAuditRuns.id),
+    /** The most recent run that produced the identical comparison. Status metadata only. */
+    lastObservedAuditRunId: uuid('last_observed_audit_run_id')
+      .notNull()
+      .references(() => splitwiseAuditRuns.id),
+    reconciliationRunId: uuid('reconciliation_run_id').references(() => reconciliationRuns.id),
+    kind: text('kind').notNull(),
+    /** `discrepancy` | `limitation` | `incomplete` — see `SPLITWISE_AUDIT_FINDING_CLASSES`. */
+    findingClass: text('finding_class').notNull(),
+    /** How precisely this is attributed. `pair` is the aggregate level, with no culprit named. */
+    scope: text('scope').notNull(),
+    summary: text('summary').notNull(),
+    /** `high | medium | low | unknown` — a deterministic evidence strength, never an AI output. */
+    confidence: text('confidence').notNull(),
+    /** Positive magnitude the finding is about. Null when it is not about an amount. */
+    amount: paiseColumn('amount'),
+    /** Signed share of `theirs − ours` this finding accounts for (`domain.auditSplitwisePair`). */
+    balanceImpact: paiseColumn('balance_impact').notNull(),
+    personAId: uuid('person_a_id').references(() => people.id),
+    personBId: uuid('person_b_id').references(() => people.id),
+    expenseId: uuid('expense_id').references(() => expenses.id),
+    splitwiseExpenseRowId: uuid('splitwise_expense_row_id').references(() => splitwiseExpenses.id),
+    settlementId: uuid('settlement_id').references(() => settlements.id),
+    splitwiseSettlementRowId: uuid('splitwise_settlement_row_id').references(
+      () => splitwiseSettlements.id,
+    ),
+    /** Splitwise's own id for the entry this is about, when there is one. */
+    externalReference: text('external_reference'),
+    /** What this ledger held at comparison time. */
+    localSnapshot: jsonb('local_snapshot').notNull(),
+    /** What Splitwise reported, uninterpreted. Null when the read produced nothing. */
+    externalSnapshot: jsonb('external_snapshot'),
+    /** Pointers to the records supporting the conclusion — never copies of them. */
+    evidence: jsonb('evidence')
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    fingerprint: text('fingerprint').notNull(),
+    comparisonDigest: text('comparison_digest').notNull(),
+    firstObservedAt: timestamp('first_observed_at', { withTimezone: true }).notNull().defaultNow(),
+    lastObservedAt: timestamp('last_observed_at', { withTimezone: true }).notNull().defaultNow(),
+    reviewStatus: text('review_status').notNull().default('open'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    /** `'user'` or `'user:<id>'` — a person, never a model and never `system`. */
+    reviewedBy: text('reviewed_by'),
+    reviewReason: text('review_reason'),
+    supersededAt: timestamp('superseded_at', { withTimezone: true }),
+    supersededByFindingId: uuid('superseded_by_finding_id').references(
+      (): AnyPgColumn => splitwiseAuditFindings.id,
+    ),
+    supersedeReason: text('supersede_reason'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    // One current row per identity. A rerun that finds the same cause on the same record
+    // updates when-last-seen; it never appends a second row saying the same thing.
+    uniqueIndex('splitwise_audit_findings_current_idx')
+      .on(table.fingerprint)
+      .where(sql`${table.supersededAt} is null`),
+    index('splitwise_audit_findings_run_idx').on(table.auditRunId),
+    index('splitwise_audit_findings_review_idx').on(table.reviewStatus, table.firstObservedAt),
+    index('splitwise_audit_findings_pair_idx').on(table.personAId, table.personBId),
+    check('splitwise_audit_findings_kind_check', oneOf('kind', SPLITWISE_AUDIT_FINDING_KINDS)),
+    check(
+      'splitwise_audit_findings_class_check',
+      oneOf('finding_class', SPLITWISE_AUDIT_FINDING_CLASSES),
+    ),
+    check('splitwise_audit_findings_scope_check', oneOf('scope', SPLITWISE_AUDIT_FINDING_SCOPES)),
+    check('splitwise_audit_findings_confidence_check', oneOf('confidence', CONFIDENCE_LEVELS)),
+    check(
+      'splitwise_audit_findings_review_status_check',
+      oneOf('review_status', SPLITWISE_AUDIT_REVIEW_STATUSES),
+    ),
+    check(
+      'splitwise_audit_findings_supersede_reason_check',
+      sql`${table.supersedeReason} is null
+          or supersede_reason in ('materially_changed', 'no_longer_observed')`,
+    ),
+    // A magnitude is a magnitude. `balance_impact` is deliberately unconstrained in sign — it
+    // is a signed share of a signed gap, and clamping it would break the residual arithmetic.
+    check(
+      'splitwise_audit_findings_amount_check',
+      sql`${table.amount} is null or ${table.amount} >= 0`,
+    ),
+    // A review is attributable and explained, or it is not a review. `open` is the audit's own
+    // state and carries no actor, because nobody decided it.
+    check(
+      'splitwise_audit_findings_review_attribution_check',
+      sql`(${table.reviewStatus} <> 'open')
+            = (${table.reviewedAt} is not null)
+          and (${table.reviewStatus} <> 'open')
+            = (${table.reviewedBy} is not null)
+          and (${table.reviewStatus} in ('resolved', 'dismissed'))
+            <= (${table.reviewReason} is not null)`,
+    ),
+    // Superseding is one decision with three parts; a row cannot be half-superseded.
+    check(
+      'splitwise_audit_findings_supersede_check',
+      sql`(${table.supersededAt} is null) = (${table.supersedeReason} is null)
+          and (${table.supersededByFindingId} is null or ${table.supersededAt} is not null)`,
+    ),
+    check(
+      'splitwise_audit_findings_snapshot_shape_check',
+      sql`jsonb_typeof(${table.localSnapshot}) = 'object'
+          and (${table.externalSnapshot} is null
+               or jsonb_typeof(${table.externalSnapshot}) = 'object')
+          and jsonb_typeof(${table.evidence}) = 'array'`,
     ),
   ],
 );

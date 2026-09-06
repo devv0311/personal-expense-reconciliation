@@ -91,6 +91,10 @@ function createUnconfiguredSplitwisePort(): SplitwisePort {
     // empty would misreport "connected, nothing owed" instead of "not actually configured", so
     // this still rejects like the other two.
     fetchBalances: (): Promise<readonly SplitwiseFriendBalance[]> => notConfigured('fetchBalances'),
+    // `fetchLedgerEntries` (phase 19, ADR-0046) is deliberately absent rather than rejecting:
+    // the port declares it optional so an adapter without the capability is representable, and
+    // omitting it here is the honest description of a port that has none. The audit records
+    // the read as `unsupported` and keeps its findings at aggregate scope — never as agreement.
   };
 }
 
