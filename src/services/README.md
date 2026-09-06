@@ -192,5 +192,38 @@ import (phase 6):
   nothing else off the context, and fails closed if anything identifying is still in the
   payload (`security-model.md`).
 
-Not yet implemented: re-sync of a `stale` `SplitwiseExpense`/`SplitwiseSettlement`, and
-resolving a `ReconciliationDiscrepancy` — see `docs/roadmap.md` phase 15's implementation note.
+## Phase 19 — Splitwise drift & ghost-debt auditing (ADR-0046)
+
+- `splitwise-audit-service.ts` — `runSplitwiseAudit`, its reads
+  (`listSplitwiseAuditRunHistory`, `getSplitwiseAuditRun`, `listAuditFindings`,
+  `getAuditFinding`) and `reviewSplitwiseAuditFinding`.
+
+  It loads what both ledgers say, hands it to `domain.auditSplitwisePair`, and turns the
+  findings into durable rows. Four things are this layer's responsibility rather than the
+  engine's, because all four are about persistence and the outside world:
+
+  - **The canonical ledger is read-only here.** No `Payment`, `Expense`, `ExpenseItem`,
+    `Allocation`, `ExpenseAdjustment` or `Settlement` is written, no obligation or balance is
+    recomputed into storage, and no `Settlement` is ever invented to make an external figure
+    agree. Net shares come from the current, already refund-aware allocation (ADR-0045) — the
+    audit reads that number, it does not compute a second one.
+  - **No external write.** The only port calls are `fetchBalances` and the optional
+    `fetchLedgerEntries`, both reads. Reviewing a finding does not authorize one either; stale
+    re-sync stays separate, explicitly approved work (ADR-0040/0041).
+  - **A failed read is an incomplete audit.** Every failure path records what could not be seen
+    and stops short of the conclusions that needed it. Absence is evidence only under a
+    `complete` read, and no finding is retired by a read that could not be made.
+  - **A rerun is a rerun.** Findings are matched by `domain.findingFingerprint` and compared by
+    a SHA-256 of `domain.findingComparisonSource`, so an unchanged rerun writes only a "seen
+    again" timestamp — no row, no audit event — and a materially changed one supersedes rather
+    than overwrites.
+
+- `balance-service.ts` (phase 19 extension) — `detectSplitwiseDrift` is unchanged in behaviour
+  and now also returns the balances it fetched, so `runReconciliation` can run the audit in the
+  same transaction on the same external read. With no integration connected the audit does not
+  run at all and reconciliation behaves exactly as it did before this phase.
+
+Not yet implemented: re-sync of a `stale` `SplitwiseExpense`/`SplitwiseSettlement` — see
+`docs/roadmap.md` phase 15's implementation note and ADR-0046's §6. Resolving a
+`ReconciliationDiscrepancy` on a `ReconciliationRun` also remains unbuilt; phase 19's review path
+is for `splitwise_audit_findings`, which is a different, addressable record (ADR-0046 §3).

@@ -42,5 +42,7 @@ belongs in `src/services` instead.
 | `evidence-observation.ts` | The structured reading of one evidence record: notification parsing, reference normalization, dedupe identity (ADR-0044) |
 | `evidence-matching.ts`    | The six context-re-attachment signals, candidate eligibility, strength and ordering (ADR-0044)                           |
 | `evidence-context.ts`     | The re-attached context of a payment: reconstruction beside the narration, disagreements named (ADR-0044)                |
+| `splitwise-drift.ts`      | The aggregate pair comparison against Splitwise's own reported balance (ADR-0041)                                        |
+| `splitwise-audit.ts`      | Per-record drift attribution, earned by `balanceImpact`; an unread Splitwise is a finding, never agreement (ADR-0046)    |
 
 Import from `src/domain/index.js`, the layer's public surface, rather than an individual file.
