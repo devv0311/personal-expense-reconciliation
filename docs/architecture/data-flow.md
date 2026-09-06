@@ -363,6 +363,36 @@ port produces an `incomplete` finding rather than silence. Absence is evidence o
 complete read — which is why the audit checks a "complete" listing against the balance Splitwise
 itself reported before believing it.
 
+## 9b. Derived proof pack (phase 20, ADR-0047)
+
+A recipient-specific summary of one pair's position, assembled on request and returned — never
+stored. `services.buildProofPackPreview` is a pure read: it opens no transaction, writes no row,
+records no `AuditEvent`, and calls no `SplitwisePort` method.
+
+```
+services.buildProofPackPreview ─▶ services.getBalance ─────────────────────┐
+                               ─▶ services.getRefundAllocationState ───────┤
+                               ─▶ services.getPaymentContext (conflict?) ───┤
+                               ─▶ db.listSettlementsForAudit ───────────────┤
+                               ─▶ db.listSplitwiseAuditFindings (open only) ┤
+                               ─▶ db.listEvidenceLinkedToExpense /          │
+                                    db.listExpensePaymentIds                ▼
+                                                       ai.redactReceiptText  (local map, never returned)
+                                                                            ▼
+                                                       domain.buildProofPack (arranges; recomputes nothing)
+                                                                            ▼
+                                                       services.assertProofPackExportable
+                                                         └▶ ai.findResidualIdentifiers ─▶ throw, or return
+```
+
+Every figure is quoted from a function that already owns it; `domain.buildProofPack` does no
+financial arithmetic beyond summing figures it was handed. There is **no** arrow from this step
+into any table, and none into `integrations.splitwise` — a pack is derived, and generating it
+sends nothing and records nothing. The only arrow into `ai/` is the redaction primitive and its
+residual check, which run locally: if an identifier survives, the step throws instead of
+returning a body, the same fail-closed rule the AI payload boundary uses (§"Where the AI
+boundary sits", ADR-0044).
+
 ## Where the AI boundary sits
 
 Every arrow leaving `ai/` in the diagrams above lands on an `AIInference` row, never directly

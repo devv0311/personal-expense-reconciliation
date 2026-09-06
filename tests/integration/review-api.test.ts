@@ -533,6 +533,7 @@ describe('the surface itself', () => {
       'GET /api/expenses',
       'GET /api/balances/:personAId/:personBId',
       'GET /api/people',
+      'GET /api/proof-packs/:recipientPersonId',
       'POST /api/integrations/splitwise/connect',
       'POST /api/expenses/:expenseId/ready-to-sync',
       'POST /api/expenses/:expenseId/splitwise-sync',

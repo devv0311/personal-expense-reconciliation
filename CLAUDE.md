@@ -1,7 +1,23 @@
 # CLAUDE.md — Engineering Context for This Repository
 
-> **Current decisions (2026-09-06).** Phases 16–19 are complete. Next is Phase 20, **derived
-> proof packs**.
+> **Current decisions (2026-09-06).** Phases 16–20 are complete. Next is Phase 21, the **`web/`
+> UI/UX overhaul** — the last numbered phase before the unnumbered later work.
+> [Phase 20](docs/roadmap.md) shipped **derived proof packs**
+> ([ADR-0047](docs/decisions/0047-proof-packs-are-a-derived-read-not-a-second-ledger.md)):
+> `domain.buildProofPack` + `services.buildProofPackPreview` +
+> `GET /api/proof-packs/:recipientPersonId` produce a recipient-specific summary — original
+> purchase, attributed item refunds, net expense, the recipient's share, prior settlements and
+> the remaining (or reverse) balance, with selected evidence references and an explicit as-of
+> label. It is a **pure derived read with no table and no migration**: it quotes `getBalance`,
+> `getRefundAllocationState`, `getPaymentContext` and the open Phase 19 findings and recomputes
+> nothing (a pack that re-divides a share is a bug). Recipient isolation is structural (no third
+> party is ever passed to the assembler); free text is redacted through Phase 17's
+> `redactReceiptText` and the finished pack is walked through `findResidualIdentifiers`, throwing
+> `SanitizationError` rather than returning an unredacted pack; open findings, pending/blocked
+> refund distribution, believed-settled-unconfirmed, a reverse balance after a settlement, a
+> mixed adjustment basis and conflicting/missing evidence each become a visible warning. `asOf`
+> is a snapshot label, not a historical filter, and a fixed `asOf` over an unchanged ledger is
+> byte-identical. Generating a pack sends nothing, records no settlement, and writes no row.
 > [Phase 17](docs/roadmap.md) shipped context re-attachment
 > ([ADR-0044](docs/decisions/0044-evidence-observations-and-match-candidates.md)):
 > `EvidenceObservation` records the structured reading of a bank SMS or UPI push notification
@@ -127,7 +143,13 @@ or their interactions have shipped.
 5. **One-Click WhatsApp Proof Packs.** Derive concise, recipient-specific summaries of original
    spend, item refunds, net shares, settlements and remaining balances, with supporting evidence
    references. Preview/redact before copying or sharing. Packs are derived artifacts, never
-   ledger authority; generation does not authorize sending or change a debt.
+   ledger authority; generation does not authorize sending or change a debt. Shipped in Phase 20
+   (ADR-0047): `domain.buildProofPack` + `services.buildProofPackPreview` +
+   `GET /api/proof-packs/:recipientPersonId`, a pure read that quotes the canonical figures and
+   recomputes none, isolates the recipient structurally, reuses Phase 17's redaction and fails
+   closed on an unredacted export, keeps every uncertainty visible as a warning, and persists
+   nothing. The deliberate copy/export/share step, and a recipient-facing review of exactly what
+   is about to be sent, are Phase 21's UI concern.
 6. **Local PII Sanitization Boundary.** Raw statements, SMS/push content, receipts, account/card
    numbers, UPI IDs, contact details and identifiers stay behind the local boundary. Sanitize
    and pseudonymize before any external AI call; keep reversible mappings local, block unsafe

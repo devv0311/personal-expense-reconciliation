@@ -9,7 +9,7 @@
  */
 
 import { isDomainError } from '../domain/index.js';
-import { isAiContractError } from '../ai/index.js';
+import { isAiContractError, isSanitizationError } from '../ai/index.js';
 import { isServiceError } from '../services/index.js';
 
 /** A request this layer refused before any service saw it. */
@@ -75,6 +75,16 @@ export function toErrorResponse(error: unknown): Response {
     // A proposal that is not a proposal. The caller sent it (a `modify`), so it is theirs.
     return jsonResponse(422, {
       error: { code: error.code, message: error.message },
+    } satisfies ApiErrorBody);
+  }
+
+  if (isSanitizationError(error)) {
+    // Redaction did not remove an identifier the boundary refuses to export. This is the
+    // system stopping itself, not a bad request — a 500, but with the real code so the
+    // fail-closed path is greppable in a log rather than an anonymous internal error
+    // (ADR-0044, ADR-0047).
+    return jsonResponse(500, {
+      error: { code: error.code, message: 'The request could not be completed safely.' },
     } satisfies ApiErrorBody);
   }
 

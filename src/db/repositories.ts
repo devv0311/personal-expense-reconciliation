@@ -640,6 +640,25 @@ export async function listPaymentExpenseLinksByPayment(
   return rows as Array<{ amount: Paise }>;
 }
 
+/**
+ * Every `Payment` id attributed to one expense, oldest link first.
+ *
+ * The inverse of {@link listPaymentExpenseLinksByPayment}: a proof pack gathers an expense's
+ * supporting evidence by walking from the expense to its payments and then to whatever is
+ * linked to each (phase 20).
+ */
+export async function listExpensePaymentIds(
+  exec: Executor,
+  expenseId: ExpenseId,
+): Promise<PaymentId[]> {
+  const rows = await exec
+    .select({ paymentId: paymentExpenseLinks.paymentId })
+    .from(paymentExpenseLinks)
+    .where(eq(paymentExpenseLinks.expenseId, expenseId))
+    .orderBy(asc(paymentExpenseLinks.createdAt), asc(paymentExpenseLinks.id));
+  return rows.map((row) => row.paymentId as PaymentId);
+}
+
 export interface PaymentExpenseLinkDraft {
   readonly paymentId: PaymentId;
   readonly expenseId: ExpenseId;
@@ -2396,6 +2415,26 @@ export async function findEvidenceByNotificationKey(
  * The input to `domain.deriveReattachedContext`: several records may enrich one movement, so
  * this deliberately returns all of them rather than the newest or the most complete.
  */
+/**
+ * Every `Evidence` record linked directly to one expense (`evidence.linked_expense_id`),
+ * oldest capture first.
+ *
+ * A proof pack cites this alongside whatever is linked to the expense's payments; both are
+ * "evidence for this expense" from a reader's point of view (phase 20). Evidence linked only
+ * to a payment is reached separately, through {@link listEvidenceContextSourcesForPayment}.
+ */
+export async function listEvidenceLinkedToExpense(
+  exec: Executor,
+  expenseId: ExpenseId,
+): Promise<readonly EvidenceRow[]> {
+  const rows = await exec
+    .select()
+    .from(evidence)
+    .where(eq(evidence.linkedExpenseId, expenseId))
+    .orderBy(asc(evidence.capturedAt), asc(evidence.id));
+  return rows.map(toEvidenceRow);
+}
+
 export async function listEvidenceContextSourcesForPayment(
   exec: Executor,
   paymentId: PaymentId,

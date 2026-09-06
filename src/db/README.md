@@ -63,6 +63,11 @@ per record" a property of the database rather than of the reconciliation loop, a
 `splitwise_audit_findings_review_attribution_check` makes any non-`open` review state reachable
 only with a recorded actor and instant, and `resolved`/`dismissed` only with a reason (ADR-0046).
 
+**Proof packs add no table.** Phase 20 (ADR-0047) is a pure derived read; the only additions
+here are two plain `SELECT` helpers — `listExpensePaymentIds` (the inverse of
+`listPaymentExpenseLinksByPayment`) and `listEvidenceLinkedToExpense` — used to gather an
+expense's supporting evidence. No migration, no new row anywhere.
+
 **Immutability.** There is no update path here for `payments.amount/occurred_at/
 raw_description/account_id`, `evidence.type/note_kind/storage_ref/media_type/byte_size/raw_text/
 captured_at`, `expenses.amount`, or any `audit_events` row. `updateEvidenceLinks` is the single
