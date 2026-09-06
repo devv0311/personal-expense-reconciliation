@@ -329,6 +329,40 @@ services.runReconciliation ─▶ domain.computeUnexplained ─┐
                                                           db.insertReconciliationRun
 ```
 
+## 9a. Splitwise drift & ghost-debt audit (phase 19, ADR-0046)
+
+The step after the comparison: step 9 says _these two ledgers disagree about this pair_; this one
+asks _which record is responsible, and how sure can we honestly be?_
+
+`services.runSplitwiseAudit` reuses the balances step 9 already fetched (one run, one external
+read), adds the optional per-entry read, and hands both sides to `domain.auditSplitwisePair`. It
+writes one `SplitwiseAuditRun` and reconciles its findings against the ones already standing:
+unchanged findings are re-observed, materially changed ones supersede their predecessor, and one
+that no longer reproduces is closed **only** if this run could actually re-derive it.
+
+```
+services.runSplitwiseAudit ─▶ integrations.splitwise.fetchBalances ─────┐
+                            ─▶ integrations.splitwise.fetchLedgerEntries?┤  (optional read)
+                            ─▶ db.loadBalanceInput / synced rows / adjustments ┤
+                                                                         ▼
+                                                        domain.auditSplitwisePair
+                                                                         │
+                                                                         ▼
+                                    db.insertSplitwiseAuditRun / insertSplitwiseAuditFinding
+```
+
+Two arrows that deliberately do not exist. There is **no** arrow from this step back into
+`integrations.splitwise` for a write: the audit explains the disagreement and never corrects
+either side, and `services.reviewSplitwiseAuditFinding` — a person's recorded conclusion — adds
+no such arrow either. And there is no arrow from this step into `payments`, `expenses`,
+`allocations`, `expense_adjustments` or `settlements`: the local approved ledger is what the
+audit is measured _against_, so nothing here may move it.
+
+A read that failed, returned part of a pair's entries, or is not implemented by the configured
+port produces an `incomplete` finding rather than silence. Absence is evidence only under a
+complete read — which is why the audit checks a "complete" listing against the balance Splitwise
+itself reported before believing it.
+
 ## Where the AI boundary sits
 
 Every arrow leaving `ai/` in the diagrams above lands on an `AIInference` row, never directly

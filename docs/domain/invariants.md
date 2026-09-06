@@ -363,6 +363,26 @@ from a percentage and a possibly-stale total.
     `stale`, not `drifted` — the two are surfaced and handled distinctly (added per ADR-0008; see
     `SplitwiseExpense`/`SplitwiseSettlement` in `domain-model.md`).
 
+    **Extended per [ADR-0046](../decisions/0046-splitwise-audit-findings-and-external-read-completeness.md)
+    (phase 19), which adds attribution and review without relaxing anything above.** Three rules
+    the auditing engine adds to this invariant rather than replacing it:
+
+    - **A named cause must be earned.** An aggregate pair mismatch names a specific expense,
+      settlement or external entry only when a specific record accounts for it; every finding
+      carries a signed `balanceImpact`, and whatever the findings do not account for is reported
+      as `unattributed_balance_mismatch` at `unknown` confidence. An aggregate mismatch is never
+      converted into a falsely precise culprit, which is the same "a discrepancy is surfaced, not
+      auto-resolved" discipline applied one level finer.
+    - **An unread Splitwise is not an agreeing one.** A failed, partial, unsupported or
+      unreported external read is recorded as an **incomplete** finding. Absence is evidence only
+      under a complete read, and no standing finding is closed by a read that could not be made.
+      Local reconciliation still completes independently when Splitwise is unavailable.
+    - **Review is a conclusion, not an authorization.** Recording that a person accepted,
+      dismissed or resolved a finding writes the finding's review columns and an `AuditEvent`,
+      and nothing else — no ledger row, no fabricated `Settlement` or `Payment`, and no outbound
+      write to Splitwise. Re-syncing a `stale` row remains a separate, explicitly approved
+      capability that does not exist yet.
+
 19. **No Splitwise write from unapproved data, and never a `Group` as the debtor.** A
     `SplitwiseExpense` may only be created from an `Expense` whose `Allocation` has reached
     `APPROVED`. A `SplitwiseSettlement` may only be created from an `APPROVED` `Settlement`. Any

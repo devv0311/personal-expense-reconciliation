@@ -38,7 +38,13 @@ import type {
   PaymentDirection,
   PaymentReferenceType,
   PaymentState,
+  SplitwiseAuditFindingClass,
+  SplitwiseAuditFindingKind,
+  SplitwiseAuditFindingScope,
+  SplitwiseAuditReviewStatus,
+  SplitwiseAuditSupersedeReason,
   SplitwiseExpenseSyncStatus,
+  SplitwiseExternalReadStatus,
   SplitwiseSettlementSyncStatus,
 } from '../domain/enums.js';
 import type {
@@ -65,6 +71,8 @@ import type {
   ReconciliationAccountSnapshotId,
   ReconciliationRunId,
   SettlementId,
+  SplitwiseAuditFindingId,
+  SplitwiseAuditRunId,
   SplitwiseExpenseId,
   SplitwiseSettlementId,
   UserId,
@@ -110,6 +118,8 @@ import {
   reconciliationAccountSnapshots,
   reconciliationRuns,
   settlements,
+  splitwiseAuditFindings,
+  splitwiseAuditRuns,
   splitwiseExpenses,
   splitwiseSettlements,
   users,
@@ -3714,6 +3724,576 @@ export async function listDismissedDuplicatePairs(exec: Executor): Promise<strin
       ),
     );
   return rows.map((row) => row.pairKey).filter((key): key is string => key !== null);
+}
+
+/* ========================================== Splitwise drift & ghost-debt auditing */
+
+/**
+ * Every `SplitwiseExpense` for an expense this ledger recorded the user paying, in **every**
+ * sync status (phase 19, ADR-0046).
+ *
+ * Deliberately wider than `listSyncedSplitwiseExpensesPaidBy`, which phase 15 scoped to
+ * `synced` because a row that had already moved could not move again. The audit needs the
+ * opposite: a `stale` row is the single most informative thing in the table — our side changed
+ * after a sync — and a `drifted` one is what phase 15's aggregate comparison already flagged.
+ * Both are left exactly where they are; this read never writes.
+ */
+export async function listSplitwiseExpensesPaidByForAudit(
+  exec: Executor,
+  paidByPersonId: PersonId,
+): Promise<
+  Array<{
+    id: SplitwiseExpenseId;
+    expenseId: ExpenseId;
+    splitwiseExpenseId: string;
+    syncStatus: SplitwiseExpenseSyncStatus;
+    ourSnapshot: unknown;
+    description: string | null;
+    grossAmount: Paise;
+    netAmount: Paise;
+    refundedTotal: Paise;
+  }>
+> {
+  const rows = await exec
+    .select({
+      id: splitwiseExpenses.id,
+      expenseId: splitwiseExpenses.expenseId,
+      splitwiseExpenseId: splitwiseExpenses.splitwiseExpenseId,
+      syncStatus: splitwiseExpenses.syncStatus,
+      ourSnapshot: splitwiseExpenses.ourSnapshot,
+      description: expenses.description,
+      grossAmount: expenses.amount,
+    })
+    .from(splitwiseExpenses)
+    .innerJoin(expenses, eq(splitwiseExpenses.expenseId, expenses.id))
+    .where(eq(expenses.paidByPersonId, paidByPersonId))
+    .orderBy(asc(splitwiseExpenses.syncedAt), asc(splitwiseExpenses.id));
+  if (rows.length === 0) return [];
+
+  const adjustmentRows = await exec
+    .select({
+      originalExpenseId: expenseAdjustments.originalExpenseId,
+      amount: expenseAdjustments.amount,
+    })
+    .from(expenseAdjustments)
+    .where(
+      inArray(
+        expenseAdjustments.originalExpenseId,
+        rows.map((row) => row.expenseId),
+      ),
+    );
+
+  const adjustmentsByExpense = new Map<string, Paise[]>();
+  for (const row of adjustmentRows) {
+    const bucket = adjustmentsByExpense.get(row.originalExpenseId) ?? [];
+    bucket.push(row.amount as Paise);
+    adjustmentsByExpense.set(row.originalExpenseId, bucket);
+  }
+
+  return rows.map((row) => {
+    const adjustments = adjustmentsByExpense.get(row.expenseId) ?? [];
+    const refundedTotal = adjustments.reduce((total, amount) => total + amount, 0n) as Paise;
+    return {
+      id: row.id as SplitwiseExpenseId,
+      expenseId: row.expenseId as ExpenseId,
+      splitwiseExpenseId: row.splitwiseExpenseId,
+      syncStatus: row.syncStatus as SplitwiseExpenseSyncStatus,
+      ourSnapshot: row.ourSnapshot,
+      description: row.description,
+      grossAmount: row.grossAmount as Paise,
+      netAmount: netAmount(row.grossAmount as Paise, adjustments),
+      refundedTotal,
+    };
+  });
+}
+
+/**
+ * Every `Settlement` naming this counterparty, with its `Payment` direction and its Splitwise
+ * row if one exists — the audit's settlement side (phase 19, ADR-0046).
+ *
+ * A settlement with no `SplitwiseSettlement` row is exactly as informative as one with a
+ * missing external entry: it is a discharge this ledger has evidence for and Splitwise may
+ * never have been told about. Both reach the engine from here, which is why this is a `LEFT`
+ * join rather than the `synced`-only inner join phase 15 used.
+ */
+export async function listSettlementsForAudit(
+  exec: Executor,
+  counterpartyPersonId: PersonId,
+): Promise<
+  Array<{
+    settlementId: SettlementId;
+    amount: Paise;
+    direction: PaymentDirection;
+    occurredAt: Date;
+    splitwiseSettlementRowId: SplitwiseSettlementId | null;
+    externalId: string | null;
+    syncStatus: SplitwiseSettlementSyncStatus | null;
+  }>
+> {
+  const rows = await exec
+    .select({
+      settlementId: settlements.id,
+      amount: settlements.amount,
+      direction: payments.direction,
+      occurredAt: payments.occurredAt,
+      splitwiseSettlementRowId: splitwiseSettlements.id,
+      externalId: splitwiseSettlements.splitwiseTransactionId,
+      syncStatus: splitwiseSettlements.syncStatus,
+    })
+    .from(settlements)
+    .innerJoin(payments, eq(settlements.paymentId, payments.id))
+    .leftJoin(splitwiseSettlements, eq(splitwiseSettlements.settlementId, settlements.id))
+    .where(eq(settlements.counterpartyPersonId, counterpartyPersonId))
+    .orderBy(asc(payments.occurredAt), asc(settlements.id));
+
+  return rows.map((row) => ({
+    settlementId: row.settlementId as SettlementId,
+    amount: row.amount as Paise,
+    direction: row.direction as PaymentDirection,
+    occurredAt: row.occurredAt,
+    splitwiseSettlementRowId: row.splitwiseSettlementRowId as SplitwiseSettlementId | null,
+    externalId: row.externalId,
+    syncStatus: row.syncStatus as SplitwiseSettlementSyncStatus | null,
+  }));
+}
+
+/** Every `ExpenseAdjustment` id against one expense, oldest first — a finding's evidence. */
+export async function listExpenseAdjustmentIds(
+  exec: Executor,
+  expenseIds: readonly ExpenseId[],
+): Promise<Map<ExpenseId, ExpenseAdjustmentId[]>> {
+  const grouped = new Map<ExpenseId, ExpenseAdjustmentId[]>();
+  if (expenseIds.length === 0) return grouped;
+
+  const rows = await exec
+    .select({
+      id: expenseAdjustments.id,
+      originalExpenseId: expenseAdjustments.originalExpenseId,
+    })
+    .from(expenseAdjustments)
+    .where(inArray(expenseAdjustments.originalExpenseId, [...expenseIds]))
+    .orderBy(asc(expenseAdjustments.occurredAt), asc(expenseAdjustments.id));
+
+  for (const row of rows) {
+    const key = row.originalExpenseId as ExpenseId;
+    const bucket = grouped.get(key) ?? [];
+    bucket.push(row.id as ExpenseAdjustmentId);
+    grouped.set(key, bucket);
+  }
+  return grouped;
+}
+
+/**
+ * Which of an expense's adjustments carry item attribution, per expense.
+ *
+ * `item_attributed` versus `whole_expense` is the difference between ADR-0018's item-first
+ * engine and ADR-0008's proportional default, and it is the evidence that turns "this row is
+ * stale" into "this row is stale *because a refund landed on specific purchased items*".
+ */
+export async function listRefundBasisByExpense(
+  exec: Executor,
+  expenseIds: readonly ExpenseId[],
+): Promise<Map<ExpenseId, 'none' | 'item_attributed' | 'whole_expense' | 'mixed'>> {
+  const basis = new Map<ExpenseId, 'none' | 'item_attributed' | 'whole_expense' | 'mixed'>();
+  if (expenseIds.length === 0) return basis;
+
+  const rows = await exec
+    .select({
+      originalExpenseId: expenseAdjustments.originalExpenseId,
+      adjustmentId: expenseAdjustments.id,
+      attributionId: expenseAdjustmentItems.id,
+    })
+    .from(expenseAdjustments)
+    .leftJoin(
+      expenseAdjustmentItems,
+      eq(expenseAdjustmentItems.expenseAdjustmentId, expenseAdjustments.id),
+    )
+    .where(inArray(expenseAdjustments.originalExpenseId, [...expenseIds]));
+
+  const attributed = new Map<string, boolean>();
+  const whole = new Map<string, boolean>();
+  for (const row of rows) {
+    const key = row.originalExpenseId;
+    if (row.attributionId === null) whole.set(key, true);
+    else attributed.set(key, true);
+  }
+
+  for (const expenseId of expenseIds) {
+    const hasAttributed = attributed.get(expenseId) === true;
+    const hasWhole = whole.get(expenseId) === true;
+    basis.set(
+      expenseId,
+      hasAttributed && hasWhole
+        ? 'mixed'
+        : hasAttributed
+          ? 'item_attributed'
+          : hasWhole
+            ? 'whole_expense'
+            : 'none',
+    );
+  }
+  return basis;
+}
+
+export interface SplitwiseAuditRunDraft {
+  readonly reconciliationRunId: ReconciliationRunId | null;
+  readonly externalIntegrationId: ExternalIntegrationId | null;
+  readonly externalReadStatus: SplitwiseExternalReadStatus;
+  readonly externalReadDetail: string | null;
+  readonly pairsAudited: number;
+  readonly pairsUnchecked: number;
+  readonly externalBalancesSnapshot: unknown;
+}
+
+export interface SplitwiseAuditRunRow extends SplitwiseAuditRunDraft {
+  readonly id: SplitwiseAuditRunId;
+  readonly runAt: Date;
+  readonly findingsCreated: number;
+  readonly findingsReobserved: number;
+  readonly findingsSuperseded: number;
+}
+
+export async function insertSplitwiseAuditRun(
+  exec: Executor,
+  draft: SplitwiseAuditRunDraft,
+): Promise<SplitwiseAuditRunId> {
+  const [row] = await exec
+    .insert(splitwiseAuditRuns)
+    .values({
+      reconciliationRunId: draft.reconciliationRunId,
+      externalIntegrationId: draft.externalIntegrationId,
+      externalReadStatus: draft.externalReadStatus,
+      externalReadDetail: draft.externalReadDetail,
+      pairsAudited: draft.pairsAudited,
+      pairsUnchecked: draft.pairsUnchecked,
+      externalBalancesSnapshot: draft.externalBalancesSnapshot ?? null,
+    })
+    .returning({ id: splitwiseAuditRuns.id });
+  return requireRow(row, 'splitwise_audit_runs').id as SplitwiseAuditRunId;
+}
+
+/**
+ * Writes the tallies once the run's findings have been reconciled.
+ *
+ * The only update this table takes, and deliberately not part of the insert: the counts are
+ * not known until every pair has been compared, and a row that claimed them up front would
+ * be describing work it had not done yet.
+ */
+export async function updateSplitwiseAuditRunCounts(
+  exec: Executor,
+  auditRunId: SplitwiseAuditRunId,
+  counts: {
+    readonly findingsCreated: number;
+    readonly findingsReobserved: number;
+    readonly findingsSuperseded: number;
+  },
+): Promise<void> {
+  await exec
+    .update(splitwiseAuditRuns)
+    .set({
+      findingsCreated: counts.findingsCreated,
+      findingsReobserved: counts.findingsReobserved,
+      findingsSuperseded: counts.findingsSuperseded,
+    })
+    .where(eq(splitwiseAuditRuns.id, auditRunId));
+}
+
+export async function getSplitwiseAuditRunById(
+  exec: Executor,
+  auditRunId: SplitwiseAuditRunId,
+): Promise<SplitwiseAuditRunRow | null> {
+  const [row] = await exec
+    .select()
+    .from(splitwiseAuditRuns)
+    .where(eq(splitwiseAuditRuns.id, auditRunId));
+  return row === undefined ? null : toAuditRunRow(row);
+}
+
+/** Audit history, newest first. */
+export async function listSplitwiseAuditRuns(
+  exec: Executor,
+  options: { readonly limit?: number } = {},
+): Promise<SplitwiseAuditRunRow[]> {
+  const rows = await exec
+    .select()
+    .from(splitwiseAuditRuns)
+    .orderBy(desc(splitwiseAuditRuns.runAt), desc(splitwiseAuditRuns.id))
+    .limit(options.limit ?? 50);
+  return rows.map(toAuditRunRow);
+}
+
+export interface SplitwiseAuditFindingDraftRow {
+  readonly auditRunId: SplitwiseAuditRunId;
+  readonly reconciliationRunId: ReconciliationRunId | null;
+  readonly kind: SplitwiseAuditFindingKind;
+  readonly findingClass: SplitwiseAuditFindingClass;
+  readonly scope: SplitwiseAuditFindingScope;
+  readonly summary: string;
+  readonly confidence: ConfidenceLevel;
+  readonly amount: Paise | null;
+  readonly balanceImpact: Paise;
+  readonly personAId: PersonId | null;
+  readonly personBId: PersonId | null;
+  readonly expenseId: ExpenseId | null;
+  readonly splitwiseExpenseRowId: SplitwiseExpenseId | null;
+  readonly settlementId: SettlementId | null;
+  readonly splitwiseSettlementRowId: SplitwiseSettlementId | null;
+  readonly externalReference: string | null;
+  readonly localSnapshot: unknown;
+  readonly externalSnapshot: unknown;
+  readonly evidence: unknown;
+  readonly fingerprint: string;
+  readonly comparisonDigest: string;
+}
+
+export interface SplitwiseAuditFindingRow extends SplitwiseAuditFindingDraftRow {
+  readonly id: SplitwiseAuditFindingId;
+  readonly lastObservedAuditRunId: SplitwiseAuditRunId;
+  readonly firstObservedAt: Date;
+  readonly lastObservedAt: Date;
+  readonly reviewStatus: SplitwiseAuditReviewStatus;
+  readonly reviewedAt: Date | null;
+  readonly reviewedBy: string | null;
+  readonly reviewReason: string | null;
+  readonly supersededAt: Date | null;
+  readonly supersededByFindingId: SplitwiseAuditFindingId | null;
+  readonly supersedeReason: SplitwiseAuditSupersedeReason | null;
+}
+
+export async function insertSplitwiseAuditFinding(
+  exec: Executor,
+  draft: SplitwiseAuditFindingDraftRow,
+): Promise<SplitwiseAuditFindingId> {
+  const [row] = await exec
+    .insert(splitwiseAuditFindings)
+    .values({
+      auditRunId: draft.auditRunId,
+      lastObservedAuditRunId: draft.auditRunId,
+      reconciliationRunId: draft.reconciliationRunId,
+      kind: draft.kind,
+      findingClass: draft.findingClass,
+      scope: draft.scope,
+      summary: draft.summary,
+      confidence: draft.confidence,
+      amount: draft.amount,
+      balanceImpact: draft.balanceImpact,
+      personAId: draft.personAId,
+      personBId: draft.personBId,
+      expenseId: draft.expenseId,
+      splitwiseExpenseRowId: draft.splitwiseExpenseRowId,
+      settlementId: draft.settlementId,
+      splitwiseSettlementRowId: draft.splitwiseSettlementRowId,
+      externalReference: draft.externalReference,
+      localSnapshot: draft.localSnapshot,
+      externalSnapshot: draft.externalSnapshot ?? null,
+      evidence: draft.evidence,
+      fingerprint: draft.fingerprint,
+      comparisonDigest: draft.comparisonDigest,
+    })
+    .returning({ id: splitwiseAuditFindings.id });
+  return requireRow(row, 'splitwise_audit_findings').id as SplitwiseAuditFindingId;
+}
+
+/** Every finding that is still current — the set a rerun compares itself against. */
+export async function listCurrentSplitwiseAuditFindings(
+  exec: Executor,
+): Promise<SplitwiseAuditFindingRow[]> {
+  const rows = await exec
+    .select()
+    .from(splitwiseAuditFindings)
+    .where(isNull(splitwiseAuditFindings.supersededAt))
+    .orderBy(asc(splitwiseAuditFindings.firstObservedAt), asc(splitwiseAuditFindings.id));
+  return rows.map(toAuditFindingRow);
+}
+
+export interface ListSplitwiseAuditFindingsFilter {
+  readonly reviewStatus?: SplitwiseAuditReviewStatus;
+  readonly kind?: SplitwiseAuditFindingKind;
+  readonly findingClass?: SplitwiseAuditFindingClass;
+  readonly personId?: PersonId;
+  readonly auditRunId?: SplitwiseAuditRunId;
+  /** Superseded rows are history and are excluded unless a caller asks for them. */
+  readonly includeSuperseded?: boolean;
+  readonly limit?: number;
+}
+
+export async function listSplitwiseAuditFindings(
+  exec: Executor,
+  filter: ListSplitwiseAuditFindingsFilter = {},
+): Promise<SplitwiseAuditFindingRow[]> {
+  const conditions = [
+    ...(filter.includeSuperseded === true ? [] : [isNull(splitwiseAuditFindings.supersededAt)]),
+    ...(filter.reviewStatus === undefined
+      ? []
+      : [eq(splitwiseAuditFindings.reviewStatus, filter.reviewStatus)]),
+    ...(filter.kind === undefined ? [] : [eq(splitwiseAuditFindings.kind, filter.kind)]),
+    ...(filter.findingClass === undefined
+      ? []
+      : [eq(splitwiseAuditFindings.findingClass, filter.findingClass)]),
+    ...(filter.auditRunId === undefined
+      ? []
+      : [eq(splitwiseAuditFindings.auditRunId, filter.auditRunId)]),
+    ...(filter.personId === undefined
+      ? []
+      : [
+          sql`(${splitwiseAuditFindings.personAId} = ${filter.personId}
+               or ${splitwiseAuditFindings.personBId} = ${filter.personId})`,
+        ]),
+  ];
+
+  const rows = await exec
+    .select()
+    .from(splitwiseAuditFindings)
+    .where(conditions.length === 0 ? undefined : and(...conditions))
+    .orderBy(desc(splitwiseAuditFindings.firstObservedAt), asc(splitwiseAuditFindings.id))
+    .limit(filter.limit ?? 100);
+  return rows.map(toAuditFindingRow);
+}
+
+export async function getSplitwiseAuditFindingById(
+  exec: Executor,
+  findingId: SplitwiseAuditFindingId,
+): Promise<SplitwiseAuditFindingRow | null> {
+  const [row] = await exec
+    .select()
+    .from(splitwiseAuditFindings)
+    .where(eq(splitwiseAuditFindings.id, findingId));
+  return row === undefined ? null : toAuditFindingRow(row);
+}
+
+/**
+ * Records that a later run produced the identical comparison.
+ *
+ * Touches nothing but when-last-seen and which run saw it: the finding's own conclusion,
+ * evidence and both snapshots are exactly as first recorded, and no audit event is written
+ * for a re-observation — repeating "still true" on every run is the audit noise ADR-0046
+ * sets out to avoid.
+ */
+export async function markSplitwiseAuditFindingObserved(
+  exec: Executor,
+  findingId: SplitwiseAuditFindingId,
+  auditRunId: SplitwiseAuditRunId,
+): Promise<void> {
+  await exec
+    .update(splitwiseAuditFindings)
+    .set({ lastObservedAuditRunId: auditRunId, lastObservedAt: new Date(), updatedAt: new Date() })
+    .where(eq(splitwiseAuditFindings.id, findingId));
+}
+
+/**
+ * Closes a finding as history, optionally naming the row that replaced it.
+ *
+ * Never a delete and never an in-place rewrite — the superseded row keeps its original
+ * snapshots, evidence and review decision, which is what "resolving a finding does not erase
+ * what it was about" means in storage terms.
+ */
+export async function supersedeSplitwiseAuditFinding(
+  exec: Executor,
+  findingId: SplitwiseAuditFindingId,
+  reason: SplitwiseAuditSupersedeReason,
+): Promise<void> {
+  await exec
+    .update(splitwiseAuditFindings)
+    .set({ supersededAt: new Date(), supersedeReason: reason, updatedAt: new Date() })
+    .where(eq(splitwiseAuditFindings.id, findingId));
+}
+
+/**
+ * Names the finding that replaced a superseded one.
+ *
+ * Separate from {@link supersedeSplitwiseAuditFinding} because the successor cannot exist yet
+ * when its predecessor is closed: the "one current row per fingerprint" unique index is what
+ * forces the old row out of the way before the new one can be inserted, so the link back is
+ * written afterwards rather than re-stamping `superseded_at` a second time.
+ */
+export async function linkSplitwiseAuditFindingSuccessor(
+  exec: Executor,
+  findingId: SplitwiseAuditFindingId,
+  supersededByFindingId: SplitwiseAuditFindingId,
+): Promise<void> {
+  await exec
+    .update(splitwiseAuditFindings)
+    .set({ supersededByFindingId, updatedAt: new Date() })
+    .where(eq(splitwiseAuditFindings.id, findingId));
+}
+
+/** Records a person's review decision. The append-only history is in `audit_events`. */
+export async function updateSplitwiseAuditFindingReview(
+  exec: Executor,
+  findingId: SplitwiseAuditFindingId,
+  review: {
+    readonly reviewStatus: SplitwiseAuditReviewStatus;
+    readonly reviewedAt: Date;
+    readonly reviewedBy: string;
+    readonly reviewReason: string | null;
+  },
+): Promise<void> {
+  await exec
+    .update(splitwiseAuditFindings)
+    .set({
+      reviewStatus: review.reviewStatus,
+      reviewedAt: review.reviewedAt,
+      reviewedBy: review.reviewedBy,
+      reviewReason: review.reviewReason,
+      updatedAt: new Date(),
+    })
+    .where(eq(splitwiseAuditFindings.id, findingId));
+}
+
+function toAuditRunRow(row: typeof splitwiseAuditRuns.$inferSelect): SplitwiseAuditRunRow {
+  return {
+    id: row.id as SplitwiseAuditRunId,
+    runAt: row.runAt,
+    reconciliationRunId: row.reconciliationRunId as ReconciliationRunId | null,
+    externalIntegrationId: row.externalIntegrationId as ExternalIntegrationId | null,
+    externalReadStatus: row.externalReadStatus as SplitwiseExternalReadStatus,
+    externalReadDetail: row.externalReadDetail,
+    pairsAudited: row.pairsAudited,
+    pairsUnchecked: row.pairsUnchecked,
+    findingsCreated: row.findingsCreated,
+    findingsReobserved: row.findingsReobserved,
+    findingsSuperseded: row.findingsSuperseded,
+    externalBalancesSnapshot: row.externalBalancesSnapshot,
+  };
+}
+
+function toAuditFindingRow(
+  row: typeof splitwiseAuditFindings.$inferSelect,
+): SplitwiseAuditFindingRow {
+  return {
+    id: row.id as SplitwiseAuditFindingId,
+    auditRunId: row.auditRunId as SplitwiseAuditRunId,
+    lastObservedAuditRunId: row.lastObservedAuditRunId as SplitwiseAuditRunId,
+    reconciliationRunId: row.reconciliationRunId as ReconciliationRunId | null,
+    kind: row.kind as SplitwiseAuditFindingKind,
+    findingClass: row.findingClass as SplitwiseAuditFindingClass,
+    scope: row.scope as SplitwiseAuditFindingScope,
+    summary: row.summary,
+    confidence: row.confidence as ConfidenceLevel,
+    amount: row.amount as Paise | null,
+    balanceImpact: row.balanceImpact as Paise,
+    personAId: row.personAId as PersonId | null,
+    personBId: row.personBId as PersonId | null,
+    expenseId: row.expenseId as ExpenseId | null,
+    splitwiseExpenseRowId: row.splitwiseExpenseRowId as SplitwiseExpenseId | null,
+    settlementId: row.settlementId as SettlementId | null,
+    splitwiseSettlementRowId: row.splitwiseSettlementRowId as SplitwiseSettlementId | null,
+    externalReference: row.externalReference,
+    localSnapshot: row.localSnapshot,
+    externalSnapshot: row.externalSnapshot,
+    evidence: row.evidence,
+    fingerprint: row.fingerprint,
+    comparisonDigest: row.comparisonDigest,
+    firstObservedAt: row.firstObservedAt,
+    lastObservedAt: row.lastObservedAt,
+    reviewStatus: row.reviewStatus as SplitwiseAuditReviewStatus,
+    reviewedAt: row.reviewedAt,
+    reviewedBy: row.reviewedBy,
+    reviewReason: row.reviewReason,
+    supersededAt: row.supersededAt,
+    supersededByFindingId: row.supersededByFindingId as SplitwiseAuditFindingId | null,
+    supersedeReason: row.supersedeReason as SplitwiseAuditSupersedeReason | null,
+  };
 }
 
 /* =========================================================================== helpers */

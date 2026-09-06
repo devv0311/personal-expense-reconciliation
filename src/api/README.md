@@ -174,7 +174,22 @@ pure read that runs the same engine a distribution would, so its `projectedLines
 approval will write, and its `reviewRequired` is why it could not be — a pending decision
 reported rather than an error thrown.
 
-**Not implemented:** auth, and re-sync/discrepancy-resolution routes for a `stale`
-`SplitwiseExpense`/`SplitwiseSettlement` or a `ReconciliationDiscrepancy` (deliberately deferred
-past phase 15, ADR-0041 — `fetchBalances`-driven drift detection is implemented, acting on it
-is not).
+**Phase 19 (ADR-0046) added** six routes under `/api/splitwise`:
+`POST`/`GET /api/splitwise/audits`, `GET /api/splitwise/audits/:id`,
+`GET /api/splitwise/audit-findings`, `GET /api/splitwise/audit-findings/:id` and
+`POST /api/splitwise/audit-findings/:id/review`. Every one is a read or a recorded decision —
+**none writes to Splitwise, and the review route in particular does not**: accepting a finding
+records what a person concluded, never an instruction to correct either ledger. `POST
+/api/splitwise/audits` is safe to call repeatedly, because an unchanged rerun re-observes the
+findings already on record instead of duplicating them. The list route excludes superseded
+findings unless `?includeSuperseded=true` asks for them — they are preserved, not hidden, and
+reading them back is how what an earlier comparison said stays available after a later one
+replaced it. `decision` is `acknowledged | resolved | dismissed`; the last two require a
+`reason` (a 409, from the service, not a 400 — the request is well-formed, the state it asks
+for is not), and the actor must be a person, never `system` or a rule (`invariants.md` #17).
+
+**Not implemented:** auth, and re-sync routes for a `stale`
+`SplitwiseExpense`/`SplitwiseSettlement` (deliberately deferred past phases 14, 15 and 19 —
+ADR-0040/0041/0046: drift is now detected, attributed and reviewable; acting on it against
+Splitwise is a separate write capability). Resolving a `ReconciliationDiscrepancy` on a
+`ReconciliationRun` also has no route; phase 19's reviewable record is the audit finding.

@@ -44,6 +44,8 @@ export type SplitwiseExpenseId = Id<'splitwise_expense'>;
 export type SplitwiseSettlementId = Id<'splitwise_settlement'>;
 export type ReconciliationRunId = Id<'reconciliation_run'>;
 export type ReconciliationAccountSnapshotId = Id<'reconciliation_account_snapshot'>;
+export type SplitwiseAuditRunId = Id<'splitwise_audit_run'>;
+export type SplitwiseAuditFindingId = Id<'splitwise_audit_finding'>;
 
 /**
  * Tags a raw string as an `Id` of a given entity type.

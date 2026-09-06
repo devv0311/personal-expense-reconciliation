@@ -496,6 +496,51 @@ Invariant (revised, `invariants.md` #20): `ledger_unexplained_total = ledger_tot
 ledger_transfers_total − ledger_investments_total − ledger_settlements_total −
 ledger_explained_total`.
 
+### splitwise_audit_runs — SYSTEM, immutable — **new table, phase 19, ADR-0046**
+
+`id`, `run_at timestamptz not null default now()`, `reconciliation_run_id uuid` (nullable — set
+when the audit ran inside a `ReconciliationRun`, null when invoked on its own),
+`external_integration_id uuid` (nullable), `external_read_status text not null`
+(`complete | partial | unsupported | failed | skipped`), `external_read_detail text`,
+`pairs_audited integer not null default 0`, `pairs_unchecked integer not null default 0`,
+`findings_created`/`findings_reobserved`/`findings_superseded integer not null default 0`,
+`external_balances_snapshot jsonb` (what `fetchBalances()` said, verbatim), `created_at`.
+
+The load-bearing column is `external_read_status`. It is what keeps a failed, partial or
+unsupported read from ever reading as agreement: a run that could not see Splitwise says so on
+its own row, and every finding it wrote points back here for that context.
+
+### splitwise_audit_findings — DERIVED, reviewable — **new table, phase 19, ADR-0046**
+
+`id`, `audit_run_id uuid not null` (the run that first produced it — provenance, never
+rewritten), `last_observed_audit_run_id uuid not null` (status metadata),
+`reconciliation_run_id uuid`, `kind text not null` (seventeen values, `enums.ts`),
+`finding_class text not null` (`discrepancy | limitation | incomplete`), `scope text not null`
+(`integration | pair | expense | settlement | external_entry`), `summary text not null`,
+`confidence text not null` (`high | medium | low | unknown` — a deterministic evidence strength,
+never an AI output), `amount bigint` (positive magnitude, nullable), `balance_impact bigint not
+null` (**signed**, deliberately unconstrained: it is a share of a signed gap), `person_a_id`,
+`person_b_id`, `expense_id`, `splitwise_expense_row_id`, `settlement_id`,
+`splitwise_settlement_row_id`, `external_reference text`, `local_snapshot jsonb not null`,
+`external_snapshot jsonb`, `evidence jsonb not null default '[]'`, `fingerprint text not null`,
+`comparison_digest text not null`, `first_observed_at`, `last_observed_at`,
+`review_status text not null default 'open'`, `reviewed_at`, `reviewed_by`, `review_reason`,
+`superseded_at`, `superseded_by_finding_id uuid`, `supersede_reason text`, `created_at`,
+`updated_at`.
+
+Two constraints carry decisions rather than bookkeeping:
+
+- `splitwise_audit_findings_current_idx` — `unique (fingerprint) where superseded_at is null`.
+  One current finding per cause per record, enforced by the database, so a rerun cannot append a
+  second opinion about the same thing even if the reconciliation loop is later rewritten.
+- `splitwise_audit_findings_review_attribution_check` — any non-`open` review state requires a
+  recorded actor and instant, and `resolved`/`dismissed` additionally require a reason. `open` is
+  the audit's own state and carries no actor, because nobody decided it.
+
+Superseded, never rewritten: a materially different comparison inserts a new row and closes the
+old one (`materially_changed`, naming its replacement), so the earlier snapshots, evidence and
+review decision survive exactly as recorded.
+
 ## Deliberately deferred
 
 - Row-level security policies — revisit once real multi-user access is on the roadmap.

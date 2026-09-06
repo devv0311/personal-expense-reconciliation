@@ -397,6 +397,8 @@ export const AUDITABLE_ENTITY_TYPES = [
   'splitwise_settlement',
   'reconciliation_run',
   'reconciliation_account_snapshot',
+  'splitwise_audit_run',
+  'splitwise_audit_finding',
 ] as const;
 export type AuditableEntityType = (typeof AUDITABLE_ENTITY_TYPES)[number];
 
@@ -426,6 +428,124 @@ export const SPLITWISE_SETTLEMENT_SYNC_STATUSES = [
   'sync_failed',
 ] as const;
 export type SplitwiseSettlementSyncStatus = (typeof SPLITWISE_SETTLEMENT_SYNC_STATUSES)[number];
+
+/* ------------------------------------------- Splitwise drift & ghost-debt auditing */
+
+/**
+ * How complete an external Splitwise read was (Phase 19, ADR-0046).
+ *
+ * The single most important value here is that **none of these mean "agreement"**. A failed,
+ * unsupported or partial read is an *incomplete check*: it says this ledger could not see
+ * enough of Splitwise to conclude anything, which is a different answer from "the two agree"
+ * and is stored as such.
+ */
+export const SPLITWISE_EXTERNAL_READ_STATUSES = [
+  /** Every entry Splitwise holds for the audited scope was read back. */
+  'complete',
+  /** Some of it was read; absence of a record proves nothing under this status. */
+  'partial',
+  /** The port does not implement the finer read at all — no adapter capability. */
+  'unsupported',
+  /** The read was attempted and errored. */
+  'failed',
+  /** No Splitwise integration is connected, so no read was attempted. */
+  'skipped',
+] as const;
+export type SplitwiseExternalReadStatus = (typeof SPLITWISE_EXTERNAL_READ_STATUSES)[number];
+
+/**
+ * What one audit finding is: a disagreement, a permanent observability limit, or a gap in
+ * what could be checked.
+ *
+ * Kept separate from `kind` so a reader never has to know the whole kind list to answer "is
+ * this Splitwise being wrong, or this system being honest about what it cannot see?".
+ */
+export const SPLITWISE_AUDIT_FINDING_CLASSES = ['discrepancy', 'limitation', 'incomplete'] as const;
+export type SplitwiseAuditFindingClass = (typeof SPLITWISE_AUDIT_FINDING_CLASSES)[number];
+
+/** How precisely a finding is attributed. `pair` is the aggregate, never-a-culprit level. */
+export const SPLITWISE_AUDIT_FINDING_SCOPES = [
+  'integration',
+  'pair',
+  'expense',
+  'settlement',
+  'external_entry',
+] as const;
+export type SplitwiseAuditFindingScope = (typeof SPLITWISE_AUDIT_FINDING_SCOPES)[number];
+
+/**
+ * Every suspected cause the audit can name, and the three "cannot say" answers.
+ *
+ * A kind is only produced when the evidence in hand actually supports it (ADR-0046): an
+ * aggregate pair mismatch that nothing explains stays `unattributed_balance_mismatch` rather
+ * than being promoted into whichever precise cause would have balanced the totals.
+ */
+export const SPLITWISE_AUDIT_FINDING_KINDS = [
+  /* --- attributable disagreements, finest first --- */
+  /** A row this ledger synced is absent from, or deleted in, Splitwise's own ledger. */
+  'missing_external_expense',
+  /** Splitwise holds a second entry that repeats one this ledger already synced. */
+  'duplicate_external_expense',
+  /** Splitwise still shows a share this ledger has since reduced by a partial refund. */
+  'stale_refund_partial',
+  /** As above, where the local expense is now fully refunded (net zero). */
+  'stale_refund_full',
+  /** A refund attributed to specific items (ADR-0018) that Splitwise has not been told about. */
+  'unreflected_item_refund',
+  /** A local `Settlement` Splitwise has no record of, so it still shows the debt open. */
+  'missing_external_settlement',
+  /** Splitwise holds a repeated payment entry for one local settlement. */
+  'duplicate_external_settlement',
+  /** Splitwise records a payment this ledger has no `Settlement` for. */
+  'unrecorded_external_settlement',
+  /** Both sides hold the entry, and disagree about the amount owed on it. */
+  'external_amount_disagreement',
+  /** External debt with nothing in the current local ledger supporting it. */
+  'unsupported_ghost_debt',
+  /* --- the honest aggregate --- */
+  /** A pair-level gap attribution could not explain. Never promoted to a specific culprit. */
+  'unattributed_balance_mismatch',
+  /* --- incomplete checks: not agreement --- */
+  'external_read_failed',
+  'external_read_unsupported',
+  'external_read_partial',
+  /** A person this ledger links to Splitwise, whom Splitwise's own read did not report. */
+  'external_record_inaccessible',
+  /* --- permanent limitations --- */
+  /** Two non-user people: Splitwise's friends-list read cannot see their pair at all. */
+  'non_user_settlement_unobservable',
+  /** An expense someone else fronted: no synced row maps it, so drift cannot be attributed. */
+  'cross_payer_attribution_unavailable',
+] as const;
+export type SplitwiseAuditFindingKind = (typeof SPLITWISE_AUDIT_FINDING_KINDS)[number];
+
+/**
+ * A finding's review state.
+ *
+ * `open` is the only state the audit itself writes. The other three are a person's recorded
+ * decision, carrying actor, time and reason — and none of them authorizes a write back to
+ * Splitwise (ADR-0046; re-sync remains separate work).
+ */
+export const SPLITWISE_AUDIT_REVIEW_STATUSES = [
+  'open',
+  'acknowledged',
+  'resolved',
+  'dismissed',
+] as const;
+export type SplitwiseAuditReviewStatus = (typeof SPLITWISE_AUDIT_REVIEW_STATUSES)[number];
+
+/** The review states a person can move a finding into — `open` is the audit's own. */
+export const SPLITWISE_AUDIT_REVIEW_DECISIONS = ['acknowledged', 'resolved', 'dismissed'] as const;
+export type SplitwiseAuditReviewDecision = (typeof SPLITWISE_AUDIT_REVIEW_DECISIONS)[number];
+
+/** Why a finding stopped being current. Both are the audit's own bookkeeping, never a review. */
+export const SPLITWISE_AUDIT_SUPERSEDE_REASONS = [
+  /** A later audit compared the same subject and got a materially different answer. */
+  'materially_changed',
+  /** A later, complete audit of the same subject no longer produced this finding. */
+  'no_longer_observed',
+] as const;
+export type SplitwiseAuditSupersedeReason = (typeof SPLITWISE_AUDIT_SUPERSEDE_REASONS)[number];
 
 /* ----------------------------------------------------------------------- predicates */
 

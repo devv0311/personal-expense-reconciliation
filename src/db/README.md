@@ -53,6 +53,16 @@ omission — what must not change about them is enforced by `CHECK` instead. In 
 recorded actor and instant, which is what keeps "no confidence threshold silently approves an
 evidence link" a property of the schema (ADR-0044).
 
+**Findings are superseded, never rewritten.** `splitwise_audit_findings` (phase 19) is DERIVED
+and reviewable, and its update paths are deliberately three narrow ones: "seen again" on an
+unchanged rerun, a person's review decision, and supersession. A materially different comparison
+inserts a new row and closes the old one, so the earlier snapshots, evidence and review decision
+stay exactly as recorded. `splitwise_audit_findings_current_idx` — a unique index on
+`fingerprint`, partial to `superseded_at is null` — is what makes "one current finding per cause
+per record" a property of the database rather than of the reconciliation loop, and
+`splitwise_audit_findings_review_attribution_check` makes any non-`open` review state reachable
+only with a recorded actor and instant, and `resolved`/`dismissed` only with a reason (ADR-0046).
+
 **Immutability.** There is no update path here for `payments.amount/occurred_at/
 raw_description/account_id`, `evidence.type/note_kind/storage_ref/media_type/byte_size/raw_text/
 captured_at`, `expenses.amount`, or any `audit_events` row. `updateEvidenceLinks` is the single

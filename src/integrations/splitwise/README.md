@@ -14,7 +14,15 @@ and call this port. `fetchBalances` is read-only, called by `services.runReconci
 (phase 15): one entry per Splitwise friend of the connected account, scoped to that account
 because that's what Splitwise's real "get friends" call actually returns. A failure there is
 non-fatal to its caller — surfaced as a discrepancy, not a thrown request failure the caller
-must special-case. `tests/support/splitwise.ts` provides the in-memory mock every test injects.
+must special-case. `fetchLedgerEntries` (phase 19, ADR-0046) is the finer read beside it, and is
+**optional on the interface by design**: it is the read that lets `services.runSplitwiseAudit`
+name a specific external record as the cause of drift, and an adapter that cannot list a pair's
+entries omits it so the audit records `unsupported` rather than mistaking a missing capability
+for a Splitwise holding nothing. Each entry carries a `pairNetBalance` — its own contribution to
+the pair balance, in `fetchBalances`' sign convention — so a listing that claims to be complete
+can be checked against the balance Splitwise itself reported, and downgraded to `partial` when
+it does not add up. `tests/support/splitwise.ts` provides the in-memory mock every test injects,
+plus `createAggregateOnlySplitwisePort` for the no-`fetchLedgerEntries` case.
 
 **Depends on:** `src/domain` types only; called from `src/services`, never calls back into
 `src/services` or `src/db` itself.
@@ -27,4 +35,6 @@ only from an already-recorded `Settlement`. Built and tested against a mock only
 deliberately pointed at a real Splitwise account — see `docs/security/security-model.md`.
 
 **Not yet implemented:** any concrete adapter, and a write path back to Splitwise for a `stale`
-expense (an amount update or a deletion) — see `docs/roadmap.md` phase 15's implementation note.
+expense (an amount update or a deletion) — see `docs/roadmap.md` phase 15's implementation note
+and ADR-0046 §6. Phase 19 detects, attributes and makes drift reviewable; reviewing a finding is
+explicitly not authorization to write, and no method on this port can perform one.

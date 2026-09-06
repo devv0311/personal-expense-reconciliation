@@ -1,7 +1,7 @@
 # CLAUDE.md — Engineering Context for This Repository
 
-> **Current decisions (2026-09-06).** Phases 16, 17 and 18 are complete. Next is Phase 19, the
-> Splitwise **drift and ghost-debt auditing engine**.
+> **Current decisions (2026-09-06).** Phases 16–19 are complete. Next is Phase 20, **derived
+> proof packs**.
 > [Phase 17](docs/roadmap.md) shipped context re-attachment
 > ([ADR-0044](docs/decisions/0044-evidence-observations-and-match-candidates.md)):
 > `EvidenceObservation` records the structured reading of a bank SMS or UPI push notification
@@ -23,7 +23,21 @@
 > falling back to the whole-basket default. These decisions supersede older outflow-only scope
 > restrictions and refine whole-expense refund distribution for item-attributed refunds; the
 > existing engine is preserved alongside them, not replaced.
-> Read these two ADRs and the current roadmap before historical implementation notes.
+> [Phase 19](docs/roadmap.md) shipped the Splitwise **drift and ghost-debt auditing engine**
+> ([ADR-0046](docs/decisions/0046-splitwise-audit-findings-and-external-read-completeness.md)):
+> `domain.auditSplitwisePair` extends phase 15's aggregate `compareSplitwiseBalance` — which is
+> unchanged — with per-record attribution, and every finding is a durable, reviewable
+> `splitwise_audit_findings` row carrying both compared snapshots, its evidence, its amount, its
+> suspected cause and its confidence. Three rules govern it and are not negotiable: attribution
+> is **earned** (a signed `balanceImpact` accounts for part of the gap, and whatever no record
+> explains stays `unattributed_balance_mismatch` at `unknown` confidence, never promoted to a
+> culprit); a failed, partial, unsupported or unreported external read is an **incomplete
+> check, never agreement** (the new `SplitwisePort.fetchLedgerEntries` is deliberately optional
+> so a missing capability is representable); and `stale` (our side changed) stays distinct from
+> `drifted` (theirs did). Reviewing a finding records a person's conclusion with actor, time and
+> reason — it authorizes **no** write to Splitwise, and stale re-sync/update/delete is still
+> unbuilt.
+> Read these ADRs and the current roadmap before historical implementation notes.
 >
 > **ADR numbering:** older ADR-0017 (integration tests) and ADR-0018 (manual-note semantics)
 > remain in place. Always qualify the new decisions by title/full filename. Historical bare
@@ -106,7 +120,10 @@ or their interactions have shipped.
    item/refund/settlement evidence to Splitwise. Expose stale refund shares, missing or duplicate
    records and debt unsupported by the current ledger as auditable discrepancies. A pair-level
    mismatch is a signal, not proof that one particular expense is wrong. Never silently trust
-   an external balance or fabricate a local settlement to clear it.
+   an external balance or fabricate a local settlement to clear it. Shipped in Phase 19
+   (ADR-0046): `domain.auditSplitwisePair` + `services.runSplitwiseAudit`, with an unexplained
+   gap reported as an unattributed mismatch rather than pinned on a record, and an unreadable
+   Splitwise recorded as an incomplete audit rather than a clean one.
 5. **One-Click WhatsApp Proof Packs.** Derive concise, recipient-specific summaries of original
    spend, item refunds, net shares, settlements and remaining balances, with supporting evidence
    references. Preview/redact before copying or sharing. Packs are derived artifacts, never
