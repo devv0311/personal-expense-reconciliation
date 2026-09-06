@@ -1,10 +1,16 @@
 # ADR-0018. Item-level refund attribution
 
-**Status:** Accepted (2026-09-05); **schema and validation implemented in Phase 16
-(2026-09-06)** — `expense_adjustment_items`, `src/domain/refund-attribution.ts` and
-`services.recordExpenseAdjustment`'s attribution path, including the row lock that makes 19.3's
-cumulative ceilings safe under concurrency. The **allocation engine** — net item cost to
-superseding allocation to obligation — remains Phase 18, as scheduled here.
+**Status:** Accepted (2026-09-05); **fully implemented as of Phase 18 (2026-09-06).**
+Phase 16 shipped the schema and validation — `expense_adjustment_items`,
+`src/domain/refund-attribution.ts` and `services.recordExpenseAdjustment`'s attribution path,
+including the row lock that makes 19.3's cumulative ceilings safe under concurrency. Phase 18
+shipped the **allocation engine** — net item cost to superseding allocation to obligation —
+as `src/domain/refund-allocation.ts` and `services.distributeAdjustment`'s item-attributed
+path, with `services.getRefundAllocationState` as its read.
+[ADR-0045](0045-item-refund-allocation-is-rebuilt-not-decremented.md) records how the engine
+answers the three questions "Calculation semantics" below leaves to the implementation: the
+rebuild-from-recorded-facts shape, the refusal to guess item ownership, and how a legacy
+whole-expense reduction coexists with item attribution. No schema change was needed.
 
 **Identity:** Cite this ADR by its full filename or as **ADR-0018 (item refunds)**.
 The older [0018 manual-note decision](0018-manual-note-signal-ambiguity.md) remains accepted.
@@ -159,6 +165,16 @@ Phase 16 adds the join table, domain types, foreign keys, uniqueness/positive co
 transactional aggregate validation. Phase 18 extends allocation services and their scenario
 tests; it must not reuse the whole-expense proportional default for item-specific refunds.
 The existing historical and whole-expense scenarios must continue to pass.
+
+**Delivered (Phase 18, 2026-09-06).** `domain.buildItemAwareAllocationLines` places each item's
+net cost on that item's own beneficiaries and applies any unattributed whole-expense reduction
+once, afterwards; `services.distributeAdjustment` branches to it whenever any attribution
+exists and keeps ADR-0008's path byte-for-byte otherwise. An allocation that cannot express
+item ownership is refused with `REFUND_ITEM_OWNERSHIP_REQUIRED` rather than falling back to the
+whole-basket default. `services.approveAllocation` allocates item-based lines against net item
+costs. The scenario matrix below is `tests/scenarios/item-refund-allocation.test.ts`; the
+whole-expense scenarios in `tests/scenarios/adjustments-settlements-and-exclusions.test.ts` are
+unchanged and still pass.
 
 The scenario matrix must cover one-item partial refund, multiple refunded items, successive
 refunds and cumulative ceilings, concurrent/duplicate refunds, shared quantities and paise

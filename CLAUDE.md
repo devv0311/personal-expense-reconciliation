@@ -1,7 +1,7 @@
 # CLAUDE.md — Engineering Context for This Repository
 
-> **Current decisions (2026-09-06).** Phases 16 and 17 are complete. Next is Phase 18, the
-> item-level refund **allocation engine**.
+> **Current decisions (2026-09-06).** Phases 16, 17 and 18 are complete. Next is Phase 19, the
+> Splitwise **drift and ghost-debt auditing engine**.
 > [Phase 17](docs/roadmap.md) shipped context re-attachment
 > ([ADR-0044](docs/decisions/0044-evidence-observations-and-match-candidates.md)):
 > `EvidenceObservation` records the structured reading of a bank SMS or UPI push notification
@@ -11,13 +11,18 @@
 > sanitization boundary is now fail-closed (`ai.assertPayloadSanitized`) with a local-only
 > reversible mapping. [ADR-0017 (cash balance)](docs/decisions/0017-pragmatic-cash-balance-reconciliation.md)
 > and [ADR-0018 (item refunds)](docs/decisions/0018-item-level-refund-attribution.md) are now
-> **implemented at the schema, domain and service layers**: `Payment.cash_flow_category` with
-> its own classification lifecycle, `ReconciliationAccountSnapshot`, and
-> `ExpenseAdjustmentItem` all exist and are enforced. What remains scheduled is ADR-0018's
-> **allocation engine** — turning net item costs into a superseding allocation and new
-> obligations — which is Phase 18, as that ADR always specified. These decisions supersede
-> older outflow-only scope restrictions and refine whole-expense refund distribution for
-> item-attributed refunds; the existing engine is preserved alongside them, not replaced.
+> **implemented in full at the schema, domain and service layers**: `Payment.cash_flow_category`
+> with its own classification lifecycle, `ReconciliationAccountSnapshot`, and
+> `ExpenseAdjustmentItem` all exist and are enforced. [Phase 18](docs/roadmap.md) shipped
+> ADR-0018's **allocation engine** ([ADR-0045](docs/decisions/0045-item-refund-allocation-is-rebuilt-not-decremented.md)):
+> `domain.buildItemAwareAllocationLines` puts each item's net cost on that item's own
+> beneficiaries and applies any unattributed whole-expense reduction once, afterwards, through
+> ADR-0008's unchanged `distributeAdjustment`. It rebuilds from recorded facts rather than
+> decrementing the current lines, and **refuses rather than guesses** — an allocation that
+> cannot say who owned a refunded item raises `REFUND_ITEM_OWNERSHIP_REQUIRED` instead of
+> falling back to the whole-basket default. These decisions supersede older outflow-only scope
+> restrictions and refine whole-expense refund distribution for item-attributed refunds; the
+> existing engine is preserved alongside them, not replaced.
 > Read these two ADRs and the current roadmap before historical implementation notes.
 >
 > **ADR numbering:** older ADR-0017 (integration tests) and ADR-0018 (manual-note semantics)

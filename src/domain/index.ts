@@ -31,6 +31,7 @@ export * from './money.js';
 export * from './normalization.js';
 export * from './payment.js';
 export * from './receipt.js';
+export * from './refund-allocation.js';
 export * from './refund-attribution.js';
 export * from './reconciliation.js';
 export * from './review.js';

@@ -134,9 +134,23 @@ import (phase 6):
   event it attributes are one decision. `db.lockExpenseForAdjustment` takes a row lock on the
   parent expense first, which is what stops two concurrent refunds each finding room under the
   same remaining ceiling (19.3). Omitting `itemAttributions` is the legacy whole-expense path
-  from ADR-0008, unchanged. Turning the resulting net item costs into a superseding allocation
-  is Phase 18; `distributeAdjustment` is still ADR-0008's whole-expense proportional
-  distribution.
+  from ADR-0008, unchanged.
+
+- `adjustment-service.ts` (phase 18, ADR-0018 (item refunds) / ADR-0045) —
+  `distributeAdjustment` now picks its arithmetic from what the ledger recorded. With no
+  attribution anywhere on the expense it is ADR-0008's whole-expense proportional distribution,
+  unchanged; with any attribution it calls `domain.buildItemAwareAllocationLines`, which puts
+  each item's net cost on that item's **own** beneficiaries and then applies any unattributed
+  whole-expense reduction once, afterwards, over the item-derived lines. The lines are rebuilt
+  from recorded facts each time rather than decremented, which is what makes the outcome
+  independent of refund order and of how often distribution ran; a second call with nothing new
+  recorded is refused (`PRECONDITION_FAILED`) rather than rewriting the same numbers, and the
+  same row lock `recordExpenseAdjustment` takes is held throughout. An allocation that cannot
+  say who owned a refunded item raises `REFUND_ITEM_OWNERSHIP_REQUIRED` — the whole-basket
+  default is never the fallback. `getRefundAllocationState` is the read beside it: gross beside
+  net per item, the two reductions kept apart, the lines a distribution would write, and
+  `reviewRequired` when it could not. Custom weights describe the unattributed reduction only,
+  and are refused outright when the whole reduction is item-attributed.
 
 - `balance-service.ts` (phase 16 extension, ADR-0017 (cash balance)) — `runReconciliation` now
   also writes one immutable `ReconciliationAccountSnapshot` per account per run, carrying the

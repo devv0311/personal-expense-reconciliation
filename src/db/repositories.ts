@@ -695,6 +695,82 @@ export async function listAdjustmentAmounts(
   return rows.map((row) => row.amount as Paise);
 }
 
+/** One recorded adjustment, with how much of it item attribution accounts for. */
+export interface ExpenseAdjustmentSummaryRow {
+  readonly id: ExpenseAdjustmentId;
+  readonly kind: 'merchant_refund' | 'third_party_reimbursement';
+  readonly amount: Paise;
+  readonly adjustmentPaymentId: PaymentId | null;
+  readonly occurredAt: Date;
+  /** Sum of this adjustment's `ExpenseAdjustmentItem` rows; `0` for a legacy adjustment. */
+  readonly attributedAmount: Paise;
+  /** How many items it names. Zero means ADR-0008's whole-expense path (19.2). */
+  readonly attributionCount: number;
+}
+
+/**
+ * Every adjustment against one expense, split by whether it carries item attribution.
+ *
+ * The allocation engine needs this distinction and cannot infer it from amounts: an
+ * item-attributed refund reduces only its own item's net cost, while a legacy whole-expense
+ * refund has to keep its separate, explicitly-distributed reduction and be applied exactly
+ * once (ADR-0018 (item refunds), "Calculation semantics"). Reading them together, in one
+ * pass, is what makes "do not distribute the same reduction twice" checkable rather than
+ * hopeful.
+ */
+export async function listExpenseAdjustmentSummaries(
+  exec: Executor,
+  expenseId: ExpenseId,
+): Promise<ExpenseAdjustmentSummaryRow[]> {
+  const rows = await exec
+    .select({
+      id: expenseAdjustments.id,
+      kind: expenseAdjustments.kind,
+      amount: expenseAdjustments.amount,
+      adjustmentPaymentId: expenseAdjustments.adjustmentPaymentId,
+      occurredAt: expenseAdjustments.occurredAt,
+    })
+    .from(expenseAdjustments)
+    .where(eq(expenseAdjustments.originalExpenseId, expenseId))
+    .orderBy(asc(expenseAdjustments.occurredAt), asc(expenseAdjustments.id));
+  if (rows.length === 0) return [];
+
+  const attributionRows = await exec
+    .select({
+      expenseAdjustmentId: expenseAdjustmentItems.expenseAdjustmentId,
+      amount: expenseAdjustmentItems.amount,
+    })
+    .from(expenseAdjustmentItems)
+    .where(
+      inArray(
+        expenseAdjustmentItems.expenseAdjustmentId,
+        rows.map((row) => row.id),
+      ),
+    );
+
+  const attributed = new Map<string, { amount: Paise; count: number }>();
+  for (const row of attributionRows) {
+    const running = attributed.get(row.expenseAdjustmentId) ?? { amount: 0n as Paise, count: 0 };
+    attributed.set(row.expenseAdjustmentId, {
+      amount: (running.amount + (row.amount as Paise)) as Paise,
+      count: running.count + 1,
+    });
+  }
+
+  return rows.map((row) => {
+    const summary = attributed.get(row.id) ?? { amount: 0n as Paise, count: 0 };
+    return {
+      id: row.id as ExpenseAdjustmentId,
+      kind: row.kind as ExpenseAdjustmentSummaryRow['kind'],
+      amount: row.amount as Paise,
+      adjustmentPaymentId: row.adjustmentPaymentId as PaymentId | null,
+      occurredAt: row.occurredAt,
+      attributedAmount: summary.amount,
+      attributionCount: summary.count,
+    };
+  });
+}
+
 /* --------------------------------------------------- item-level refund attribution */
 
 export interface ExpenseAdjustmentItemDraft {

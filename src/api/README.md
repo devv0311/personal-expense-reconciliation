@@ -56,14 +56,15 @@ correction field left out of the body (unchanged) from one sent as `null` (clear
 
 **Implemented (phase 12): allocation, adjustments, settlement.**
 
-| Route                                                  | Service                   |
-| ------------------------------------------------------ | ------------------------- |
-| `POST /api/expenses/:expenseId/items`                  | `recordExpenseItems`      |
-| `GET /api/expenses/:expenseId/items`                   | `getExpenseItems`         |
-| `POST /api/expenses/:expenseId/allocation`             | `approveAllocation`       |
-| `POST /api/expenses/:expenseId/adjustments`            | `recordExpenseAdjustment` |
-| `POST /api/expenses/:expenseId/adjustments/distribute` | `distributeAdjustment`    |
-| `POST /api/payments/:paymentId/settlements`            | `recordSettlement`        |
+| Route                                                  | Service                    |
+| ------------------------------------------------------ | -------------------------- |
+| `POST /api/expenses/:expenseId/items`                  | `recordExpenseItems`       |
+| `GET /api/expenses/:expenseId/items`                   | `getExpenseItems`          |
+| `POST /api/expenses/:expenseId/allocation`             | `approveAllocation`        |
+| `POST /api/expenses/:expenseId/adjustments`            | `recordExpenseAdjustment`  |
+| `POST /api/expenses/:expenseId/adjustments/distribute` | `distributeAdjustment`     |
+| `POST /api/payments/:paymentId/settlements`            | `recordSettlement`         |
+| `GET /api/expenses/:expenseId/refund-allocation`       | `getRefundAllocationState` |
 
 These service functions predate this phase (the 2026-08-14 foundation pass) — phase 12 is
 their first caller from this layer, the same gap phases 9–11 each closed for their own service.
@@ -160,6 +161,18 @@ the same one ordering rule `files` and `notes` already carried.
 deferred here since phase 13 — and `GET /api/people` (`services.listPeople`), the roster
 `web/` needed and no earlier phase had a caller for. `../server.ts` is the first real process
 serving this dispatcher; `web/` is the first UI calling it.
+
+**Phase 18 (ADR-0018 (item refunds), ADR-0045) added:** `GET
+/api/expenses/:expenseId/refund-allocation` (`services.getRefundAllocationState`) and an
+`itemAttributions` body field on `POST /api/expenses/:expenseId/adjustments` — the complete
+`{ expenseItemId, amount }` set for a refund whose items are known, which Phase 16's service
+had accepted since it shipped but no route had yet passed through. Omitting the field records
+ADR-0008's whole-expense refund; sending an **empty array** is a 400, because "this refund
+covers these items" with none named is a malformed proposal rather than a shorter way of saying
+"no items". Amounts are decimal-string minor units like every other money field. The `GET` is a
+pure read that runs the same engine a distribution would, so its `projectedLines` are what
+approval will write, and its `reviewRequired` is why it could not be — a pending decision
+reported rather than an error thrown.
 
 **Not implemented:** auth, and re-sync/discrepancy-resolution routes for a `stale`
 `SplitwiseExpense`/`SplitwiseSettlement` or a `ReconciliationDiscrepancy` (deliberately deferred

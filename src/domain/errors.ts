@@ -83,6 +83,8 @@ export type DomainErrorCode =
   | 'REFUND_ATTRIBUTION_DUPLICATE_ITEM'
   /** Cumulative attributions exceeded an item's original gross cost (19.3). */
   | 'REFUND_ITEM_CEILING_EXCEEDED'
+  /** An item refund cannot be distributed because ownership is unstated (ADR-0018). */
+  | 'REFUND_ITEM_OWNERSHIP_REQUIRED'
   /** An `EvidenceObservation` recorded nothing observable about a money movement. */
   | 'EVIDENCE_OBSERVATION_EMPTY'
   /** An observed account hint was not the masked trailing digits it claims to be. */

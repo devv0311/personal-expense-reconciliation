@@ -20,19 +20,34 @@
  * a refund whose item *is* known must not silently take that path, which is why the caller
  * passes the attributions rather than this service inferring them.
  *
- * Distribution — turning net item costs into a superseding allocation and new obligations —
- * is Phase 18's work and deliberately absent here. `distributeAdjustment` below is still
- * ADR-0008's whole-expense proportional distribution, unchanged.
+ * Phase 18 completes step 2. `distributeAdjustment` now picks its arithmetic from what the
+ * ledger actually recorded rather than from one hard-coded default:
+ *
+ *  - **No attribution anywhere on the expense** — ADR-0008's whole-expense proportional
+ *    distribution over the current lines, byte-for-byte the behaviour that shipped before.
+ *  - **Any attribution** — `domain.buildItemAwareAllocationLines`: each item's net cost
+ *    lands on that item's own beneficiaries, and any unattributed whole-expense reduction is
+ *    applied once, afterwards, over the item-derived lines. An expense whose current
+ *    allocation cannot say who owned an item is refused, not guessed at.
+ *
+ * `getRefundAllocationState` is the read beside it: what came back, per item, what a
+ * distribution would write, and what is still pending — so "recorded but not distributed"
+ * stays a visible state rather than an invisible one (ADR-0018, "Consequences").
  */
 
 import {
+  buildItemAwareAllocationLines,
+  deriveItemRefundBases,
   distributeAdjustment as distributeAcrossLines,
+  isDomainError,
+  itemAwareAllocationTotal,
   netAmount as computeNetAmount,
   sumPaise,
   undistributedAmount,
   validateAdjustmentTotal,
   validateAllocationLineAmounts,
   validateAllocationSum,
+  validateItemNetLineSums,
   validateRefundAttribution,
   netItemAmount,
 } from '../domain/index.js';
@@ -42,6 +57,7 @@ import type {
   ExpenseAdjustmentKind,
   ExpenseId,
   ExpenseItemId,
+  ItemRefundBasis,
   Paise,
   PaymentId,
   PersonId,
@@ -53,7 +69,9 @@ import {
   insertAllocationWithLines,
   insertExpenseAdjustment,
   insertExpenseAdjustmentItems,
+  listExpenseAdjustmentSummaries,
   listExpenseItemContexts,
+  listExpenseItemsByExpense,
   listGroupMemberships,
   listItemAttributionTotals,
   lockExpenseForAdjustment,
@@ -70,7 +88,12 @@ import {
 
 import { runAudited, type AuditMeta } from './audit.js';
 import { ServiceError } from './errors.js';
-import { requireCurrentAllocation, requireExpenseSnapshot, requirePayment } from './loaders.js';
+import {
+  loadCurrentAllocation,
+  requireCurrentAllocation,
+  requireExpenseSnapshot,
+  requirePayment,
+} from './loaders.js';
 
 /** States in which an expense's cost is settled enough to be adjusted against. */
 const ADJUSTABLE_STATES = new Set([
@@ -344,14 +367,23 @@ async function describeAttributions(
 export interface DistributeAdjustmentInput {
   readonly expenseId: ExpenseId;
   /**
-   * An explicit, non-proportional distribution, positionally aligned with the current
-   * allocation's lines. Omit for the proportional-to-existing-share default.
+   * An explicit, non-proportional distribution of the **unattributed** reduction,
+   * positionally aligned with the current allocation's lines. Omit for the
+   * proportional-to-existing-share default.
+   *
+   * It never redirects an item-attributed refund: which beneficiary a returned item's money
+   * comes off is decided by the attribution and the approved item ownership, not by a weight
+   * set, so supplying weights for an expense whose whole reduction is item-attributed is
+   * refused rather than ignored (ADR-0018 (item refunds)).
    */
   readonly customWeights?: readonly bigint[];
   readonly audit: AuditMeta;
   readonly decidedBy?: string;
   readonly decidedAt?: Date;
 }
+
+/** How the reduction reaching a superseding allocation was worked out. */
+export type RefundDistributionBasis = 'whole_expense' | 'item_attributed';
 
 export interface DistributeAdjustmentResult {
   readonly allocationId: string;
@@ -361,6 +393,14 @@ export interface DistributeAdjustmentResult {
   readonly lines: readonly DraftAllocationLine[];
   /** Splitwise rows moved to `stale` because our side changed (ADR-0008). */
   readonly staleSplitwiseExpenseIds: readonly string[];
+  /** Which arithmetic produced the lines above (ADR-0008 legacy, or ADR-0018 item-first). */
+  readonly basis: RefundDistributionBasis;
+  /** Every item's gross cost, cumulative refunds and derived net cost. */
+  readonly itemNetCosts: readonly ItemRefundBasis[];
+  /** The part of the reduction no item accounts for, kept explicitly separate (ADR-0018). */
+  readonly unattributedReduction: Paise;
+  /** The part of the reduction item attribution accounts for. */
+  readonly attributedReduction: Paise;
 }
 
 /**
@@ -370,12 +410,24 @@ export interface DistributeAdjustmentResult {
  * The amount to distribute is derived — the current lines' total minus the expense's
  * current net amount — rather than tracked per adjustment, so recording two refunds and
  * distributing once produces exactly the same result as distributing after each.
+ *
+ * On the item-attributed path the lines are rebuilt from the ledger's own recorded facts
+ * (immutable gross item costs, every attribution, the unattributed remainder) rather than
+ * decremented from where they happen to stand. That is what makes the outcome independent of
+ * the order refunds arrived in and of how many times distribution was invoked along the way —
+ * and it is why a second call with nothing new recorded is refused outright below rather than
+ * quietly rewriting the same numbers.
  */
 export async function distributeAdjustment(
   db: Database,
   input: DistributeAdjustmentInput,
 ): Promise<DistributeAdjustmentResult> {
   return runAudited(db, input.audit, async ({ exec, record }) => {
+    // The same lock `recordExpenseAdjustment` takes. Without it a refund recorded between
+    // reading the attributions and writing the allocation would leave a superseding version
+    // that already fails invariant #11 the moment it is committed.
+    await lockExpenseForAdjustment(exec, input.expenseId);
+
     const expense = await requireExpenseSnapshot(exec, input.expenseId);
     const current = await requireCurrentAllocation(exec, expense.id);
 
@@ -390,12 +442,32 @@ export async function distributeAdjustment(
       );
     }
 
-    const newLines = distributeAcrossLines({
-      lines: current.lines,
-      adjustmentAmount: pending,
-      ...(input.customWeights === undefined ? {} : { customWeights: input.customWeights }),
-    });
+    const basis = await loadRefundBasis(exec, expense.id);
+    const distributionBasis: RefundDistributionBasis =
+      basis.attributedReduction === 0n ? 'whole_expense' : 'item_attributed';
+    const newLines =
+      distributionBasis === 'whole_expense'
+        ? // ADR-0008's whole-expense path, untouched: no item ever came back, so there is no
+          // item cost to reduce and the reduction is the current lines' to share.
+          distributeAcrossLines({
+            lines: current.lines,
+            adjustmentAmount: pending,
+            ...(input.customWeights === undefined ? {} : { customWeights: input.customWeights }),
+          })
+        : buildItemAwareAllocationLines({
+            lines: current.lines,
+            itemBases: basis.itemBases,
+            legacyReduction: basis.unattributedReduction,
+            ...(input.customWeights === undefined ? {} : { legacyWeights: input.customWeights }),
+          });
+
     validateAllocationLineAmounts(newLines);
+    // Invariant #14's tightened form, checkable only while no unattributed reduction is also
+    // in play: with one, a line's share is its item's net cost *less* that item's part of the
+    // whole-expense refund, and the two reductions stay deliberately distinguishable.
+    if (distributionBasis === 'item_attributed' && basis.unattributedReduction === 0n) {
+      validateItemNetLineSums(newLines, basis.itemBases);
+    }
     validateAllocationSum(newLines, expense.netAmount);
 
     const decidedAt = input.decidedAt ?? new Date();
@@ -432,6 +504,17 @@ export async function distributeAdjustment(
         distributedAmount: pending.toString(),
         netAmount: expense.netAmount.toString(),
         distribution: input.customWeights === undefined ? 'proportional' : 'custom',
+        // The whole pipeline, in one event: what came back per item, what no item accounts
+        // for, and the lines that follow from both (ADR-0018 (item refunds), 19.6).
+        basis: distributionBasis,
+        attributedReduction: basis.attributedReduction.toString(),
+        unattributedReduction: basis.unattributedReduction.toString(),
+        itemNetCosts: basis.itemBases.map((item) => ({
+          expenseItemId: item.expenseItemId,
+          grossAmount: item.grossAmount.toString(),
+          refundedAmount: item.refundedAmount.toString(),
+          netAmount: item.netAmount.toString(),
+        })),
         lines: serialise(newLines),
       },
     });
@@ -461,11 +544,214 @@ export async function distributeAdjustment(
       netAmount: expense.netAmount,
       lines: newLines,
       staleSplitwiseExpenseIds,
+      basis: distributionBasis,
+      itemNetCosts: basis.itemBases,
+      unattributedReduction: basis.unattributedReduction,
+      attributedReduction: basis.attributedReduction,
     };
   });
 }
 
+/* ------------------------------------------- the refund allocation state, as a read */
+
+/** One purchased item, its immutable gross cost, and what it now costs after refunds. */
+export interface RefundAllocationItemState extends ItemRefundBasis {
+  readonly description: string;
+  readonly quantity: string;
+}
+
+/** One line of an allocation, as this read renders it. */
+export interface RefundAllocationLineState {
+  readonly beneficiaryType: 'person' | 'group';
+  readonly beneficiaryId: string;
+  readonly expenseItemId: string | null;
+  readonly amount: Paise;
+}
+
+export interface RefundAllocationState {
+  readonly expenseId: ExpenseId;
+  /** Immutable, gross, historical — shown beside the net figure, never replaced by it. */
+  readonly grossAmount: Paise;
+  readonly netAmount: Paise;
+  /** `none` until an adjustment exists; `mixed` when both kinds have been recorded. */
+  readonly basis: 'none' | 'whole_expense' | 'item_attributed' | 'mixed';
+  readonly attributedReduction: Paise;
+  readonly unattributedReduction: Paise;
+  /** What a distribution would still have to absorb: current lines' total minus net amount. */
+  readonly pendingReduction: Paise;
+  readonly pendingDistribution: boolean;
+  /**
+   * False while a recorded adjustment has not reached the current allocation.
+   *
+   * The flag ADR-0018 asks for in as many words: *"a pending adjustment is visible, but stale
+   * allocation-based obligations are not represented as current/verified"*.
+   */
+  readonly obligationsReflectAdjustments: boolean;
+  readonly items: readonly RefundAllocationItemState[];
+  readonly currentAllocation: {
+    readonly id: string;
+    readonly method: string;
+    readonly total: Paise;
+    readonly lines: readonly RefundAllocationLineState[];
+  } | null;
+  /** The lines a distribution would write right now, or `null` when it cannot be computed. */
+  readonly projectedLines: readonly RefundAllocationLineState[] | null;
+  /** Why distribution would be refused — a decision waiting on a human, never a guess. */
+  readonly reviewRequired: { readonly code: string; readonly message: string } | null;
+}
+
+/**
+ * Reads the whole item-refund picture for one expense without changing anything.
+ *
+ * Deliberately a pure read that runs the *same* engine a distribution would: the projected
+ * lines below are not an approximation of what approval will do, they are what it will do.
+ * When the engine refuses — an item nobody is recorded as having benefited from, an
+ * allocation whose method cannot express item ownership — the refusal is reported here as a
+ * pending review decision rather than thrown, because "this cannot be distributed yet" is
+ * exactly the state this read exists to make visible.
+ */
+export async function getRefundAllocationState(
+  db: Database,
+  expenseId: ExpenseId,
+): Promise<RefundAllocationState> {
+  const expense = await requireExpenseSnapshot(db, expenseId);
+  const basis = await loadRefundBasis(db, expense.id);
+  const itemRows = await listExpenseItemsByExpense(db, expense.id);
+  const describedById = new Map(itemRows.map((row) => [row.id, row]));
+
+  const current = await loadCurrentAllocation(db, expense.id);
+  const currentTotal =
+    current === null ? (0n as Paise) : sumPaise(current.lines.map((line) => line.amount));
+  const pendingReduction =
+    current === null ? (0n as Paise) : undistributedAmount(currentTotal, expense.netAmount);
+
+  let projectedLines: readonly RefundAllocationLineState[] | null = null;
+  let reviewRequired: RefundAllocationState['reviewRequired'] = null;
+  if (current !== null && basis.attributedReduction > 0n) {
+    try {
+      projectedLines = renderLines(
+        buildItemAwareAllocationLines({
+          lines: current.lines,
+          itemBases: basis.itemBases,
+          legacyReduction: basis.unattributedReduction,
+        }),
+      );
+    } catch (error) {
+      if (!isDomainError(error)) throw error;
+      reviewRequired = { code: error.code, message: error.message };
+    }
+  }
+
+  // A last cross-check, reported rather than thrown: the items are supposed to account for
+  // the expense's gross amount, so an item-first rebuild should land exactly on the net
+  // amount. If it would not, the purchase composition and the adjustments disagree about
+  // what was bought, and that is a human's question to answer.
+  if (projectedLines !== null) {
+    const projectedTotal = itemAwareAllocationTotal(basis.itemBases, basis.unattributedReduction);
+    if (projectedTotal !== expense.netAmount) {
+      projectedLines = null;
+      reviewRequired = {
+        code: 'ALLOCATION_SUM_MISMATCH',
+        message:
+          `Net item costs less the unattributed reduction come to ${projectedTotal} paise, but ` +
+          `the expense's net amount is ${expense.netAmount} paise. The recorded items do not ` +
+          'account for this purchase, so its refunds cannot be allocated item-first ' +
+          '(invariants.md #11, #14).',
+      };
+    }
+  }
+
+  return {
+    expenseId: expense.id,
+    grossAmount: expense.grossAmount,
+    netAmount: expense.netAmount,
+    basis: describeBasis(basis),
+    attributedReduction: basis.attributedReduction,
+    unattributedReduction: basis.unattributedReduction,
+    pendingReduction,
+    pendingDistribution: pendingReduction > 0n,
+    obligationsReflectAdjustments: current !== null && pendingReduction === 0n,
+    items: basis.itemBases.map((item) => ({
+      ...item,
+      description: describedById.get(item.expenseItemId)?.description ?? '',
+      quantity: describedById.get(item.expenseItemId)?.quantity ?? '1',
+    })),
+    currentAllocation:
+      current === null
+        ? null
+        : {
+            id: current.allocation.id,
+            method: current.allocation.method,
+            total: currentTotal,
+            lines: renderLines(current.lines),
+          },
+    projectedLines,
+    reviewRequired,
+  };
+}
+
 /* ------------------------------------------------------------------------- internals */
+
+/** Everything the allocation engine needs to know about what came back, and against what. */
+interface RefundBasis {
+  /** Σ of adjustments that carry item attribution rows. */
+  readonly attributedReduction: Paise;
+  /** Σ of adjustments that carry none — ADR-0008's legacy whole-expense path (19.2). */
+  readonly unattributedReduction: Paise;
+  /** Every item of the expense, with gross cost, cumulative refunds and derived net cost. */
+  readonly itemBases: readonly ItemRefundBasis[];
+}
+
+/**
+ * Reads the two reductions apart, and every item's derived net cost.
+ *
+ * Splitting the adjustments by whether they name items is the whole point: an amount alone
+ * cannot say whether it belongs to one returned item or to the basket, and answering that
+ * wrongly is precisely how a refund ends up reducing a debt owed by someone whose item was
+ * never refunded (ADR-0018 (item refunds), "Context").
+ */
+async function loadRefundBasis(exec: Executor, expenseId: ExpenseId): Promise<RefundBasis> {
+  const summaries = await listExpenseAdjustmentSummaries(exec, expenseId);
+  let attributedReduction = 0n as Paise;
+  let unattributedReduction = 0n as Paise;
+  for (const summary of summaries) {
+    if (summary.attributionCount > 0) {
+      attributedReduction = (attributedReduction + summary.amount) as Paise;
+    } else {
+      unattributedReduction = (unattributedReduction + summary.amount) as Paise;
+    }
+  }
+
+  // Read in the same order `GET /api/expenses/:id/items` uses, so the refund view and the
+  // purchase view list a basket's contents the same way round rather than each picking their
+  // own; nothing in the arithmetic depends on it, but a human comparing the two does.
+  const items = await listExpenseItemsByExpense(exec, expenseId);
+  const refundedByItem = await listItemAttributionTotals(exec, expenseId);
+  return {
+    attributedReduction,
+    unattributedReduction,
+    itemBases: deriveItemRefundBases(
+      items.map((item) => ({ expenseItemId: item.id, grossAmount: item.amount })),
+      refundedByItem,
+    ),
+  };
+}
+
+function describeBasis(basis: RefundBasis): RefundAllocationState['basis'] {
+  if (basis.attributedReduction > 0n && basis.unattributedReduction > 0n) return 'mixed';
+  if (basis.attributedReduction > 0n) return 'item_attributed';
+  if (basis.unattributedReduction > 0n) return 'whole_expense';
+  return 'none';
+}
+
+function renderLines(lines: readonly DraftAllocationLine[]): readonly RefundAllocationLineState[] {
+  return lines.map((line) => ({
+    beneficiaryType: line.beneficiary.type,
+    beneficiaryId: line.beneficiary.id,
+    expenseItemId: line.expenseItemId,
+    amount: line.amount,
+  }));
+}
 
 /**
  * Re-resolves a group line's expansion for the **new** allocation version.

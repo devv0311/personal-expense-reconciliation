@@ -177,6 +177,13 @@ recorded ──▶ distributed   (a new Allocation version exists, summing to th
   superseding the previous one, summing to the new `domain.netAmount(Expense)` (invariant #11).
   If the original expense had already reached `SYNCED`, its `SplitwiseExpense.sync_status` moves
   to `stale` at this point (see below), never silently left showing the pre-adjustment amount.
+  **How** the reduction reaches the lines depends on what was recorded, not on one default: with
+  no item attribution anywhere on the expense it is ADR-0008's whole-expense proportional
+  distribution; with any attribution it is the item-first engine (ADR-0018 (item refunds),
+  ADR-0045), where each item's net cost lands on that item's own beneficiaries and an
+  unattributed whole-expense reduction is applied once, afterwards. An expense whose current
+  allocation cannot say who owned a refunded item stays **recorded**: distribution refuses with
+  `REFUND_ITEM_OWNERSHIP_REQUIRED` until a human approves the item mapping or a method change.
 
 ## Settlement lifecycle
 

@@ -328,8 +328,12 @@ from a percentage and a possibly-stale total.
     tightened:_ the aggregate-only version of this invariant would pass even if allocation lines
     were attached to the wrong item (e.g. all lines pointing at a ₹1,160 item while an ₹80 item
     has none, yet the grand total still matches) — a real misallocation the aggregate check
-    can't catch. _Enforced by:_ `domain.validateAllocationSums()`, checked per `expense_item_id`
-    group, not just once for the whole expense.
+    can't catch. _Enforced by:_ `domain.validateItemBasedLineSums()` against each item's currently
+    allocatable cost, and `domain.validateItemNetLineSums()` against its net cost after item
+    refunds — both checked per `expense_item_id` group, not just once for the whole expense. The
+    per-item form applies while no unattributed whole-expense reduction is in play; with one, a
+    line's share is its item's net cost _less_ that item's part of that reduction, which is why
+    the two reductions stay separately recorded (ADR-0045).
 
 ## AI boundary
 

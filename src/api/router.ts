@@ -18,7 +18,11 @@
 
 import type { AiService, Database, EvidenceStore, SplitwisePort } from '../services/index.js';
 
-import { postDistributeAdjustment, postExpenseAdjustment } from './adjustment-routes.js';
+import {
+  getRefundAllocationRoute,
+  postDistributeAdjustment,
+  postExpenseAdjustment,
+} from './adjustment-routes.js';
 import { postAllocation } from './allocation-routes.js';
 import { getBalanceRoute } from './balance-routes.js';
 import {
@@ -164,6 +168,11 @@ export const ALLOCATION_ROUTES: readonly ApiRoute[] = [
     method: 'POST',
     path: '/api/expenses/:expenseId/adjustments',
     handler: postExpenseAdjustment,
+  },
+  {
+    method: 'GET',
+    path: '/api/expenses/:expenseId/refund-allocation',
+    handler: getRefundAllocationRoute,
   },
 ];
 
