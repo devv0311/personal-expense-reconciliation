@@ -34,6 +34,7 @@ export * from './proof-pack-service.js';
 export * from './splitwise-service.js';
 export * from './splitwise-audit-service.js';
 export * from './people-service.js';
+export * from './account-service.js';
 
 /**
  * The two handles every service call needs, re-exported so a caller — `src/api`, a future

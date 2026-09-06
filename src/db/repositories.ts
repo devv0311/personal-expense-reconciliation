@@ -328,6 +328,12 @@ export interface ExpenseLedgerRow {
 export interface ListExpensesFilter {
   readonly state?: ExpenseState;
   readonly paidByPersonId?: PersonId;
+  /**
+   * One expense by id — the same row shape a listing produces, for a detail surface that
+   * needs exactly one (`docs/roadmap.md` phase 21). A filter rather than a second query, so
+   * `netAmount` here can never disagree with `netAmount` in the list beside it.
+   */
+  readonly expenseId?: ExpenseId;
   /** Defaults to `DEFAULT_EXPENSE_LEDGER_LIMIT`; a listing is bounded even with no filter. */
   readonly limit?: number;
 }
@@ -354,6 +360,7 @@ export async function listExpenses(
   if (filter.paidByPersonId !== undefined) {
     conditions.push(eq(expenses.paidByPersonId, filter.paidByPersonId));
   }
+  if (filter.expenseId !== undefined) conditions.push(eq(expenses.id, filter.expenseId));
 
   const rows = await exec
     .select({
@@ -1943,6 +1950,45 @@ export async function listAccountsForCashReconciliation(
     .from(accounts)
     .orderBy(asc(accounts.id));
   return rows.map((row) => ({ id: row.id as AccountId, currency: row.currency }));
+}
+
+/** One account as a surface renders it — a name and a redacted tail, never a full number. */
+export interface AccountSummaryRow {
+  readonly id: AccountId;
+  readonly name: string;
+  readonly type: string;
+  readonly institution: string | null;
+  /** At most four digits; `accounts_last4_check` enforces that at the database. */
+  readonly last4: string | null;
+  readonly currency: string;
+  readonly isActive: boolean;
+  readonly archivedAt: Date | null;
+}
+
+/**
+ * Every account, for a surface that has to name one — phase 21's account-boundary entry and
+ * the per-account cash waterfall (`docs/roadmap.md` phase 21).
+ *
+ * Archived accounts are included for the same reason
+ * {@link listAccountsForCashReconciliation} includes them: a closed account still posted real
+ * movements in a past period, and a snapshot naming it must still be renderable. `archivedAt`
+ * travels with the row so a caller can say so rather than having to guess.
+ */
+export async function listAccountSummaries(exec: Executor): Promise<AccountSummaryRow[]> {
+  const rows = await exec
+    .select({
+      id: accounts.id,
+      name: accounts.name,
+      type: accounts.type,
+      institution: accounts.institution,
+      last4: accounts.last4,
+      currency: accounts.currency,
+      isActive: accounts.isActive,
+      archivedAt: accounts.archivedAt,
+    })
+    .from(accounts)
+    .orderBy(asc(accounts.name), asc(accounts.id));
+  return rows.map((row) => ({ ...row, id: row.id as AccountId }));
 }
 
 /**

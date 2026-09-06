@@ -19,12 +19,22 @@
 
 import { eq } from 'drizzle-orm';
 
+import { createAiService } from '../src/ai/index.js';
+import type { ModelTransport } from '../src/ai/index.js';
 import { createPgliteDatabase, createPostgresDatabase, schema } from '../src/db/index.js';
 import { asId, paise } from '../src/domain/index.js';
+import type { SplitwiseFriendBalance, SplitwisePort } from '../src/integrations/splitwise/index.js';
 import {
   approveAllocation,
+  classifyPayment,
   connectSplitwiseIntegration,
+  matchEvidenceContext,
+  recordEvidenceNotification,
+  recordExpenseAdjustment,
+  recordExpenseItems,
   recordSettlement,
+  runSplitwiseAudit,
+  requireUserPersonId,
 } from '../src/services/index.js';
 
 const AS_SEED = { actor: 'system', source: 'scripts/seed-dev-data' } as const;
@@ -247,9 +257,163 @@ async function main(): Promise<void> {
   // verify in the UI, not a gap in the seed data.
   await connectSplitwiseIntegration(db, { externalAccountRef: 'dev-seed-sandbox' });
 
-  console.log('Seeded: 3 people, 1 account, 3 expenses (1 allocated+shared, 1 unallocated');
-  console.log('personal, 1 allocated+household), 1 settlement, 1 connected integration.');
+  /* ------------------------------------------------- phase 21: one scenario per pillar */
+
+  // A statement page, so the reconciliation form has real evidence to cite for a boundary
+  // balance. Everything about it is synthetic (`fixtures/README.md`).
+  const [statement] = await db
+    .insert(schema.evidence)
+    .values({
+      type: 'bank_line',
+      rawText: 'HDFC Savings — statement for August 2026. Opening 50,000.00, closing 30,960.00.',
+      capturedAt: new Date('2026-09-01T00:00:00.000Z'),
+    })
+    .returning({ id: schema.evidence.id });
+
+  // Pillar 2 — an itemised purchase with a partial, item-attributed refund that has been
+  // recorded but NOT distributed. That is the state ADR-0018 cares most about: a pending
+  // adjustment is visible, and the obligations below it are not presented as current.
+  const groceriesExpenseId = await linkedExpense({
+    description: 'Blinkit — weekly groceries',
+    amount: 2_150_00n,
+    occurredAt: '2026-08-11T19:20:00.000Z',
+    relationshipType: 'shared',
+    rawDescription: 'UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD',
+  });
+  const { items } = await recordExpenseItems(db, {
+    expenseId: asId<'expense'>(groceriesExpenseId),
+    items: [
+      { description: 'Cold-pressed olive oil (returned)', amount: paise(650_00n) },
+      { description: 'Coffee beans, 1kg', amount: paise(900_00n) },
+      { description: 'Household staples', amount: paise(520_00n) },
+      { description: 'Delivery and handling', amount: paise(80_00n) },
+    ],
+    audit: AS_SEED,
+  });
+  await approveAllocation(db, {
+    expenseId: asId<'expense'>(groceriesExpenseId),
+    decision: {
+      method: 'item_based',
+      lines: [
+        { beneficiary: { type: 'person', id: devPersonId }, expenseItemId: items[0]!.id },
+        { beneficiary: { type: 'person', id: alexId }, expenseItemId: items[1]!.id },
+        { beneficiary: { type: 'person', id: devPersonId }, expenseItemId: items[2]!.id },
+        { beneficiary: { type: 'person', id: devPersonId }, expenseItemId: items[3]!.id },
+      ],
+    },
+    decidedBy: 'manual',
+    audit: AS_SEED,
+  });
+  const refundPaymentId = await payment({
+    amount: 650_00n,
+    direction: 'credit',
+    occurredAt: '2026-08-14T09:05:00.000Z',
+    rawDescription: 'UPI-BLINKIT9821PAYTM-REFUND',
+    channel: 'upi',
+    counterpartyType: 'merchant',
+  });
+  await recordExpenseAdjustment(db, {
+    expenseId: asId<'expense'>(groceriesExpenseId),
+    kind: 'merchant_refund',
+    amount: paise(650_00n),
+    occurredAt: new Date('2026-08-14T09:05:00.000Z'),
+    adjustmentPaymentId: asId<'payment'>(refundPaymentId),
+    itemAttributions: [{ expenseItemId: items[0]!.id, amount: paise(650_00n) }],
+    audit: AS_SEED,
+  });
+
+  // Pillar 1 — a UPI push notification nobody has attached yet, and the candidates the matcher
+  // records for it. Nothing is linked: accepting a candidate stays an explicit human act.
+  const notification = await recordEvidenceNotification(db, {
+    type: 'upi_notification',
+    text: 'Rs.640.00 debited from A/c XX4821 on 08-Aug-26 to PEPPERMILL CAFE. UPI Ref 884120993741.',
+    capturedAt: new Date('2026-08-08T11:31:00.000Z'),
+    audit: AS_SEED,
+  });
+  await matchEvidenceContext(db, { evidenceId: notification.evidenceId, audit: AS_SEED });
+
+  // Pillar 1 again, from the other side — a bank SMS attached to the dinner payment, so one
+  // payment's re-attached context has something to show.
+  const dinnerNotification = await recordEvidenceNotification(db, {
+    type: 'bank_line',
+    text: 'Rs.3200.00 debited from A/c XX4821 on 05-Aug-26 to PEPPERMILL RESTAURANT. Ref 771204885512.',
+    capturedAt: new Date('2026-08-05T20:16:00.000Z'),
+    audit: AS_SEED,
+  });
+  await matchEvidenceContext(db, { evidenceId: dinnerNotification.evidenceId, audit: AS_SEED });
+
+  // A pending classification, so the review queue has a decision waiting. The model is a
+  // scripted transport defined in this file — no provider is wired anywhere (ADR-0025).
+  const unclassifiedPaymentId = await payment({
+    amount: 1_240_00n,
+    direction: 'debit',
+    occurredAt: '2026-08-19T13:10:00.000Z',
+    rawDescription: 'UPI-ZOMATO4471-SAMPLE RESTAURANT PVT LTD',
+    channel: 'upi',
+    counterpartyType: 'merchant',
+  });
+  await classifyPayment(db, {
+    paymentId: asId<'payment'>(unclassifiedPaymentId),
+    ai: createAiService(seedTransport()),
+    audit: AS_SEED,
+  });
+
+  // Pillar 4 — one audit against a scripted Splitwise that disagrees with this ledger, so the
+  // findings screen has a real disagreement, a real balance impact, and an honest read status.
+  // No network call is made and no real account is involved.
+  await runSplitwiseAudit(db, {
+    userPersonId: await requireUserPersonId(db),
+    splitwise: seedSplitwisePort([
+      { splitwiseUserId: 'sw-alex-seed', netBalance: paise(-2_000_00n) },
+    ]),
+    audit: AS_SEED,
+  });
+
+  console.log('Seeded a synthetic scenario covering all six pillars:');
+  console.log('  3 people, 1 account, 5 expenses, 1 settlement, 1 connected integration');
+  console.log('  1 itemised expense with a recorded, undistributed item refund');
+  console.log('  2 evidence notifications with recorded (unaccepted) match candidates');
+  console.log('  1 pending classification decision, 1 Splitwise audit with findings');
+  console.log(`  1 statement page to cite as boundary evidence: ${statement!.id}`);
   await database.close();
+}
+
+/**
+ * The scripted model this seed classifies against.
+ *
+ * The same shape `tests/support/ai.ts` uses and for the same reason: no provider is wired
+ * (ADR-0025), and a seeded review queue needs a proposal to have a decision about. It answers
+ * one redacted description and declines everything else, so it can never quietly classify
+ * something this script did not intend.
+ */
+function seedTransport(): ModelTransport {
+  return {
+    modelInfo: { provider: 'synthetic', model: 'seed-classifier-v1' },
+    complete: () =>
+      Promise.resolve({
+        confidence: 'medium',
+        proposedOutput: {
+          proposedKind: 'expense',
+          relationshipType: 'shared',
+          category: 'dining',
+        },
+      }),
+  };
+}
+
+/**
+ * A scripted `SplitwisePort` that reports balances and supports no finer read.
+ *
+ * `fetchLedgerEntries` is deliberately absent: the port's per-entry read is optional
+ * (ADR-0046), so leaving it off is how an adapter without that capability is represented — and
+ * it makes the audit report an honestly `unsupported` external read rather than a clean one.
+ */
+function seedSplitwisePort(balances: readonly SplitwiseFriendBalance[]): SplitwisePort {
+  return {
+    createExpense: () => Promise.reject(new Error('The seed script never writes to Splitwise.')),
+    recordPayment: () => Promise.reject(new Error('The seed script never writes to Splitwise.')),
+    fetchBalances: () => Promise.resolve(balances),
+  };
 }
 
 main().catch((error: unknown) => {

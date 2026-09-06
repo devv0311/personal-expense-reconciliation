@@ -4,6 +4,7 @@
  * ```
  * POST /api/evidence/notifications                  record a bank SMS / UPI push notification
  * POST /api/evidence/:evidenceId/observation        record or correct its structured reading
+ * GET  /api/evidence/:evidenceId/observation        the recorded reading, or null
  * POST /api/evidence/:evidenceId/enrich             find the payments it could be about
  * GET  /api/evidence/:evidenceId/matches            the recorded candidates
  * POST /api/evidence/matches/:candidateId/decision  accept | dismiss  (the only way to link)
@@ -35,6 +36,7 @@ import type {
 } from '../domain/index.js';
 import {
   decideEvidenceMatch,
+  getEvidenceObservation,
   getPaymentContext,
   listEvidenceMatches,
   matchEvidenceContext,
@@ -165,6 +167,25 @@ export async function postEvidenceEnrichment(
     },
   });
   return jsonResponse(200, result);
+}
+
+/**
+ * `GET /api/evidence/:evidenceId/observation` — the recorded structured reading, or `null`.
+ *
+ * A read, so an inspector can show what was read off a document without re-running the matcher
+ * (`docs/roadmap.md` phase 21). `null` is a real answer: a stored photograph nobody has read
+ * has no observation, and that is not an error.
+ */
+export async function getEvidenceObservationRoute(
+  deps: ApiDependencies,
+  _request: Request,
+  params: RouteParams,
+): Promise<Response> {
+  const evidenceId = asId<'evidence'>(
+    requireUuid(requireParam(params, 'evidenceId'), 'evidenceId'),
+  ) satisfies EvidenceId;
+  const observation = await getEvidenceObservation(deps.db, evidenceId);
+  return jsonResponse(200, { evidenceId, observation });
 }
 
 /** `GET /api/evidence/:evidenceId/matches` — the recorded candidates, strongest first. */

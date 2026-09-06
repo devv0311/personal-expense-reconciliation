@@ -515,6 +515,7 @@ describe('the surface itself', () => {
       'POST /api/evidence/:evidenceId/link',
       'POST /api/evidence/:evidenceId/receipt',
       'POST /api/evidence/:evidenceId/observation',
+      'GET /api/evidence/:evidenceId/observation',
       'POST /api/evidence/:evidenceId/enrich',
       'GET /api/evidence/:evidenceId/matches',
       'GET /api/evidence/:evidenceId',
@@ -531,8 +532,10 @@ describe('the surface itself', () => {
       'POST /api/payments/:paymentId/settlements',
       'GET /api/payments/:paymentId/context',
       'GET /api/expenses',
+      'GET /api/expenses/:expenseId',
       'GET /api/balances/:personAId/:personBId',
       'GET /api/people',
+      'GET /api/accounts',
       'GET /api/proof-packs/:recipientPersonId',
       'POST /api/integrations/splitwise/connect',
       'POST /api/expenses/:expenseId/ready-to-sync',
@@ -547,6 +550,7 @@ describe('the surface itself', () => {
       'POST /api/reconciliation/runs',
       'GET /api/reconciliation/runs',
       'GET /api/reconciliation/runs/:id',
+      'GET /api/reconciliation/runs/:id/account-snapshots',
     ]);
   });
 });
