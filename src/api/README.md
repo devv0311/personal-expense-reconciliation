@@ -188,8 +188,19 @@ replaced it. `decision` is `acknowledged | resolved | dismissed`; the last two r
 `reason` (a 409, from the service, not a 400 — the request is well-formed, the state it asks
 for is not), and the actor must be a person, never `system` or a rule (`invariants.md` #17).
 
+**Phase 20 (ADR-0047) added** one route: `GET /api/proof-packs/:recipientPersonId`. It derives a
+recipient-specific proof pack from approved ledger state and returns the preview — the intended
+recipient, the WhatsApp-ready text, the selected evidence references, an explicit `asOf` label
+(`?asOf=<ISO-8601>`, defaulting to now) and every uncertainty as a warning. A **GET**, because
+it is a pure read with no side effect: nothing is sent, no settlement is recorded, no row is
+written. `userPersonId` is resolved from the single `User` row, never from the request; a pack
+for the user themselves is a 409, an unknown or archived recipient a 404. If redaction leaves an
+identifier the boundary refuses to export, the whole pack fails closed with a `500
+PAYLOAD_NOT_SANITIZED` rather than returning a partially-redacted body.
+
 **Not implemented:** auth, and re-sync routes for a `stale`
 `SplitwiseExpense`/`SplitwiseSettlement` (deliberately deferred past phases 14, 15 and 19 —
 ADR-0040/0041/0046: drift is now detected, attributed and reviewable; acting on it against
 Splitwise is a separate write capability). Resolving a `ReconciliationDiscrepancy` on a
-`ReconciliationRun` also has no route; phase 19's reviewable record is the audit finding.
+`ReconciliationRun` also has no route; phase 19's reviewable record is the audit finding. A
+proof pack has no send/copy/share route — that deliberate step is Phase 21's UI (ADR-0047).

@@ -227,3 +227,31 @@ Not yet implemented: re-sync of a `stale` `SplitwiseExpense`/`SplitwiseSettlemen
 `docs/roadmap.md` phase 15's implementation note and ADR-0046's §6. Resolving a
 `ReconciliationDiscrepancy` on a `ReconciliationRun` also remains unbuilt; phase 19's review path
 is for `splitwise_audit_findings`, which is a different, addressable record (ADR-0046 §3).
+
+## Phase 20 — Derived proof packs (ADR-0047)
+
+- `proof-pack-service.ts` — `buildProofPackPreview` and `assertProofPackExportable`.
+
+  A **pure read**: no `runAudited`, no transaction, no `AuditEvent`, no write to any table, no
+  `SplitwisePort` call. Two jobs are this layer's rather than `domain.buildProofPack`'s:
+
+  - **Reuse the canonical figures.** The balance and its `ObligationEvidenceStatus` come from
+    `getBalance`; each expense's recipient share from that call's own `contributions`; the
+    net-after-refund and pending/review state from `getRefundAllocationState`; the conflict flag
+    from `getPaymentContext`; prior settlements from `db.listSettlementsForAudit`; unresolved
+    contested facts from the open `splitwise_audit_findings` for the pair. Nothing is recomputed.
+  - **Redact, then fail closed.** Every free-text field is put through Phase 17's
+    `redactReceiptText` with a local `createLocalRedactionMap` the service never returns, and the
+    finished pack is walked through `findResidualIdentifiers` — the same residual check the AI
+    boundary runs. A surviving UPI handle, phone number or account number throws
+    `SanitizationError` and nothing is returned (`http.ts` maps it to `500 PAYLOAD_NOT_SANITIZED`).
+
+  `asOf` is an explicit snapshot label, not a historical filter — filtering the balance to a
+  past instant would be a second balance engine. Recipient isolation is structural: only the
+  recipient's own share and the pair's settlements are ever passed to the assembler.
+
+- Two small repository reads were added for it: `db.listExpensePaymentIds` (the inverse of
+  `listPaymentExpenseLinksByPayment`) and `db.listEvidenceLinkedToExpense`.
+
+Not built: any WhatsApp/messaging transport, a persisted proof-pack table, and a "recorded that
+this was shared" event — generating a pack is a read and stays one (ADR-0047).

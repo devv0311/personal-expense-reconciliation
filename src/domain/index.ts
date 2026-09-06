@@ -30,6 +30,7 @@ export * from './lifecycle.js';
 export * from './money.js';
 export * from './normalization.js';
 export * from './payment.js';
+export * from './proof-pack.js';
 export * from './receipt.js';
 export * from './refund-allocation.js';
 export * from './refund-attribution.js';

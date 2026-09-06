@@ -44,6 +44,7 @@ import { getExpenseItemsRoute, postExpenseItems } from './expense-item-routes.js
 import { getExpensesRoute } from './expense-ledger-routes.js';
 import { jsonResponse, toErrorResponse } from './http.js';
 import { getPeopleRoute } from './people-routes.js';
+import { getProofPackRoute } from './proof-pack-routes.js';
 import {
   getReceiptRoute,
   postReceiptConfirmation,
@@ -213,6 +214,15 @@ export const PEOPLE_ROUTES: readonly ApiRoute[] = [
 ];
 
 /**
+ * The recipient-specific derived proof pack — `services.buildProofPackPreview` (phase 20,
+ * ADR-0047). A read: it derives a preview from approved ledger state and neither sends it nor
+ * records anything.
+ */
+export const PROOF_PACK_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/proof-packs/:recipientPersonId', handler: getProofPackRoute },
+];
+
+/**
  * Running a reconciliation and reading its history — `services.runReconciliation`
  * (phase 15, ADR-0041).
  */
@@ -283,6 +293,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...EXPENSE_LEDGER_ROUTES,
   ...BALANCE_ROUTES,
   ...PEOPLE_ROUTES,
+  ...PROOF_PACK_ROUTES,
   ...SPLITWISE_ROUTES,
   ...SPLITWISE_AUDIT_ROUTES,
   ...RECONCILIATION_ROUTES,
