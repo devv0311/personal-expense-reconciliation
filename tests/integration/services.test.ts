@@ -386,8 +386,20 @@ describe('the audit log is append-only in practice as well as by policy', () => 
     const repositories: Record<string, unknown> = await import('../../src/db/repositories.js');
     const names = Object.keys(repositories);
 
-    expect(names.filter((name) => /audit/i.test(name) && /update|delete/i.test(name))).toEqual([]);
+    // `SplitwiseAuditRun`/`SplitwiseAuditFinding` are a different entity that happens to share
+    // the word: phase 19's audit findings are ordinary DERIVED rows with a review state, and
+    // their own history lives in `audit_events` exactly like every other entity's. Excluding
+    // them by name keeps this guard aimed at the thing it is actually about — `AuditEvent`
+    // itself, which has no update or delete path and must never grow one (invariants.md #22).
+    const auditEventFunctions = names.filter(
+      (name) => /audit/i.test(name) && !/SplitwiseAudit/.test(name),
+    );
+
+    expect(auditEventFunctions.filter((name) => /update|delete/i.test(name))).toEqual([]);
     expect(names).toContain('insertAuditEvent');
+    expect(names.filter((name) => /auditEvent/i.test(name) && /update|delete/i.test(name))).toEqual(
+      [],
+    );
   });
 });
 

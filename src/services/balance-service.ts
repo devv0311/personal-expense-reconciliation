@@ -61,6 +61,8 @@ import type { SplitwiseFriendBalance, SplitwisePort } from '../integrations/spli
 
 import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
 import { loadCurrentAllocation, resolveAllocationShares } from './loaders.js';
+import { runSplitwiseAuditWithin } from './splitwise-audit-service.js';
+import type { PrefetchedSplitwiseBalances } from './splitwise-audit-service.js';
 
 export interface BalanceResult {
   readonly personAId: PersonId;
@@ -159,6 +161,13 @@ export interface RunReconciliationResult {
   readonly discrepancies: readonly ReconciliationDiscrepancy[];
   /** One per account, ADR-0017's second identity. Empty only when there are no accounts. */
   readonly accountSnapshots: readonly AccountCashSnapshotDraft[];
+  /**
+   * The phase 19 audit this run also produced (ADR-0046), or `null` when no Splitwise
+   * integration is connected — in which case nothing external was read and the run behaves
+   * exactly as it did before that phase, which `CLAUDE.md`'s "no real account in development"
+   * rule requires.
+   */
+  readonly splitwiseAuditRunId: string | null;
 }
 
 /**
@@ -208,11 +217,10 @@ export async function runReconciliation(
     });
     validateReconciliationTotals(totals);
 
-    const { discrepancies, splitwiseBalancesSnapshot } = await detectSplitwiseDrift(exec, {
-      userPersonId: input.userPersonId,
-      splitwise: input.splitwise,
-      record,
-    });
+    const { discrepancies, splitwiseBalancesSnapshot, balances } = await detectSplitwiseDrift(
+      exec,
+      { userPersonId: input.userPersonId, splitwise: input.splitwise, record },
+    );
 
     const reconciliationRunId = await insertReconciliationRun(exec, {
       periodStart: input.periodStart,
@@ -268,7 +276,24 @@ export async function runReconciliation(
       },
     });
 
-    return { reconciliationRunId, totals, discrepancies, accountSnapshots };
+    // Phase 19's finer audit runs on the same balances this comparison already fetched, inside
+    // the same transaction, so its findings can name the reconciliation they belong to. With no
+    // integration connected it does not run at all — `balances` is null, nothing was read, and
+    // there is nothing to audit (ADR-0046).
+    const splitwiseAuditRunId =
+      balances === null
+        ? null
+        : (
+            await runSplitwiseAuditWithin(exec, record, {
+              userPersonId: input.userPersonId,
+              splitwise: input.splitwise,
+              reconciliationRunId,
+              prefetchedBalances: balances,
+              audit: input.audit,
+            })
+          ).splitwiseAuditRunId;
+
+    return { reconciliationRunId, totals, discrepancies, accountSnapshots, splitwiseAuditRunId };
   });
 }
 
@@ -322,6 +347,12 @@ async function detectSplitwiseDrift(
 ): Promise<{
   readonly discrepancies: ReconciliationDiscrepancy[];
   readonly splitwiseBalancesSnapshot: unknown;
+  /**
+   * What `fetchBalances()` produced, passed on to phase 19's audit so one run makes one
+   * external read rather than asking Splitwise for the same figures twice (ADR-0046).
+   * `null` when no integration is connected and nothing was called at all.
+   */
+  readonly balances: PrefetchedSplitwiseBalances | null;
 }> {
   const ownerUser = await getPrimaryUserPerson(exec);
   const integration =
@@ -329,23 +360,23 @@ async function detectSplitwiseDrift(
       ? null
       : await getConnectedExternalIntegration(exec, ownerUser.userId, 'splitwise');
   if (integration === null) {
-    return { discrepancies: [], splitwiseBalancesSnapshot: null };
+    return { discrepancies: [], splitwiseBalancesSnapshot: null, balances: null };
   }
 
   let theirBalances: readonly SplitwiseFriendBalance[];
   try {
     theirBalances = await input.splitwise.fetchBalances();
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return {
       discrepancies: [
         {
           kind: 'splitwise_fetch_failed',
-          detail:
-            'fetchBalances() failed, so no drift comparison ran this time: ' +
-            (error instanceof Error ? error.message : String(error)),
+          detail: 'fetchBalances() failed, so no drift comparison ran this time: ' + message,
         },
       ],
       splitwiseBalancesSnapshot: null,
+      balances: { ok: false, error: message },
     };
   }
 
@@ -419,7 +450,11 @@ async function detectSplitwiseDrift(
     netBalance: entry.netBalance.toString(),
   }));
 
-  return { discrepancies, splitwiseBalancesSnapshot };
+  return {
+    discrepancies,
+    splitwiseBalancesSnapshot,
+    balances: { ok: true, balances: theirBalances },
+  };
 }
 
 /**

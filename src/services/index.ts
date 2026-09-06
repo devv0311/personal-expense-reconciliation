@@ -31,6 +31,7 @@ export * from './adjustment-service.js';
 export * from './cash-flow-service.js';
 export * from './balance-service.js';
 export * from './splitwise-service.js';
+export * from './splitwise-audit-service.js';
 export * from './people-service.js';
 
 /**

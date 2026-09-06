@@ -63,6 +63,14 @@ import {
 } from './review-routes.js';
 import { postSettlement } from './settlement-routes.js';
 import {
+  getSplitwiseAuditFindingRoute,
+  getSplitwiseAuditFindingsRoute,
+  getSplitwiseAuditRunRoute,
+  getSplitwiseAuditsRoute,
+  postSplitwiseAudit,
+  postSplitwiseAuditFindingReview,
+} from './splitwise-audit-routes.js';
+import {
   postConnectSplitwiseIntegration,
   postReadyToSync,
   postSyncExpense,
@@ -231,6 +239,32 @@ export const SPLITWISE_ROUTES: readonly ApiRoute[] = [
 ];
 
 /**
+ * Running the Splitwise drift & ghost-debt audit, reading its findings, and reviewing one
+ * (phase 19, ADR-0046). Every route is a read or a recorded decision — none writes to
+ * Splitwise, and reviewing a finding does not authorize one to.
+ */
+export const SPLITWISE_AUDIT_ROUTES: readonly ApiRoute[] = [
+  { method: 'POST', path: '/api/splitwise/audits', handler: postSplitwiseAudit },
+  { method: 'GET', path: '/api/splitwise/audits', handler: getSplitwiseAuditsRoute },
+  { method: 'GET', path: '/api/splitwise/audits/:id', handler: getSplitwiseAuditRunRoute },
+  {
+    method: 'GET',
+    path: '/api/splitwise/audit-findings',
+    handler: getSplitwiseAuditFindingsRoute,
+  },
+  {
+    method: 'GET',
+    path: '/api/splitwise/audit-findings/:id',
+    handler: getSplitwiseAuditFindingRoute,
+  },
+  {
+    method: 'POST',
+    path: '/api/splitwise/audit-findings/:id/review',
+    handler: postSplitwiseAuditFindingReview,
+  },
+];
+
+/**
  * Every route, in match order.
  *
  * Order carries one rule: a literal segment is listed before the capture that would swallow
@@ -250,6 +284,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...BALANCE_ROUTES,
   ...PEOPLE_ROUTES,
   ...SPLITWISE_ROUTES,
+  ...SPLITWISE_AUDIT_ROUTES,
   ...RECONCILIATION_ROUTES,
 ];
 
