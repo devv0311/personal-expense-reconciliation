@@ -541,6 +541,18 @@ Superseded, never rewritten: a materially different comparison inserts a new row
 old one (`materially_changed`, naming its replacement), so the earlier snapshots, evidence and
 review decision survive exactly as recorded.
 
+### Derived proof packs — **no table, phase 20, ADR-0047**
+
+Phase 20 added **no schema and no migration**. A proof pack is a pure derived read — it quotes
+`getBalance`, `getRefundAllocationState`, `getPaymentContext` and the open `splitwise_audit_findings`
+for a pair, arranges them into prose, and returns them. It has no identity, no review state and
+no lifecycle of its own, so there is nothing to persist; storing one would be a second place a
+share or a balance is written down (the thing ADR-0047 forbids) and would go stale the moment
+any contributing row changed. This mirrors `getBalance`, `getRefundAllocationState` and
+`getPaymentContext`, which are all table-less reads. Two plain `SELECT` helpers were added to
+`db.repositories` for it — `listExpensePaymentIds` and `listEvidenceLinkedToExpense` — neither a
+new table.
+
 ## Deliberately deferred
 
 - Row-level security policies — revisit once real multi-user access is on the roadmap.
