@@ -125,9 +125,7 @@ export async function postAccountUpdate(
   await updateAccountDetails(deps.db, {
     accountId,
     ...optional('name', optionalString(body, 'name')),
-    ...('institution' in body
-      ? { institution: optionalString(body, 'institution') ?? null }
-      : {}),
+    ...('institution' in body ? { institution: optionalString(body, 'institution') ?? null } : {}),
     ...('last4' in body ? { last4: optionalString(body, 'last4') ?? null } : {}),
     ...optional('isActive', optionalBoolean(body, 'isActive')),
     ...optional('archived', optionalBoolean(body, 'archived')),
@@ -283,10 +281,7 @@ export async function postGroupMembershipEnd(
 /* ------------------------------------------------------------------------- validation */
 
 /** Spreads a key only when the value is present, so `exactOptionalPropertyTypes` holds. */
-function optional<K extends string, V>(
-  key: K,
-  value: V | undefined,
-): Partial<Record<K, V>> {
+function optional<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {
   return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 }
 
@@ -310,7 +305,10 @@ function parseMembers(
   if (!('members' in body) || body['members'] === null) return undefined;
   const raw = body['members'];
   if (!Array.isArray(raw)) {
-    throw new ApiRequestError('"members", when present, must be an array of person ids.', 'members');
+    throw new ApiRequestError(
+      '"members", when present, must be an array of person ids.',
+      'members',
+    );
   }
   return raw.map((entry, index) => {
     if (typeof entry !== 'string') {

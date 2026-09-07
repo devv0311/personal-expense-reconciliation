@@ -47,7 +47,9 @@ import type { ApiDependencies, RouteParams } from './router.js';
  * - `equal` — `beneficiaries: [{ type, id }]`
  * - `exact` / `custom` — `lines: [{ beneficiary: { type, id }, amount }]`
  * - `percentage` — `lines: [{ beneficiary: { type, id }, percentage }]`
- * - `item_based` / `quantity_based` — `lines: [{ beneficiary: { type, id }, expenseItemId, amount? }]`
+ * - `item_based` — `lines: [{ beneficiary: { type, id }, expenseItemId, amount? }]`
+ * - `quantity_based` — the same, plus `units?` per line: the item's cost is then split across
+ *   its unit-stated lines by the Largest Remainder Method (audit row 21)
  *
  * `decidedBy` defaults to `"manual"` — the only origin a human-driven HTTP request can honestly
  * claim; `"rule:<rule_id>"` is for a future rule-engine caller (`invariants.md` #17).
@@ -135,10 +137,12 @@ function parseDecision(body: Record<string, unknown>): AllocationDecision {
           requireUuid(requireString(raw, 'expenseItemId'), `lines[${index}].expenseItemId`),
         );
         const amount = optionalLineAmount(raw, `lines[${index}].amount`);
+        const units = optionalUnits(raw, `lines[${index}].units`);
         return {
           beneficiary: requireBeneficiary(raw['beneficiary'], `lines[${index}].beneficiary`),
           expenseItemId,
           ...(amount === undefined ? {} : { amount }),
+          ...(units === undefined ? {} : { units }),
         };
       });
       return { method, lines };
@@ -183,6 +187,20 @@ function optionalLineAmount(raw: Record<string, unknown>, field: string): Paise 
     );
   }
   return value === undefined ? undefined : (value as Paise);
+}
+
+/**
+ * `units` on a quantity-based line: how many of a shared item this beneficiary took.
+ *
+ * A count, so the same exact-decimal-string discipline as money — a unit claim decides real
+ * paise, and a float would be the one place this system rounded by accident.
+ */
+function optionalUnits(raw: Record<string, unknown>, field: string): bigint | undefined {
+  const value = optionalMinorUnitsField(raw, 'units');
+  if (value === null) {
+    throw new ApiRequestError(`"${field}" cannot be null; omit it instead.`, field);
+  }
+  return value ?? undefined;
 }
 
 /** A non-negative integer weight — a count, not money, but the same exact-string discipline. */

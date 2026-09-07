@@ -42,6 +42,12 @@ import {
   postEvidenceLink,
   postEvidenceNote,
 } from './evidence-routes.js';
+import {
+  getExpenseFundingRoute,
+  postExpense,
+  postExpenseFunding,
+  postExpenseItemsCorrection,
+} from './expense-authoring-routes.js';
 import { getExpenseItemsRoute, postExpenseItems } from './expense-item-routes.js';
 import {
   getCounterpartyOptionsRoute,
@@ -94,7 +100,7 @@ import {
   postPaymentDuplicateDecision,
   postPaymentReclassification,
 } from './review-routes.js';
-import { postSettlement } from './settlement-routes.js';
+import { getSettlementsRoute, postSettlement } from './settlement-routes.js';
 import {
   getSplitwiseAuditFindingRoute,
   getSplitwiseAuditFindingsRoute,
@@ -202,7 +208,20 @@ export const RECEIPT_ROUTES: readonly ApiRoute[] = [
  * how much (`docs/roadmap.md` phase 12).
  */
 export const ALLOCATION_ROUTES: readonly ApiRoute[] = [
+  // `/items/correct` before `/items`: they differ in length, so no capture swallows either,
+  // but keeping the more specific path first matches the table's stated ordering rule.
+  {
+    method: 'POST',
+    path: '/api/expenses/:expenseId/items/correct',
+    handler: postExpenseItemsCorrection,
+  },
   { method: 'POST', path: '/api/expenses/:expenseId/items', handler: postExpenseItems },
+  {
+    method: 'GET',
+    path: '/api/expenses/:expenseId/payment-links',
+    handler: getExpenseFundingRoute,
+  },
+  { method: 'POST', path: '/api/expenses/:expenseId/payment-links', handler: postExpenseFunding },
   { method: 'GET', path: '/api/expenses/:expenseId/items', handler: getExpenseItemsRoute },
   { method: 'POST', path: '/api/expenses/:expenseId/allocation', handler: postAllocation },
   {
@@ -225,6 +244,7 @@ export const ALLOCATION_ROUTES: readonly ApiRoute[] = [
 /** A manual settlement over a payment, independent of classification (phase 12). */
 export const SETTLEMENT_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/payments/:paymentId/settlements', handler: postSettlement },
+  { method: 'GET', path: '/api/settlements', handler: getSettlementsRoute },
 ];
 
 /**
@@ -278,6 +298,7 @@ export const PAYMENT_WORKSPACE_ROUTES: readonly ApiRoute[] = [
  */
 export const EXPENSE_LEDGER_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/expenses', handler: getExpensesRoute },
+  { method: 'POST', path: '/api/expenses', handler: postExpense },
   { method: 'GET', path: '/api/expenses/:expenseId', handler: getExpenseRoute },
 ];
 

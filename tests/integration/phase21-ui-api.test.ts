@@ -123,7 +123,9 @@ describe('GET /api/accounts', () => {
   });
 
   it('refuses a verb it does not implement rather than 404ing a known path', async () => {
-    const response = await api.handle(post('/api/accounts', {}));
+    // `/api/accounts` now answers POST too (audit row 48), so the read-only management
+    // roster is the surface that still makes this distinction visible.
+    const response = await api.handle(post('/api/people/manage', {}));
     expect(response.status).toBe(405);
   });
 });

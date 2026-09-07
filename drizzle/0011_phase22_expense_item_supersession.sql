@@ -1,0 +1,1 @@
+ALTER TABLE "expense_items" ADD COLUMN "superseded_at" timestamp with time zone;

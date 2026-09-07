@@ -74,8 +74,9 @@ export async function recordExpenseItems(
     if (existing.length > 0) {
       throw new ServiceError(
         'PRECONDITION_FAILED',
-        `Expense ${expense.id} already has ${existing.length} item(s). There is no correction ` +
-          'path in this phase; an expense is itemized once.',
+        `Expense ${expense.id} already has ${existing.length} item(s). An expense is itemized ` +
+          'once; correcting a wrong breakdown is `services.correctExpenseItems`, which ' +
+          'supersedes the whole set rather than editing rows in place.',
         { expenseId: expense.id },
       );
     }
@@ -115,6 +116,7 @@ export async function recordExpenseItems(
       amount: input.items[index]!.amount,
       quantity: input.items[index]!.quantity ?? '1',
       receiptItemId: input.items[index]!.receiptItemId ?? null,
+      supersededAt: null,
     }));
 
     for (const item of items) {

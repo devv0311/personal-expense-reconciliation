@@ -636,15 +636,89 @@ export async function getSettlementById(
   return row === undefined ? null : (row as SettlementRow);
 }
 
+/** One row of the settlement register, with everything a surface needs to name it. */
+export interface SettlementRegisterRow extends SettlementRow {
+  readonly counterpartyName: string;
+  /** From the linked payment, which is what says which way the money actually moved. */
+  readonly direction: PaymentDirection;
+  readonly occurredAt: Date;
+  readonly paymentDescription: string;
+}
+
+/**
+ * Every recorded settlement, newest first (audit row 29).
+ *
+ * Direction comes from the linked payment rather than from the settlement row, because that
+ * is where it lives: a `Settlement` has no direction column, deliberately — the payment says
+ * whether money left or arrived (`schema.ts`, `settlements`).
+ */
+export async function listSettlementRegister(
+  exec: Executor,
+  options: {
+    readonly counterpartyPersonId?: PersonId;
+    readonly limit?: number;
+    readonly offset?: number;
+  } = {},
+): Promise<SettlementRegisterRow[]> {
+  const base = exec
+    .select({
+      id: settlements.id,
+      paymentId: settlements.paymentId,
+      counterpartyPersonId: settlements.counterpartyPersonId,
+      amount: settlements.amount,
+      reason: settlements.reason,
+      recordedAt: settlements.recordedAt,
+      counterpartyName: people.displayName,
+      direction: payments.direction,
+      occurredAt: payments.occurredAt,
+      paymentDescription: payments.rawDescription,
+    })
+    .from(settlements)
+    .innerJoin(people, eq(people.id, settlements.counterpartyPersonId))
+    .innerJoin(payments, eq(payments.id, settlements.paymentId));
+
+  const rows = await (
+    options.counterpartyPersonId === undefined
+      ? base
+      : base.where(eq(settlements.counterpartyPersonId, options.counterpartyPersonId))
+  )
+    .orderBy(desc(payments.occurredAt), desc(settlements.recordedAt))
+    .limit(options.limit ?? 100)
+    .offset(options.offset ?? 0);
+
+  return rows.map((row) => ({
+    ...row,
+    id: row.id as SettlementId,
+    paymentId: row.paymentId as PaymentId,
+    counterpartyPersonId: row.counterpartyPersonId as PersonId,
+    amount: row.amount as Paise,
+    direction: row.direction as PaymentDirection,
+  }));
+}
+
+export async function countSettlements(
+  exec: Executor,
+  counterpartyPersonId?: PersonId,
+): Promise<number> {
+  const base = exec.select({ total: sql<number>`count(*)::int` }).from(settlements);
+  const [row] = await (counterpartyPersonId === undefined
+    ? base
+    : base.where(eq(settlements.counterpartyPersonId, counterpartyPersonId)));
+  return Number(row?.total ?? 0);
+}
+
 export async function listPaymentExpenseLinksByPayment(
   exec: Executor,
   paymentId: PaymentId,
-): Promise<Array<{ amount: Paise }>> {
+): Promise<Array<{ expenseId: ExpenseId; amount: Paise }>> {
   const rows = await exec
-    .select({ amount: paymentExpenseLinks.amount })
+    .select({ expenseId: paymentExpenseLinks.expenseId, amount: paymentExpenseLinks.amount })
     .from(paymentExpenseLinks)
     .where(eq(paymentExpenseLinks.paymentId, paymentId));
-  return rows as Array<{ amount: Paise }>;
+  return rows.map((row) => ({
+    expenseId: row.expenseId as ExpenseId,
+    amount: row.amount as Paise,
+  }));
 }
 
 /**
@@ -666,6 +740,27 @@ export async function listExpensePaymentIds(
   return rows.map((row) => row.paymentId as PaymentId);
 }
 
+/** Every funding link on one expense, with its payment and portion — a read for authoring. */
+export async function listExpenseFundingLinks(
+  exec: Executor,
+  expenseId: ExpenseId,
+): Promise<Array<{ linkId: string; paymentId: PaymentId; amount: Paise }>> {
+  const rows = await exec
+    .select({
+      linkId: paymentExpenseLinks.id,
+      paymentId: paymentExpenseLinks.paymentId,
+      amount: paymentExpenseLinks.amount,
+    })
+    .from(paymentExpenseLinks)
+    .where(eq(paymentExpenseLinks.expenseId, expenseId))
+    .orderBy(asc(paymentExpenseLinks.createdAt), asc(paymentExpenseLinks.id));
+  return rows.map((row) => ({
+    linkId: row.linkId,
+    paymentId: row.paymentId as PaymentId,
+    amount: row.amount as Paise,
+  }));
+}
+
 export interface PaymentExpenseLinkDraft {
   readonly paymentId: PaymentId;
   readonly expenseId: ExpenseId;
@@ -682,12 +777,16 @@ export interface PaymentExpenseLinkDraft {
 export async function insertPaymentExpenseLink(
   exec: Executor,
   draft: PaymentExpenseLinkDraft,
-): Promise<void> {
-  await exec.insert(paymentExpenseLinks).values({
-    paymentId: draft.paymentId,
-    expenseId: draft.expenseId,
-    amount: draft.amount,
-  });
+): Promise<string> {
+  const [row] = await exec
+    .insert(paymentExpenseLinks)
+    .values({
+      paymentId: draft.paymentId,
+      expenseId: draft.expenseId,
+      amount: draft.amount,
+    })
+    .returning({ id: paymentExpenseLinks.id });
+  return requireRow(row, 'payment_expense_links').id;
 }
 
 /* ======================================================================== adjustments */
@@ -967,7 +1066,7 @@ export async function listExpenseItemContexts(
   const rows = await exec
     .select({ id: expenseItems.id, expenseId: expenseItems.expenseId, amount: expenseItems.amount })
     .from(expenseItems)
-    .where(eq(expenseItems.expenseId, expenseId))
+    .where(and(eq(expenseItems.expenseId, expenseId), isNull(expenseItems.supersededAt)))
     .orderBy(asc(expenseItems.id));
   return rows.map((row) => ({
     expenseItemId: row.id as ExpenseItemId,
@@ -2096,7 +2195,9 @@ export async function listExpenseItems(
   const rows = await exec
     .select({ id: expenseItems.id, amount: expenseItems.amount })
     .from(expenseItems)
-    .where(eq(expenseItems.expenseId, expenseId))
+    // Current items only: a superseded row is kept so an old allocation line still resolves,
+    // but it is not part of what this expense is made of now (audit row 17).
+    .where(and(eq(expenseItems.expenseId, expenseId), isNull(expenseItems.supersededAt)))
     .orderBy(asc(expenseItems.id));
   return rows as Array<{ id: string; amount: Paise }>;
 }
@@ -2109,6 +2210,8 @@ export interface ExpenseItemRow {
   readonly amount: Paise;
   readonly quantity: string;
   readonly receiptItemId: ReceiptItemId | null;
+  /** Non-null once a corrected breakdown replaced this row (audit row 17). */
+  readonly supersededAt: Date | null;
 }
 
 export interface InsertExpenseItemDraft {
@@ -2147,15 +2250,23 @@ export async function insertExpenseItems(
   return rows.map((row) => row.id as ExpenseItemId);
 }
 
-/** Every `ExpenseItem` for an expense, in the shape a caller reading them back needs. */
+/**
+ * An expense's **current** item set, in the shape a caller reading them back needs.
+ *
+ * Pass `includeSuperseded` to see the corrected-away rows too — a history panel wants them;
+ * everything financial wants only what the expense is made of now.
+ */
 export async function listExpenseItemsByExpense(
   exec: Executor,
   expenseId: ExpenseId,
+  options: { readonly includeSuperseded?: boolean } = {},
 ): Promise<ExpenseItemRow[]> {
+  const conditions = [eq(expenseItems.expenseId, expenseId)];
+  if (options.includeSuperseded !== true) conditions.push(isNull(expenseItems.supersededAt));
   const rows = await exec
     .select()
     .from(expenseItems)
-    .where(eq(expenseItems.expenseId, expenseId))
+    .where(and(...conditions))
     .orderBy(asc(expenseItems.createdAt), asc(expenseItems.id));
   return rows.map((row) => ({
     id: row.id as ExpenseItemId,
@@ -2164,7 +2275,42 @@ export async function listExpenseItemsByExpense(
     amount: row.amount as Paise,
     quantity: row.quantity,
     receiptItemId: row.receiptItemId as ReceiptItemId | null,
+    supersededAt: row.supersededAt,
   }));
+}
+
+/**
+ * Stamps `superseded_at` on a set of items, so a corrected breakdown replaces rather than
+ * edits (audit row 17).
+ *
+ * The rows survive: `allocation_lines.expense_item_id` still points at them, and an old
+ * allocation version has to stay explicable. `services.correctExpenseItems` refuses the
+ * correction outright when an item refund has been attributed to any of these items, so a
+ * superseded row is never one an `ExpenseAdjustmentItem` depends on.
+ */
+export async function supersedeExpenseItems(
+  exec: Executor,
+  itemIds: readonly ExpenseItemId[],
+  supersededAt: Date,
+): Promise<void> {
+  if (itemIds.length === 0) return;
+  await exec
+    .update(expenseItems)
+    .set({ supersededAt })
+    .where(inArray(expenseItems.id, [...itemIds]));
+}
+
+/** How many item-refund attributions reference any of these items. Zero permits correction. */
+export async function countAdjustmentItemsForExpenseItems(
+  exec: Executor,
+  itemIds: readonly ExpenseItemId[],
+): Promise<number> {
+  if (itemIds.length === 0) return 0;
+  const [row] = await exec
+    .select({ total: sql<number>`count(*)::int` })
+    .from(expenseAdjustmentItems)
+    .where(inArray(expenseAdjustmentItems.expenseItemId, [...itemIds]));
+  return Number(row?.total ?? 0);
 }
 
 /**

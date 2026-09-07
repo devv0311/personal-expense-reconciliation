@@ -510,3 +510,92 @@ describe('validateItemBasedLineSums — invariant #14, tightened to per-item', (
     expect(() => validateItemBasedLineSums(lines, [])).not.toThrow();
   });
 });
+
+describe('quantity_based unit splitting (audit row 21)', () => {
+  const item = asId<'expense_item'>('11111111-1111-4111-8111-111111111111');
+  const alice = {
+    type: 'person',
+    id: asId<'person'>('aaaaaaaa-1111-4111-8111-111111111111'),
+  } as const;
+  const bob = {
+    type: 'person',
+    id: asId<'person'>('bbbbbbbb-1111-4111-8111-111111111111'),
+  } as const;
+
+  it('divides a shared item by units, exactly, with the remainder placed once', () => {
+    // ₹10.00 across three units — 333⅓ paise each, which does not divide evenly.
+    const lines = buildAllocationLines({
+      method: 'quantity_based',
+      items: [{ id: item, amount: paise(1000n) }],
+      lines: [
+        { beneficiary: alice, expenseItemId: item, units: 2n },
+        { beneficiary: bob, expenseItemId: item, units: 1n },
+      ],
+    });
+    expect(lines.map((line) => line.amount)).toEqual([667n, 333n]);
+    // The item is exactly accounted for: no paisa is invented or lost.
+    expect(lines[0]!.amount + lines[1]!.amount).toBe(1000n);
+  });
+
+  it('keeps every line pointing at the item it divides', () => {
+    const lines = buildAllocationLines({
+      method: 'quantity_based',
+      items: [{ id: item, amount: paise(900n) }],
+      lines: [
+        { beneficiary: alice, expenseItemId: item, units: 1n },
+        { beneficiary: bob, expenseItemId: item, units: 2n },
+      ],
+    });
+    expect(lines.every((line) => line.expenseItemId === item)).toBe(true);
+    expect(lines.map((line) => line.amount)).toEqual([300n, 600n]);
+  });
+
+  it('refuses units on an item_based allocation', () => {
+    expect(() =>
+      buildAllocationLines({
+        method: 'item_based',
+        items: [{ id: item, amount: paise(1000n) }],
+        lines: [{ beneficiary: alice, expenseItemId: item, units: 1n }],
+      }),
+    ).toThrow(/quantity_based/);
+  });
+
+  it('refuses a line that states both units and an amount', () => {
+    expect(() =>
+      buildAllocationLines({
+        method: 'quantity_based',
+        items: [{ id: item, amount: paise(1000n) }],
+        lines: [
+          { beneficiary: alice, expenseItemId: item, units: 1n, amount: paise(500n) },
+          { beneficiary: bob, expenseItemId: item, units: 1n },
+        ],
+      }),
+    ).toThrow(/One line has one amount/);
+  });
+
+  it('refuses mixing unit-stated and amount-stated lines on one item', () => {
+    expect(() =>
+      buildAllocationLines({
+        method: 'quantity_based',
+        items: [{ id: item, amount: paise(1000n) }],
+        lines: [
+          { beneficiary: alice, expenseItemId: item, units: 1n },
+          { beneficiary: bob, expenseItemId: item, amount: paise(500n) },
+        ],
+      }),
+    ).toThrow(/allocate the item twice/);
+  });
+
+  it('refuses a zero-unit claim rather than writing a zero line for it', () => {
+    expect(() =>
+      buildAllocationLines({
+        method: 'quantity_based',
+        items: [{ id: item, amount: paise(1000n) }],
+        lines: [
+          { beneficiary: alice, expenseItemId: item, units: 0n },
+          { beneficiary: bob, expenseItemId: item, units: 1n },
+        ],
+      }),
+    ).toThrow(/zero-unit claim/);
+  });
+});

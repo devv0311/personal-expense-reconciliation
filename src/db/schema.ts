@@ -754,6 +754,17 @@ export const expenseItems = pgTable(
     amount: paiseColumn('amount').notNull(),
     quantity: numeric('quantity', { precision: 10, scale: 3 }).notNull().default('1'),
     receiptItemId: uuid('receipt_item_id').references(() => receiptItems.id),
+    /**
+     * When a corrected breakdown replaced this item (audit row 17).
+     *
+     * An `ExpenseItem` is a DERIVED reading of what was bought, and a wrong first reading has
+     * to be fixable — but not by mutation. A correction writes a whole new item set and stamps
+     * the old rows here, exactly as an `Allocation` is superseded rather than edited
+     * (`invariants.md` #6). Every current-item read filters on this being null; the superseded
+     * rows stay forever, because an old allocation line still points at them and "why did this
+     * expense once divide that way?" has to remain answerable.
+     */
+    supersededAt: timestamp('superseded_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (table) => [
