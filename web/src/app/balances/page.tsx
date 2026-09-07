@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { BalanceView } from "@/components/balance-view";
+import { PageHeader } from "@/components/page-header";
 import { PersonSelect } from "@/components/person-select";
 import {
   EmptyBlock,
@@ -13,20 +16,58 @@ import {
 import { useBalance, usePeople } from "@/lib/queries";
 
 export default function BalancesPage() {
+  return (
+    <Suspense
+      fallback={
+        <LoadingStatus label="Loading…">
+          <FieldSkeleton />
+        </LoadingStatus>
+      }
+    >
+      <BalancesContent />
+    </Suspense>
+  );
+}
+
+/**
+ * Who owes whom, in either direction.
+ *
+ * `?with=<personId>` puts the user on one side and that person on the other — the shape the
+ * command palette links to, and the question ("what is between me and them?") this screen is
+ * asked most often. Both pickers stay editable, because the payer is not always the user and a
+ * balance between two flatmates is a real thing this ledger can compute.
+ */
+function BalancesContent() {
+  const searchParams = useSearchParams();
+  const requestedWith = searchParams.get("with");
   const peopleQuery = usePeople();
-  const [personAId, setPersonAId] = useState<string | null>(null);
-  const [personBId, setPersonBId] = useState<string | null>(null);
+  const [chosenA, setChosenA] = useState<string | null>(null);
+  const [chosenB, setChosenB] = useState<string | null>(null);
+
+  const userPersonId = peopleQuery.data?.find((person) => person.isUser)?.id ?? null;
+
+  // `?with=` supplies the *default* pair rather than being copied into state: an explicit
+  // choice always wins, and no effect has to race the people query to apply the link.
+  const personAId = chosenA ?? (requestedWith === null ? null : userPersonId);
+  const personBId = chosenB ?? requestedWith;
   const balanceQuery = useBalance(personAId, personBId);
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-h1 font-medium text-ink">Balances</h1>
-        <p className="mt-1 max-w-prose text-body text-ink-muted">
-          Who owes whom, computed from every shared expense — in either direction, since the payer
-          isn&apos;t always you.
-        </p>
-      </div>
+      <PageHeader
+        title="Balances"
+        description="Who owes whom, computed from every shared expense — in either direction, since the payer isn't always you."
+        actions={
+          personBId !== null && personBId !== userPersonId ? (
+            <Link
+              href={`/proof-packs?recipient=${personBId}`}
+              className="text-meta text-accent underline-offset-2 hover:underline"
+            >
+              Preview a proof pack for this person
+            </Link>
+          ) : undefined
+        }
+      />
 
       {peopleQuery.isPending && (
         <LoadingStatus label="Loading people…">
@@ -48,7 +89,7 @@ export default function BalancesPage() {
               label="Person A"
               people={peopleQuery.data}
               value={personAId}
-              onChange={setPersonAId}
+              onChange={setChosenA}
             />
             <span aria-hidden="true" className="pb-2 text-ink-faint">
               &harr;
@@ -58,7 +99,7 @@ export default function BalancesPage() {
               label="Person B"
               people={peopleQuery.data}
               value={personBId}
-              onChange={setPersonBId}
+              onChange={setChosenB}
             />
           </div>
 

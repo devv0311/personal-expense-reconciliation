@@ -35,3 +35,7 @@ Thumbs.db
 storage/evidence/
 *.receipt.*
 local-data/
+
+# Browser-verification artifacts (snapshots and screenshots from a driven browser session).
+# They are a record of one local run against synthetic data, not part of the product.
+.playwright-mcp/

@@ -18,6 +18,7 @@
 
 import type { AiService, Database, EvidenceStore, SplitwisePort } from '../services/index.js';
 
+import { getAccountsRoute } from './account-routes.js';
 import {
   getRefundAllocationRoute,
   postDistributeAdjustment,
@@ -27,6 +28,7 @@ import { postAllocation } from './allocation-routes.js';
 import { getBalanceRoute } from './balance-routes.js';
 import {
   getEvidenceMatchesRoute,
+  getEvidenceObservationRoute,
   getPaymentContextRoute,
   postEvidenceEnrichment,
   postEvidenceMatchDecision,
@@ -41,7 +43,7 @@ import {
   postEvidenceNote,
 } from './evidence-routes.js';
 import { getExpenseItemsRoute, postExpenseItems } from './expense-item-routes.js';
-import { getExpensesRoute } from './expense-ledger-routes.js';
+import { getExpenseRoute, getExpensesRoute } from './expense-ledger-routes.js';
 import { jsonResponse, toErrorResponse } from './http.js';
 import { getPeopleRoute } from './people-routes.js';
 import { getProofPackRoute } from './proof-pack-routes.js';
@@ -52,6 +54,7 @@ import {
   postReceiptExtraction,
 } from './receipt-routes.js';
 import {
+  getReconciliationAccountSnapshotsRoute,
   getReconciliationRunRoute,
   getReconciliationRunsRoute,
   postReconciliationRun,
@@ -147,6 +150,11 @@ export const EVIDENCE_ROUTES: readonly ApiRoute[] = [
     path: '/api/evidence/:evidenceId/observation',
     handler: postEvidenceObservation,
   },
+  {
+    method: 'GET',
+    path: '/api/evidence/:evidenceId/observation',
+    handler: getEvidenceObservationRoute,
+  },
   { method: 'POST', path: '/api/evidence/:evidenceId/enrich', handler: postEvidenceEnrichment },
   { method: 'GET', path: '/api/evidence/:evidenceId/matches', handler: getEvidenceMatchesRoute },
   { method: 'GET', path: '/api/evidence/:evidenceId', handler: getEvidenceMetadata },
@@ -198,9 +206,13 @@ export const PAYMENT_CONTEXT_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/payments/:paymentId/context', handler: getPaymentContextRoute },
 ];
 
-/** The expense ledger, queryable — `services.listExpenses` (`docs/roadmap.md` phase 13). */
+/**
+ * The expense ledger, queryable — `services.listExpenses` (`docs/roadmap.md` phase 13) — and
+ * one row of it, which the phase 21 expense detail screen reads.
+ */
 export const EXPENSE_LEDGER_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/expenses', handler: getExpensesRoute },
+  { method: 'GET', path: '/api/expenses/:expenseId', handler: getExpenseRoute },
 ];
 
 /** The pairwise `Balance` between any two people — `services.getBalance` (phase 13, ADR-0006). */
@@ -211,6 +223,14 @@ export const BALANCE_ROUTES: readonly ApiRoute[] = [
 /** The people roster `web/` renders names from — `services.listPeople` (phase 15). */
 export const PEOPLE_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/people', handler: getPeopleRoute },
+];
+
+/**
+ * The account roster the per-account cash waterfall names — `services.listAccounts`
+ * (phase 21). Phase 16 shipped the snapshot with no surface for it on purpose.
+ */
+export const ACCOUNT_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/accounts', handler: getAccountsRoute },
 ];
 
 /**
@@ -230,6 +250,11 @@ export const RECONCILIATION_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/reconciliation/runs', handler: postReconciliationRun },
   { method: 'GET', path: '/api/reconciliation/runs', handler: getReconciliationRunsRoute },
   { method: 'GET', path: '/api/reconciliation/runs/:id', handler: getReconciliationRunRoute },
+  {
+    method: 'GET',
+    path: '/api/reconciliation/runs/:id/account-snapshots',
+    handler: getReconciliationAccountSnapshotsRoute,
+  },
 ];
 
 /** Connecting to, and syncing with, Splitwise for the first time (phase 14, ADR-0040). */
@@ -293,6 +318,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...EXPENSE_LEDGER_ROUTES,
   ...BALANCE_ROUTES,
   ...PEOPLE_ROUTES,
+  ...ACCOUNT_ROUTES,
   ...PROOF_PACK_ROUTES,
   ...SPLITWISE_ROUTES,
   ...SPLITWISE_AUDIT_ROUTES,

@@ -522,6 +522,21 @@ export async function matchEvidenceContext(
   };
 }
 
+/**
+ * The recorded reading of one evidence record, or `null` when nothing has read it.
+ *
+ * A read, added for phase 21's evidence inspector: the observation already exists beside the
+ * source and there was no way to fetch one without re-running the matcher. `null` is a real
+ * answer — a photograph with no extraction and no text has no reading.
+ */
+export async function getEvidenceObservation(
+  exec: Executor,
+  evidenceId: EvidenceId,
+): Promise<EvidenceObservationView | null> {
+  const row = await getEvidenceObservationByEvidenceId(exec, evidenceId);
+  return row === null ? null : observationRowView(row);
+}
+
 /** Every candidate recorded for one evidence record, strongest first. A read. */
 export async function listEvidenceMatches(
   exec: Executor,

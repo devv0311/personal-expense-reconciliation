@@ -1,9 +1,13 @@
 # web/ — the reconciliation UI
 
-A standalone Next.js (App Router) application: the first production frontend for this project
-(`docs/roadmap.md` phase 15). It is its own package — own `package.json`, own lockfile, own
-`tsconfig.json`/`eslint.config.mjs`/`.prettierrc.json` — deliberately isolated from the root
+A standalone Next.js (App Router) application: the production frontend for this project
+(`docs/roadmap.md` phases 15 and 21). It is its own package — own `package.json`, own lockfile,
+own `tsconfig.json`/`eslint.config.mjs`/`.prettierrc.json` — deliberately isolated from the root
 repository's own gate. See `docs/decisions/0042-frontend-stack-and-server-bridge.md` for why.
+
+**Since phase 21 this covers all six of `CLAUDE.md`'s pillars**, across six sections and five
+detail screens. The one rule that shapes all of it: `web/` renders financial figures and never
+derives them — see `docs/decisions/0048-phase-21-ui-reads-the-ledger-and-never-recomputes-it.md`.
 
 **See `Design.md` before making a visual or component change** — it's the authoritative design
 system (tokens, typography, component principles, accessibility/responsive rules), written during
@@ -65,28 +69,68 @@ npm run build       # next build — also type-checks and generates route types
 ## Structure
 
 ```
-src/app/            App Router pages: reconciliation, balances, expenses
-src/components/     Presentational + a few page-adjacent components
-src/components/ui/  Hand-owned primitives (button, table, alert, skeleton, select, input, label)
+src/app/                      App Router pages — the six sections plus five detail routes:
+                              /review  /reconciliation  /reconciliation/[id]  /expenses
+                              /expenses/[id]  /balances  /splitwise
+                              /splitwise/findings/[id]  /proof-packs
+                              /evidence/[id]  /payments/[id]
+src/components/app-shell/     The shell: keyboard layer, command palette, shortcut help, nav
+src/components/review/        The triage queue, its inspectors, and DecisionDialog
+src/components/evidence/      Evidence inspector, observation, match candidates, payment context
+src/components/expenses/      Expense detail, the item-refund splitter, the distribution panel
+src/components/reconciliation/  The account cash waterfall
+src/components/splitwise/     Audit findings list, external-read banner, finding detail
+src/components/proof-packs/   The preview and its export review
+src/components/ui/            Hand-owned primitives (button, table, alert, skeleton, select,
+                              input, label, textarea, dialog)
 src/lib/api.ts       The only fetch boundary — typed, no business logic
 src/lib/queries.ts   TanStack Query hooks over api.ts
-src/lib/money.ts     Paise (string) → display string, exact BigInt arithmetic
+src/lib/money.ts     Paise (string) → display string, and typed rupees → exact paise. All BigInt
+src/lib/labels.ts    Human wording for the API's closed enums; falls back to the raw value
 src/lib/types.ts     DTOs matching the API's JSON responses exactly
 src/lib/utils.ts     cn() — the tailwind-merge config every custom token must be registered in
-src/test-support/    Test-only helpers (a QueryClient-wrapped render)
+src/test-support/    Test-only helpers: a QueryClient-wrapped render, a fetch route map,
+                     API-shaped fixtures, and the next/navigation stand-in
 ```
 
-## What this phase's UI covers, and what it doesn't
+## What this UI covers, and what it doesn't
 
-Covers: reconciliation (run a period, see the outflow/transfers/investments/settlements/
-explained/unexplained breakdown, Splitwise discrepancies, history), balances (pairwise
-`NetBalance` + evidence status + contributing obligations), the expense ledger (filterable
-list). Deliberately out of scope for this phase, per the design spec
-(`docs/superpowers/specs/2026-09-04-phase-15-reconciliation-design.md`): review/evidence/receipts
-screens (phases 9–11's own surfaces), re-syncing a `stale` Splitwise expense, resolving a
-discrepancy, and frontend CI.
+Phase 15 shipped reconciliation, balances and the expense ledger; a design-quality pass (2026-09,
+`Design.md` and ADR-0043) then rebuilt their visual quality without adding scope. **Phase 21
+added the rest of the product**, one section per pillar:
 
-**A dedicated design-quality pass (2026-09) followed**, before phase 16, on explicit instruction
-that the phase 15 UI wasn't production-quality — see `Design.md` and ADR-0043. It redesigned
-these same four screens and every loading/empty/error/success state; it did not add scope. The
-same "deliberately out of scope" list above still holds.
+| Pillar                   | Where it lives                                                     |
+| ------------------------ | ------------------------------------------------------------------ |
+| Context re-attachment    | `/review` (unmatched evidence), `/evidence/[id]`, `/payments/[id]` |
+| Item-level refunds       | `/expenses/[id]` — items, allocation, splitter, distribution       |
+| Cash reconciliation      | `/reconciliation`, `/reconciliation/[id]` — the account waterfall  |
+| Balances and obligations | `/balances`, drilling into each contributing expense               |
+| Splitwise drift          | `/splitwise`, `/splitwise/findings/[id]`                           |
+| Proof packs              | `/proof-packs` — preview, review, copy                             |
+
+Three rules the screens hold to, and which a change here must keep:
+
+1. **No financial arithmetic.** Every figure is one the API computed. Where a number did not
+   exist over HTTP, phase 21 added the _read_ (ADR-0048).
+2. **Never a verified zero over incomplete evidence.** A missing statement balance renders as
+   "not evidenced"; `verificationStatus` comes from the database, not the screen.
+3. **No shortcut completes a decision** (ADR-0049). Every consequential act is a button behind a
+   dialog that states its consequence.
+
+Still deliberately out of scope: sending a proof pack (there is no message transport),
+re-syncing or repairing a `stale` Splitwise row, rule learning or auto-approval, and an editor
+for a model's stored proposal (`modify` exists on the API and is not reachable from here — a
+half-built editor for it would be a way to approve something nobody read).
+
+## Verifying more than the unit suite
+
+`npm test` covers roles, labels, focus, keyboard behaviour, states and the design tokens. Two
+things it cannot cover, both of which found real defects in phase 21 and both of which are worth
+re-running against a live app after a visual change:
+
+- **An axe sweep** over every route in desktop light, desktop dark and mobile. The bar is 0
+  violations. This is what caught a contrast defect in `--ink-faint` that had been shipping since
+  phase 15, and scroll containers no keyboard could reach.
+- **A figure-by-figure comparison** of what a screen renders against what the API returned. 42
+  figures were checked this way; the point is that "the frontend agrees with the backend" should
+  be a measurement, not a claim.

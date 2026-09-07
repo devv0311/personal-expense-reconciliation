@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { ExpenseStateTag, sentenceCaseState } from "@/components/expense-state-tag";
 import { Money } from "@/components/money";
@@ -16,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PageHeader } from "@/components/page-header";
 import { useExpenses, usePeople } from "@/lib/queries";
 import { EXPENSE_STATES, type ExpenseState } from "@/lib/types";
 
@@ -45,13 +47,10 @@ export default function ExpensesPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-h1 font-medium text-ink">Expenses</h1>
-        <p className="mt-1 max-w-prose text-body text-ink-muted">
-          Every expense in the ledger, newest first. Net amount is gross minus any refund or
-          reimbursement recorded against it.
-        </p>
-      </div>
+      <PageHeader
+        title="Expenses"
+        description="Every expense in the ledger, newest first. Net amount is gross minus any refund or reimbursement recorded against it — open one to see its items, who benefited, and what came back."
+      />
 
       <div className="flex flex-wrap items-end gap-4">
         <div className="flex flex-col gap-1.5">
@@ -145,7 +144,12 @@ export default function ExpensesPage() {
                 return (
                   <TableRow key={expense.id} className="align-top">
                     <TableCell>
-                      <div className="text-ink">{expense.description ?? "—"}</div>
+                      <Link
+                        href={`/expenses/${expense.id}`}
+                        className="text-accent underline-offset-2 hover:underline"
+                      >
+                        {expense.description ?? "Untitled expense"}
+                      </Link>
                       <div className="mt-0.5 text-meta text-ink-muted">
                         {DATE_FORMAT.format(new Date(expense.occurredAt))}
                       </div>
@@ -174,7 +178,12 @@ export default function ExpensesPage() {
               return (
                 <li key={expense.id} className="border-b border-rule pb-3 last:border-b-0">
                   <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-ink">{expense.description ?? "—"}</span>
+                    <Link
+                      href={`/expenses/${expense.id}`}
+                      className="text-accent underline-offset-2 hover:underline"
+                    >
+                      {expense.description ?? "Untitled expense"}
+                    </Link>
                     <span className="text-right">
                       <Money paise={expense.netAmount} />
                       {hasAdjustment && (

@@ -39,3 +39,69 @@ export function formatPaise(paise: string): FormattedMoney {
   )}.${cents.toString().padStart(2, "0")}`;
   return { text, isNegative, isZero: value === 0n };
 }
+
+/**
+ * Parses a rupee amount a person typed into the exact paise string the API expects.
+ *
+ * This is the only direction-of-travel this file has besides formatting, and it is deliberately
+ * not arithmetic over ledger state: it converts *what someone typed in a form* into the wire
+ * representation, in pure string handling with no `Number` anywhere. `"1,234.5"` becomes
+ * `"123450"`, exactly, at any magnitude.
+ *
+ * Rejections are returned, never thrown and never rounded away: three decimal places is a
+ * typo, not a value to silently truncate to two.
+ */
+export type ParsedRupees =
+  { readonly ok: true; readonly paise: string } | { readonly ok: false; readonly message: string };
+
+export function parseRupeeInput(
+  raw: string,
+  options: { allowNegative?: boolean } = {},
+): ParsedRupees {
+  const cleaned = raw.replace(/[\s,₹]/g, "");
+  if (cleaned.length === 0) return { ok: false, message: "Enter an amount." };
+
+  const negative = cleaned.startsWith("-");
+  if (negative && options.allowNegative !== true) {
+    return { ok: false, message: "This amount cannot be negative." };
+  }
+  const unsigned = negative ? cleaned.slice(1) : cleaned;
+
+  if (!/^\d*(\.\d*)?$/.test(unsigned) || unsigned === "." || unsigned.length === 0) {
+    return { ok: false, message: "Use digits and at most one decimal point." };
+  }
+
+  const [whole = "", fraction = ""] = unsigned.split(".");
+  if (fraction.length > 2) {
+    return { ok: false, message: "Rupees have at most two decimal places." };
+  }
+  const paise = `${whole === "" ? "0" : whole}${fraction.padEnd(2, "0")}`;
+  // `BigInt` normalizes leading zeroes, so "0050" and "50" produce the same string.
+  const value = BigInt(paise);
+  return { ok: true, paise: (negative ? -value : value).toString() };
+}
+
+/** `"123450"` → `"1234.50"` — the editable form of a stored amount, for a pre-filled field. */
+export function toRupeeInput(paise: string): string {
+  const value = BigInt(paise);
+  const negative = value < 0n;
+  const absolute = negative ? -value : value;
+  return `${negative ? "-" : ""}${absolute / 100n}.${(absolute % 100n).toString().padStart(2, "0")}`;
+}
+
+/** Sums exact paise strings. Used only to echo what a form's fields add up to, never a ledger figure. */
+export function sumPaise(values: readonly string[]): string {
+  return values.reduce((total, value) => total + BigInt(value), 0n).toString();
+}
+
+/** Compares two exact paise strings: -1, 0 or 1. No `Number` conversion at any magnitude. */
+export function comparePaise(a: string, b: string): -1 | 0 | 1 {
+  const left = BigInt(a);
+  const right = BigInt(b);
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** `true` when the exact paise string is zero — never `parseInt(value) === 0`. */
+export function isZeroPaise(value: string): boolean {
+  return BigInt(value) === 0n;
+}

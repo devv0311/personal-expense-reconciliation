@@ -5,7 +5,7 @@
 > Both older files and their historical references remain valid. New references must use
 > the title or full linked filename; a bare 0017/0018 in older code/docs means integration
 > tests/manual-note semantics respectively. Do not substitute one for the other or overwrite
-> either file. Future new ADRs continue after the highest existing number (currently 0047).
+> either file. Future new ADRs continue after the highest existing number (currently 0049).
 
 This directory records non-trivial technical and domain decisions and why they were made, so
 future sessions (human or Claude) don't silently re-litigate or accidentally reverse them.
@@ -85,3 +85,5 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0045](0045-item-refund-allocation-is-rebuilt-not-decremented.md)       | The item-refund allocation is rebuilt from recorded facts, never decremented    | Accepted                                                     |
 | [0046](0046-splitwise-audit-findings-and-external-read-completeness.md) | Splitwise auditing: durable findings, earned attribution, an honest read        | Accepted                                                     |
 | [0047](0047-proof-packs-are-a-derived-read-not-a-second-ledger.md)      | A proof pack is a derived read, redacted and fail-closed, never a second ledger | Accepted                                                     |
+| [0048](0048-phase-21-ui-reads-the-ledger-and-never-recomputes-it.md)    | The Phase 21 UI reads the ledger; it never recomputes it                        | Accepted                                                     |
+| [0049](0049-keyboard-first-navigation-never-completes-a-decision.md)    | Keyboard-first navigation; a shortcut never completes a decision                | Accepted                                                     |

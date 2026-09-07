@@ -236,6 +236,31 @@ export function optionalMinorUnitsField(
   return BigInt(value);
 }
 
+/**
+ * A JSON body field carrying **signed** minor units, distinguishing absent from explicit null.
+ *
+ * Separate from {@link optionalMinorUnitsField} because a statement balance is the one money
+ * field in this system that is legitimately negative: an overdraft is a real balance, and
+ * ADR-0017 (cash balance) is explicit that nothing is clamped. Every other money field on the
+ * wire is a magnitude, so the non-negative parser stays the default and this is opted into.
+ */
+export function optionalSignedMinorUnitsField(
+  body: Record<string, unknown>,
+  field: string,
+): bigint | null | undefined {
+  if (!(field in body)) return undefined;
+  const value = body[field];
+  if (value === null) return null;
+  if (typeof value !== 'string' || !/^-?\d+$/.test(value)) {
+    throw new ApiRequestError(
+      `"${field}" must be an integer count of minor units as a decimal string (a leading "-" ` +
+        'is allowed, for an overdrawn balance), or null.',
+      field,
+    );
+  }
+  return BigInt(value);
+}
+
 /** A required JSON body field carrying minor units — no "absent" or "null" reading. */
 export function requireMinorUnitsField(body: Record<string, unknown>, field: string): bigint {
   const value = optionalMinorUnitsField(body, field);

@@ -198,9 +198,39 @@ for the user themselves is a 409, an unknown or archived recipient a 404. If red
 identifier the boundary refuses to export, the whole pack fails closed with a `500
 PAYLOAD_NOT_SANITIZED` rather than returning a partially-redacted body.
 
+**Phase 21 (ADR-0048) added** four reads and one request field, and deliberately nothing else.
+The UI needed figures that had no HTTP surface, and the decision was that the _read_ comes here
+rather than the arithmetic going into the browser:
+
+- `GET /api/accounts` — the account roster a per-account waterfall names, so a screen shows
+  "HDFC Savings · ends 4821" rather than a UUID. `last4` is the only identifying fragment the
+  schema stores at all.
+- `GET /api/expenses/:expenseId` — one row of the existing ledger listing, implemented as that
+  listing with an id filter, so a detail screen and the row that linked to it can never quote two
+  different `netAmount`s. 404 for an unknown id, 400 for a non-UUID.
+- `GET /api/reconciliation/runs/:id/account-snapshots` — ADR-0017 (cash balance)'s second
+  identity per account, exactly as `runReconciliation` stored it: evidenced boundaries, gross
+  debit/credit totals, the internal-transfer and explained/unexplained subsets, the expected
+  closing balance, the signed delta, the verification status and the discrepancies. A run with
+  no snapshots returns an empty list, which is **not** the same fact as a zero delta; an unknown
+  run is a 404.
+- `GET /api/evidence/:evidenceId/observation` — the recorded structured reading of one document,
+  or `null`. Added because the only way to obtain one was to re-run the matcher (a `POST`),
+  which is the wrong verb for opening an inspector.
+- `accountBoundaries` on `POST /api/reconciliation/runs` — `[{ accountId, openingBalance?,
+openingBalanceEvidenceId?, closingBalance?, closingBalanceEvidenceId? }]`. Balances are
+  **signed** minor-unit decimal strings, because an overdraft is a real balance and ADR-0017
+  clamps nothing. Three refusals are the point: an **empty array** is a 400 (it reads like a
+  claim about accounts it does not name, where omitting the field says nothing has been
+  confirmed), a **balance with no evidence id** is a 400 (17.5 — "a balance with no evidence is
+  a number somebody typed"), and **two entries for one account** is a 400. Omit an account and
+  its snapshot comes back honestly `incomplete` rather than closing at a cosmetic zero.
+
 **Not implemented:** auth, and re-sync routes for a `stale`
-`SplitwiseExpense`/`SplitwiseSettlement` (deliberately deferred past phases 14, 15 and 19 —
-ADR-0040/0041/0046: drift is now detected, attributed and reviewable; acting on it against
-Splitwise is a separate write capability). Resolving a `ReconciliationDiscrepancy` on a
-`ReconciliationRun` also has no route; phase 19's reviewable record is the audit finding. A
-proof pack has no send/copy/share route — that deliberate step is Phase 21's UI (ADR-0047).
+`SplitwiseExpense`/`SplitwiseSettlement` (deliberately deferred past phases 14, 15, 19 and 21 —
+ADR-0040/0041/0046: drift is now detected, attributed, reviewable and reviewed through a real
+UI; acting on it against Splitwise is a separate write capability). Resolving a
+`ReconciliationDiscrepancy` on a `ReconciliationRun` also has no route; phase 19's reviewable
+record is the audit finding. A proof pack still has no send route: Phase 21 added the deliberate
+copy/export review as a UI step, and copying text to a clipboard reaches no external system
+(ADR-0047).
