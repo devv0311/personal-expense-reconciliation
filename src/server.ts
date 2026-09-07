@@ -7,18 +7,26 @@
  * hand it to `createApi(deps).handle`, and stream the result back. `router.ts`'s `API_ROUTES`
  * remains the only table of what exists; nothing here adds a second routing concept.
  *
- * `ai`/`splitwise` are unconfigured stubs, defined here rather than under `src/ai` or
- * `src/integrations/splitwise` — neither of those modules ships an adapter (ADR-0025, ADR-0040),
- * and this file staying honest about that (never a real Splitwise/AI call) matters more than
- * making local development slightly more convenient. `web/`'s reconciliation, balances and
- * ledger screens never exercise either path.
+ * **This file is the composition root, and the one place that decides what is configured.**
+ * Two external providers can now be wired, and each is wired only when its credentials are
+ * present. Absent, the corresponding stub *refuses by name* rather than degrading quietly —
+ * an unconfigured Splitwise that resolved empty would report "connected, nothing owed", and an
+ * unconfigured model that returned a default would put a guess in the review queue with a
+ * model's name on it. Both would be worse than the failure they replace.
  *
  * Run with `npx tsx src/server.ts` (or the compiled `dist/server.js`). Env vars:
- * `PORT` (default 4000), `DATABASE_URL` (a real Postgres connection string — unset falls back
- * to PGlite persisted at `PGLITE_DATA_DIR`, default `./local-data/pglite-dev`, rather than the
- * test suite's pure in-memory instance, so data survives a restart and `scripts/seed-dev-data.ts`
- * can populate the same database this process serves), `EVIDENCE_STORAGE_PATH` (default
- * `./local-data/evidence`).
+ *
+ * | Variable | Effect |
+ * | --- | --- |
+ * | `PORT` | Listen port; default 4000. |
+ * | `HOST` | Bind address; default `127.0.0.1` (loopback only). |
+ * | `DATABASE_URL` | A real Postgres connection string. Unset falls back to PGlite persisted at `PGLITE_DATA_DIR` (default `./local-data/pglite-dev`), rather than the test suite's in-memory instance, so data survives a restart and `scripts/seed-dev-data.ts` populates the same database this process serves. |
+ * | `EVIDENCE_STORAGE_PATH` | Where documents are written; default `./local-data/evidence`. |
+ * | `ANTHROPIC_API_KEY` | Wires the real model transport. Unset: every AI operation refuses, naming the missing configuration. |
+ * | `ANTHROPIC_MODEL` | Overrides the default model. |
+ * | `SPLITWISE_API_KEY` + `SPLITWISE_USER_ID` | Wires the real Splitwise adapter. Either missing: every Splitwise call refuses, and an audit records an INCOMPLETE check rather than agreement. |
+ * | `AUTH_REQUIRED` | `true`/`false`. Defaults to **true** unless `HOST` is loopback, so binding to a network interface is authenticated by default and turning that off is an explicit act. |
+ * | `CORS_ORIGIN` | `web/`'s origin; default `http://localhost:3000`. |
  */
 
 import { createServer } from 'node:http';
@@ -31,7 +39,9 @@ import { createAiService } from './ai/index.js';
 import type { ModelTransport } from './ai/index.js';
 import { createPgliteDatabase, createPostgresDatabase } from './db/index.js';
 import type { DatabaseHandle } from './db/index.js';
+import { createAnthropicTransport } from './integrations/anthropic/index.js';
 import { createFilesystemEvidenceStore } from './integrations/evidence-store/index.js';
+import { createSplitwiseAdapter } from './integrations/splitwise/index.js';
 import type {
   CreateSplitwiseExpenseResult,
   RecordSplitwisePaymentResult,
@@ -40,9 +50,28 @@ import type {
 } from './integrations/splitwise/index.js';
 
 const PORT = Number.parseInt(process.env.PORT ?? '4000', 10);
+/** Loopback by default: this process serves one person's financial history to one machine. */
+const HOST = process.env.HOST ?? '127.0.0.1';
 const EVIDENCE_STORAGE_PATH = process.env.EVIDENCE_STORAGE_PATH ?? './local-data/evidence';
 /** `web/`'s dev origin — this API and its UI are two separate processes (ADR-0042). */
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000';
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+
+/**
+ * Whether to enforce authentication.
+ *
+ * Defaults to **on** for any bind that is not loopback: the moment this listens on an
+ * interface something else can reach, the absence of a session check is a person's whole
+ * financial history served to whoever asks (audit row 50). Turning it off is possible — a
+ * purely local run genuinely does not need it — but it has to be typed out.
+ */
+function resolveAuthRequired(): boolean {
+  const configured = process.env.AUTH_REQUIRED;
+  if (configured === 'true') return true;
+  if (configured === 'false') return false;
+  return !LOOPBACK_HOSTS.has(HOST);
+}
 
 /**
  * A real Postgres server given `DATABASE_URL`; otherwise PGlite persisted on disk at
@@ -59,27 +88,52 @@ async function openDevDatabase(): Promise<DatabaseHandle> {
   return createPgliteDatabase(dataDir);
 }
 
-/** No AI provider is wired anywhere in this repository (ADR-0025) — this call never succeeds. */
+/**
+ * The transport when `ANTHROPIC_API_KEY` is unset — every call refuses, by name.
+ *
+ * Deliberately not a fallback that returns something: a default proposal would enter the
+ * review queue carrying a model's name, and the whole point of `ai-boundary.md` is that a
+ * proposal says truthfully what produced it.
+ */
 const UNCONFIGURED_MODEL_TRANSPORT: ModelTransport = {
   modelInfo: { provider: 'none', model: 'unconfigured' },
   complete(): Promise<unknown> {
     return Promise.reject(
       new Error(
-        'No AI provider is configured (ADR-0025). src/server.ts ships no adapter — wiring one ' +
-          'is a later, deliberate decision, per CLAUDE.md.',
+        'No AI provider is configured. Set ANTHROPIC_API_KEY (see .env.example and ' +
+          'docs/architecture/ai-boundary.md) and restart. Every payment can still be ' +
+          'classified by hand from the payment workspace, and every receipt itemized by hand.',
       ),
     );
   },
 };
 
-/** No Splitwise adapter is wired anywhere in this repository (ADR-0040) — every call rejects. */
+/** The real transport when a key is present; the refusing stub when it is not. */
+function resolveModelTransport(): ModelTransport {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (apiKey === undefined || apiKey.trim().length === 0) return UNCONFIGURED_MODEL_TRANSPORT;
+  const model = process.env.ANTHROPIC_MODEL;
+  return createAnthropicTransport({
+    apiKey: apiKey.trim(),
+    ...(model === undefined || model.trim().length === 0 ? {} : { model: model.trim() }),
+  });
+}
+
+/**
+ * The port when Splitwise credentials are absent — every call rejects.
+ *
+ * The refusal is the feature. `services.runReconciliation` catches a failed read and surfaces
+ * it as a discrepancy; `services.runSplitwiseAudit` records the audit as a **failed** external
+ * read rather than a clean one. Resolving empty here would turn "we could not look" into
+ * "we looked and everything agreed", which is the exact misreport ADR-0046 exists to prevent.
+ */
 function createUnconfiguredSplitwisePort(): SplitwisePort {
   const notConfigured = (operation: string): Promise<never> =>
     Promise.reject(
       new Error(
-        `Splitwise.${operation} is not configured in this environment (ADR-0040). No real ` +
-          'adapter is wired anywhere in this repository — CLAUDE.md forbids connecting one ' +
-          'during development.',
+        `Splitwise.${operation} is not configured in this environment. Set SPLITWISE_API_KEY ` +
+          'and SPLITWISE_USER_ID (see .env.example) to compare against a real account. Until ' +
+          'then an audit reports an incomplete check, never agreement (ADR-0046).',
       ),
     );
 
@@ -98,15 +152,40 @@ function createUnconfiguredSplitwisePort(): SplitwisePort {
   };
 }
 
+/**
+ * The real adapter when both credentials are present; the refusing stub otherwise.
+ *
+ * Both, because either alone cannot work: the key authenticates, and the user id is which
+ * account it authenticates *as* — the value every balance comparison is expressed relative to.
+ */
+function resolveSplitwisePort(): SplitwisePort {
+  const apiKey = process.env.SPLITWISE_API_KEY?.trim();
+  const connectedSplitwiseUserId = process.env.SPLITWISE_USER_ID?.trim();
+  if (
+    apiKey === undefined ||
+    apiKey.length === 0 ||
+    connectedSplitwiseUserId === undefined ||
+    connectedSplitwiseUserId.length === 0
+  ) {
+    return createUnconfiguredSplitwisePort();
+  }
+  return createSplitwiseAdapter({ apiKey, connectedSplitwiseUserId });
+}
+
 async function main(): Promise<void> {
   const database = await openDevDatabase();
   await database.migrate();
 
+  const transport = resolveModelTransport();
+  const splitwise = resolveSplitwisePort();
+  const authRequired = resolveAuthRequired();
+
   const deps: ApiDependencies = {
     db: database.db,
-    ai: createAiService(UNCONFIGURED_MODEL_TRANSPORT),
+    ai: createAiService(transport),
     evidenceStore: createFilesystemEvidenceStore({ root: EVIDENCE_STORAGE_PATH }),
-    splitwise: createUnconfiguredSplitwisePort(),
+    splitwise,
+    authRequired,
   };
   const api = createApi(deps);
 
@@ -152,8 +231,26 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
 
-  server.listen(PORT, () => {
-    console.log(`API listening on http://localhost:${PORT}`);
+  server.listen(PORT, HOST, () => {
+    // Says plainly what is and is not wired. A person reading this line should be able to
+    // tell, without opening a screen, whether a classification run will reach a model and
+    // whether a Splitwise audit will reach Splitwise.
+    console.log(`API listening on http://${HOST}:${PORT}`);
+    console.log(`  authentication: ${authRequired ? 'required' : 'NOT required (local only)'}`);
+    console.log(`  model provider: ${transport.modelInfo.provider}/${transport.modelInfo.model}`);
+    console.log(
+      `  splitwise:      ${
+        process.env.SPLITWISE_API_KEY === undefined || process.env.SPLITWISE_API_KEY.trim() === ''
+          ? 'not configured (audits will report an incomplete check)'
+          : 'configured'
+      }`,
+    );
+    if (!authRequired && !LOOPBACK_HOSTS.has(HOST)) {
+      console.warn(
+        `  WARNING: bound to ${HOST} with authentication disabled. Anything that can reach ` +
+          'this port can read and write the whole ledger.',
+      );
+    }
   });
 }
 

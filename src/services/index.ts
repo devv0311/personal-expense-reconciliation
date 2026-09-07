@@ -38,6 +38,8 @@ export * from './people-service.js';
 export * from './account-service.js';
 export * from './master-data-service.js';
 export * from './payment-workspace-service.js';
+export * from './history-service.js';
+export * from './session-service.js';
 
 /**
  * The two handles every service call needs, re-exported so a caller — `src/api`, a future

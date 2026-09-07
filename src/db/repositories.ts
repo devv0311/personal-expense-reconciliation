@@ -13,6 +13,7 @@
  */
 
 import { and, asc, desc, eq, exists, inArray, isNull, not, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import type {
@@ -334,12 +335,94 @@ export interface ListExpensesFilter {
    * `netAmount` here can never disagree with `netAmount` in the list beside it.
    */
   readonly expenseId?: ExpenseId;
+  /**
+   * Case-insensitive substring of the description or category.
+   *
+   * Server-side on purpose. Audit row 32 recorded the failure this closes: the ledger loaded
+   * the 200 newest rows and searched those in the browser, so an older expense was simply
+   * invisible and the result count said nothing about the ledger.
+   */
+  readonly search?: string;
+  readonly category?: string;
+  readonly occurredFrom?: Date;
+  /** Exclusive, matching every other period boundary in this system. */
+  readonly occurredTo?: Date;
+  /** Only expenses whose current allocation names this person or a group they were in. */
+  readonly beneficiaryPersonId?: PersonId;
+  /** Only expenses that still have no current allocation — the "who benefited?" backlog. */
+  readonly withoutAllocation?: boolean;
   /** Defaults to `DEFAULT_EXPENSE_LEDGER_LIMIT`; a listing is bounded even with no filter. */
   readonly limit?: number;
+  readonly offset?: number;
+}
+
+/** Builds the `WHERE` fragments shared by {@link listExpenses} and {@link countExpenses}. */
+function expenseLedgerConditions(filter: ListExpensesFilter): SQL[] {
+  const conditions: SQL[] = [];
+  if (filter.state !== undefined) conditions.push(eq(expenses.state, filter.state));
+  if (filter.paidByPersonId !== undefined) {
+    conditions.push(eq(expenses.paidByPersonId, filter.paidByPersonId));
+  }
+  if (filter.expenseId !== undefined) conditions.push(eq(expenses.id, filter.expenseId));
+  if (filter.category !== undefined) conditions.push(eq(expenses.category, filter.category));
+  if (filter.occurredFrom !== undefined) {
+    conditions.push(sql`${expenses.occurredAt} >= ${filter.occurredFrom}`);
+  }
+  if (filter.occurredTo !== undefined) {
+    conditions.push(sql`${expenses.occurredAt} < ${filter.occurredTo}`);
+  }
+  if (filter.search !== undefined && filter.search.trim().length > 0) {
+    const pattern = `%${filter.search.trim()}%`;
+    conditions.push(
+      sql`(${expenses.description} ilike ${pattern} or ${expenses.category} ilike ${pattern})`,
+    );
+  }
+  if (filter.withoutAllocation === true) {
+    conditions.push(
+      sql`not exists (
+        select 1 from ${allocations}
+        where ${allocations.expenseId} = ${expenses.id}
+          and ${allocations.supersededAt} is null
+      )`,
+    );
+  }
+  if (filter.beneficiaryPersonId !== undefined) {
+    // A person benefits either through a `person` line or through a `group` line's
+    // snapshotted expansion — both, because ADR-0009 makes the expansion the authoritative
+    // per-person share of a group line and looking only at direct lines would hide every
+    // flat expense from the person who owes for it.
+    conditions.push(
+      sql`exists (
+        select 1 from ${allocations}
+        join ${allocationLines} on ${allocationLines.allocationId} = ${allocations.id}
+        left join ${allocationLineGroupExpansions}
+          on ${allocationLineGroupExpansions.allocationLineId} = ${allocationLines.id}
+        where ${allocations.expenseId} = ${expenses.id}
+          and ${allocations.supersededAt} is null
+          and (
+            (${allocationLines.beneficiaryType} = 'person'
+              and ${allocationLines.beneficiaryId} = ${filter.beneficiaryPersonId})
+            or ${allocationLineGroupExpansions.personId} = ${filter.beneficiaryPersonId}
+          )
+      )`,
+    );
+  }
+  return conditions;
+}
+
+/** How many expenses match a filter across the whole ledger, not just the page. */
+export async function countExpenses(
+  exec: Executor,
+  filter: ListExpensesFilter = {},
+): Promise<number> {
+  const conditions = expenseLedgerConditions(filter);
+  const query = exec.select({ total: sql<number>`count(*)::int` }).from(expenses);
+  const [row] = await (conditions.length === 0 ? query : query.where(and(...conditions)));
+  return Number(row?.total ?? 0);
 }
 
 /** No filter narrows an unbounded table to a safe size on its own — this does. */
-const DEFAULT_EXPENSE_LEDGER_LIMIT = 200;
+export const DEFAULT_EXPENSE_LEDGER_LIMIT = 200;
 
 /**
  * The expense ledger, newest `occurred_at` first (`docs/roadmap.md` phase 13: "querying/
@@ -355,12 +438,7 @@ export async function listExpenses(
   exec: Executor,
   filter: ListExpensesFilter = {},
 ): Promise<ExpenseLedgerRow[]> {
-  const conditions = [];
-  if (filter.state !== undefined) conditions.push(eq(expenses.state, filter.state));
-  if (filter.paidByPersonId !== undefined) {
-    conditions.push(eq(expenses.paidByPersonId, filter.paidByPersonId));
-  }
-  if (filter.expenseId !== undefined) conditions.push(eq(expenses.id, filter.expenseId));
+  const conditions = expenseLedgerConditions(filter);
 
   const rows = await exec
     .select({
@@ -377,7 +455,8 @@ export async function listExpenses(
     .from(expenses)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(expenses.occurredAt), asc(expenses.id))
-    .limit(filter.limit ?? DEFAULT_EXPENSE_LEDGER_LIMIT);
+    .limit(filter.limit ?? DEFAULT_EXPENSE_LEDGER_LIMIT)
+    .offset(filter.offset ?? 0);
 
   if (rows.length === 0) return [];
 

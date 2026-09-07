@@ -16,6 +16,7 @@
  * does have is written down at `API_ROUTES`.
  */
 
+import { resolveSession } from '../services/index.js';
 import type { AiService, Database, EvidenceStore, SplitwisePort } from '../services/index.js';
 
 import { getAccountsRoute } from './account-routes.js';
@@ -49,6 +50,12 @@ import {
   postExpenseItemsCorrection,
 } from './expense-authoring-routes.js';
 import { getExpenseItemsRoute, postExpenseItems } from './expense-item-routes.js';
+import {
+  getAuditTrailRoute,
+  getEvidenceLibraryRoute,
+  getExpenseHistoryRoute,
+  getPaymentHistoryRoute,
+} from './history-routes.js';
 import {
   getCounterpartyOptionsRoute,
   getImportBatchRoute,
@@ -100,6 +107,13 @@ import {
   postPaymentDuplicateDecision,
   postPaymentReclassification,
 } from './review-routes.js';
+import {
+  getSessionRoute,
+  postSetPassword,
+  postSignIn,
+  postSignOut,
+  readSessionToken,
+} from './session-routes.js';
 import { getSettlementsRoute, postSettlement } from './settlement-routes.js';
 import {
   getSplitwiseAuditFindingRoute,
@@ -119,12 +133,23 @@ import {
 /** What the handlers need. Injected, so nothing in `src/api` reaches for a connection. */
 export interface ApiDependencies {
   readonly db: Database;
-  /** Used by re-classification only; every other route is a read or a decision. */
+  /** Used by classification and receipt extraction; every other route is a read or a decision. */
   readonly ai: AiService;
   /** Where documents live, which is deliberately not the database (`security-model.md`). */
   readonly evidenceStore: EvidenceStore;
-  /** No concrete adapter is wired yet (ADR-0025's precedent) — a test injects a mock. */
+  /** A real adapter when one is configured; a rejecting stub otherwise (ADR-0040). */
   readonly splitwise: SplitwisePort;
+  /**
+   * Whether this process refuses unauthenticated requests (audit row 50).
+   *
+   * Optional here, and **off** when omitted — deliberately. `src/api` is a route table; it has
+   * no idea whether it is behind a loopback socket, a reverse proxy, or nothing at all, so it
+   * has no business holding an opinion about when a lock is needed. The process that binds the
+   * socket does: `src/server.ts` sets this, and defaults it to **on** for any bind that is not
+   * loopback. A test that constructs `createApi` directly is exercising the routes, not the
+   * door, and gets the door open.
+   */
+  readonly authRequired?: boolean;
 }
 
 export type RouteParams = Readonly<Record<string, string>>;
@@ -141,6 +166,19 @@ export interface ApiRoute {
   readonly path: string;
   readonly handler: RouteHandler;
 }
+
+/**
+ * Establishing and ending a session (audit row 50).
+ *
+ * The only routes {@link requiresSession} exempts, for the obvious reason: a sign-in that
+ * required a session could never be reached.
+ */
+export const SESSION_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/session', handler: getSessionRoute },
+  { method: 'POST', path: '/api/session', handler: postSignIn },
+  { method: 'POST', path: '/api/session/end', handler: postSignOut },
+  { method: 'POST', path: '/api/session/password', handler: postSetPassword },
+];
 
 export const REVIEW_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/review', handler: getReviewQueue },
@@ -170,6 +208,7 @@ export const REVIEW_ROUTES: readonly ApiRoute[] = [
  * and its children, which would otherwise read the literal segments as ids.
  */
 export const EVIDENCE_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/evidence', handler: getEvidenceLibraryRoute },
   { method: 'POST', path: '/api/evidence/files', handler: postEvidenceFile },
   { method: 'POST', path: '/api/evidence/notes', handler: postEvidenceNote },
   { method: 'POST', path: '/api/evidence/notifications', handler: postEvidenceNotification },
@@ -223,6 +262,7 @@ export const ALLOCATION_ROUTES: readonly ApiRoute[] = [
   },
   { method: 'POST', path: '/api/expenses/:expenseId/payment-links', handler: postExpenseFunding },
   { method: 'GET', path: '/api/expenses/:expenseId/items', handler: getExpenseItemsRoute },
+  { method: 'GET', path: '/api/expenses/:expenseId/history', handler: getExpenseHistoryRoute },
   { method: 'POST', path: '/api/expenses/:expenseId/allocation', handler: postAllocation },
   {
     method: 'POST',
@@ -289,7 +329,17 @@ export const PAYMENT_WORKSPACE_ROUTES: readonly ApiRoute[] = [
     path: '/api/payments/:paymentId/cash-flow/:step',
     handler: postCashFlowDecision,
   },
+  { method: 'GET', path: '/api/payments/:paymentId/history', handler: getPaymentHistoryRoute },
   { method: 'GET', path: '/api/payments/:paymentId', handler: getPaymentRoute },
+];
+
+/**
+ * The append-only audit log, over any record that has one (audit row 33).
+ *
+ * A read of `audit_events`, which has no update or delete path anywhere in this repository.
+ */
+export const AUDIT_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/audit/:entityType/:entityId', handler: getAuditTrailRoute },
 ];
 
 /**
@@ -429,6 +479,7 @@ export const SPLITWISE_AUDIT_ROUTES: readonly ApiRoute[] = [
  * every verb rather than only for the ones that happen to be registered first.
  */
 export const API_ROUTES: readonly ApiRoute[] = [
+  ...SESSION_ROUTES,
   ...REVIEW_ROUTES,
   ...EVIDENCE_ROUTES,
   ...RECEIPT_ROUTES,
@@ -437,6 +488,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...PAYMENT_CONTEXT_ROUTES,
   ...IMPORT_ROUTES,
   ...PAYMENT_WORKSPACE_ROUTES,
+  ...AUDIT_ROUTES,
   ...EXPENSE_LEDGER_ROUTES,
   ...BALANCE_ROUTES,
   ...PEOPLE_ROUTES,
@@ -448,6 +500,16 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...SPLITWISE_AUDIT_ROUTES,
   ...RECONCILIATION_ROUTES,
 ];
+
+/**
+ * The paths reachable without a session.
+ *
+ * A closed set, listed rather than pattern-matched: every other route in the table is
+ * protected, and adding one is protected by default. That is the direction a mistake here
+ * should fail in — a new route accidentally left public is a leak of somebody's financial
+ * history, while a new route accidentally protected is a 401 somebody notices in a minute.
+ */
+const PUBLIC_PATHS: ReadonlySet<string> = new Set(SESSION_ROUTES.map((route) => route.path));
 
 export interface Api {
   readonly routes: readonly ApiRoute[];
@@ -486,6 +548,22 @@ export function createApi(deps: ApiDependencies): Api {
             candidate.route.path === owner && candidate.route.method === request.method,
         );
         if (match !== undefined) {
+          // The door, before the route (audit row 50). Deliberately here rather than in each
+          // handler: a check every handler has to remember is a check one of them eventually
+          // will not, and what is behind these routes is a person's entire financial history.
+          if (deps.authRequired === true && !PUBLIC_PATHS.has(match.route.path)) {
+            const identity = await resolveSession(deps.db, readSessionToken(request));
+            if (identity === null) {
+              return jsonResponse(401, {
+                error: {
+                  code: 'NOT_AUTHENTICATED',
+                  message:
+                    'This ledger requires a session. Sign in at POST /api/session, or set a ' +
+                    'password first at POST /api/session/password.',
+                },
+              });
+            }
+          }
           return await match.route.handler(deps, request, match.params);
         }
 

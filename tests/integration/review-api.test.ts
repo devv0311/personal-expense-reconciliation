@@ -504,10 +504,15 @@ describe('the surface itself', () => {
 
   it('exposes its route table, so a Next.js mount is mechanical', () => {
     expect(api.routes.map((route) => `${route.method} ${route.path}`)).toEqual([
+      'GET /api/session',
+      'POST /api/session',
+      'POST /api/session/end',
+      'POST /api/session/password',
       'GET /api/review',
       'POST /api/review/inferences/:inferenceId/decision',
       'POST /api/review/payments/:paymentId/reclassify',
       'POST /api/review/payments/:paymentId/duplicate',
+      'GET /api/evidence',
       'POST /api/evidence/files',
       'POST /api/evidence/notes',
       'POST /api/evidence/notifications',
@@ -528,6 +533,7 @@ describe('the surface itself', () => {
       'GET /api/expenses/:expenseId/payment-links',
       'POST /api/expenses/:expenseId/payment-links',
       'GET /api/expenses/:expenseId/items',
+      'GET /api/expenses/:expenseId/history',
       'POST /api/expenses/:expenseId/allocation',
       'POST /api/expenses/:expenseId/adjustments/distribute',
       'POST /api/expenses/:expenseId/adjustments',
@@ -545,7 +551,9 @@ describe('the surface itself', () => {
       'POST /api/payments',
       'POST /api/payments/:paymentId/counterparty',
       'POST /api/payments/:paymentId/cash-flow/:step',
+      'GET /api/payments/:paymentId/history',
       'GET /api/payments/:paymentId',
+      'GET /api/audit/:entityType/:entityId',
       'GET /api/expenses',
       'POST /api/expenses',
       'GET /api/expenses/:expenseId',

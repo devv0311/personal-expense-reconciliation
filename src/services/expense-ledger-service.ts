@@ -7,7 +7,11 @@
  * depends on `src/services`, never `src/db`, directly (`system-architecture.md`, Layering).
  */
 
-import { listExpenses as dbListExpenses } from '../db/index.js';
+import {
+  DEFAULT_EXPENSE_LEDGER_LIMIT,
+  countExpenses,
+  listExpenses as dbListExpenses,
+} from '../db/index.js';
 import type { Executor, ExpenseLedgerRow, ListExpensesFilter } from '../db/index.js';
 import type { ExpenseId } from '../domain/index.js';
 
@@ -18,6 +22,36 @@ export async function listExpenses(
   filter: ListExpensesFilter = {},
 ): Promise<readonly ExpenseLedgerRow[]> {
   return dbListExpenses(db, filter);
+}
+
+export interface ExpenseLedgerPage {
+  readonly expenses: readonly ExpenseLedgerRow[];
+  /**
+   * How many expenses match the filter across the whole ledger.
+   *
+   * Audit row 32: *"The displayed count is the loaded subset, not a guaranteed full-ledger
+   * count."* A surface that shows "12 of 480" is telling the truth; one that shows "12" over
+   * a 200-row window is not.
+   */
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+/** One page of the ledger, with the full-ledger total beside it. */
+export async function listExpensePage(
+  db: Executor,
+  filter: ListExpensesFilter = {},
+): Promise<ExpenseLedgerPage> {
+  // The same bound `db.listExpenses` has always applied when no caller states one, so adding
+  // paging changes what a page *says* about itself, never how much it returns by default.
+  const limit = filter.limit ?? DEFAULT_EXPENSE_LEDGER_LIMIT;
+  const offset = filter.offset ?? 0;
+  const [expenses, total] = await Promise.all([
+    dbListExpenses(db, { ...filter, limit, offset }),
+    countExpenses(db, filter),
+  ]);
+  return { expenses, total, limit, offset };
 }
 
 /**

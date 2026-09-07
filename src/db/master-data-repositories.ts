@@ -22,6 +22,7 @@ import type {
   GroupMembershipId,
   MerchantId,
   PersonId,
+  SessionId,
   UserId,
 } from '../domain/ids.js';
 
@@ -35,6 +36,8 @@ import {
   merchantAliases,
   merchants,
   people,
+  sessions,
+  users,
 } from './schema.js';
 
 /* ============================================================================== people */
@@ -569,4 +572,135 @@ export async function countExpensesPerOccasion(
     counts.set(row.occasionId as ExpenseOccasionId, Number(row.count));
   }
   return counts;
+}
+
+/* =========================================================================== sessions */
+
+export interface UserAccountRow {
+  readonly id: UserId;
+  readonly email: string;
+  readonly personId: PersonId;
+  readonly displayName: string;
+  readonly passwordHash: string | null;
+}
+
+/** One account by email, for sign-in. Email is stored lowercased by the service. */
+export async function getUserByEmail(
+  exec: Executor,
+  email: string,
+): Promise<UserAccountRow | null> {
+  const [row] = await exec
+    .select({
+      id: users.id,
+      email: users.email,
+      personId: users.personId,
+      displayName: people.displayName,
+      passwordHash: users.passwordHash,
+    })
+    .from(users)
+    .innerJoin(people, eq(people.id, users.personId))
+    .where(eq(users.email, email));
+  return row === undefined
+    ? null
+    : { ...row, id: row.id as UserId, personId: row.personId as PersonId };
+}
+
+/** One account by id — the ledger user's own row, for a first-run check. */
+export async function getUserById(exec: Executor, userId: UserId): Promise<UserAccountRow | null> {
+  const [row] = await exec
+    .select({
+      id: users.id,
+      email: users.email,
+      personId: users.personId,
+      displayName: people.displayName,
+      passwordHash: users.passwordHash,
+    })
+    .from(users)
+    .innerJoin(people, eq(people.id, users.personId))
+    .where(eq(users.id, userId));
+  return row === undefined
+    ? null
+    : { ...row, id: row.id as UserId, personId: row.personId as PersonId };
+}
+
+export async function setUserPasswordHash(
+  exec: Executor,
+  userId: UserId,
+  passwordHash: string,
+): Promise<void> {
+  await exec.update(users).set({ passwordHash }).where(eq(users.id, userId));
+}
+
+export async function createSession(
+  exec: Executor,
+  draft: {
+    readonly userId: UserId;
+    readonly tokenHash: string;
+    readonly expiresAt: Date;
+  },
+): Promise<SessionId> {
+  const [row] = await exec
+    .insert(sessions)
+    .values({
+      userId: draft.userId,
+      tokenHash: draft.tokenHash,
+      expiresAt: draft.expiresAt,
+    })
+    .returning({ id: sessions.id });
+  if (row === undefined) throw new Error('Insert into sessions returned no row.');
+  return row.id as SessionId;
+}
+
+/**
+ * A live session by token hash, or `null`.
+ *
+ * Expiry and revocation are part of the query, not a check the caller might forget: a session
+ * that has lapsed simply does not exist as far as any read is concerned.
+ */
+export async function findValidSession(
+  exec: Executor,
+  tokenHash: string,
+  now: Date,
+): Promise<{
+  sessionId: SessionId;
+  userId: UserId;
+  personId: PersonId;
+  email: string;
+  displayName: string;
+} | null> {
+  const [row] = await exec
+    .select({
+      sessionId: sessions.id,
+      userId: sessions.userId,
+      personId: users.personId,
+      email: users.email,
+      displayName: people.displayName,
+    })
+    .from(sessions)
+    .innerJoin(users, eq(users.id, sessions.userId))
+    .innerJoin(people, eq(people.id, users.personId))
+    .where(
+      and(
+        eq(sessions.tokenHash, tokenHash),
+        isNull(sessions.revokedAt),
+        sql`${sessions.expiresAt} > ${now}`,
+      ),
+    );
+  return row === undefined
+    ? null
+    : {
+        sessionId: row.sessionId as SessionId,
+        userId: row.userId as UserId,
+        personId: row.personId as PersonId,
+        email: row.email,
+        displayName: row.displayName,
+      };
+}
+
+export async function touchSession(exec: Executor, sessionId: SessionId, at: Date): Promise<void> {
+  await exec.update(sessions).set({ lastSeenAt: at }).where(eq(sessions.id, sessionId));
+}
+
+export async function revokeSession(exec: Executor, tokenHash: string, at: Date): Promise<void> {
+  await exec.update(sessions).set({ revokedAt: at }).where(eq(sessions.tokenHash, tokenHash));
 }
