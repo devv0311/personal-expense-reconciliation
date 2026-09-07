@@ -71,6 +71,13 @@
       "when": 1788690261422,
       "tag": "0009_phase19_splitwise_auditing",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788778113539,
+      "tag": "0010_phase22_master_data_rules_sessions_jobs",
+      "breakpoints": true
     }
   ]
 }

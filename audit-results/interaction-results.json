@@ -1,0 +1,7 @@
+{
+  "reviewDialog": "Accept this proposal\nAccepting records your approval and lets this proposal become authoritative state — an expense with its own allocation to decide, or a settlement discharging a debt. The payment amount and narration are unchanged either way.\nReason (optional)\nCancel\nAccept",
+  "refundDialog": "Approve this distribution\nThis writes a new allocation version with the lines above, superseding the current one, and the obligations between people change accordingly. Already-recorded settlements are untouched — if a refund leaves someone overpaid, that shows up as a balance running the other way rather than as a settlement being rewritten.\n\nExpense 6b569814\n\nReason (optional)\nCancel\nApprove",
+  "copyInitiallyDisabled": true,
+  "copyEnabledAfterReview": true,
+  "postRequests": []
+}

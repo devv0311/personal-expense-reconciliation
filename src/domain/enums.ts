@@ -363,6 +363,64 @@ export type ProposedKind = (typeof AI_PROPOSED_KINDS)[number];
 export const RULE_ORIGINS = ['manual', 'promoted_from_repeated_ai_suggestion'] as const;
 export type RuleOrigin = (typeof RULE_ORIGINS)[number];
 
+/**
+ * What a standing `Rule` decides about a payment it matches.
+ *
+ * Deliberately narrow, and deliberately not "anything the AI can propose". A rule is a
+ * *deterministic* restatement of a decision its author already made ("Zerodha is always an
+ * investment"), so it may only assert facts a person could have asserted by hand from the
+ * payment row alone. Anything requiring judgement about beneficiaries or amounts stays a
+ * proposal a human reads (`ai-boundary.md`).
+ */
+export const RULE_ACTIONS = [
+  /** Sets `payments.counterparty_type` (e.g. `investment_instrument`, `internal_account`). */
+  'set_counterparty_type',
+  /** Sets `payments.cash_flow_category` through the ADR-0017 lifecycle. */
+  'set_cash_flow_category',
+  /** Proposes an expense category for the derived expense; never an amount or a split. */
+  'set_expense_category',
+] as const;
+export type RuleAction = (typeof RULE_ACTIONS)[number];
+
+/**
+ * How a matched rule's action reaches the ledger.
+ *
+ * `propose` puts it in the review queue like any other proposal. `apply` writes it with
+ * `actor = 'rule:<id>'` — permitted because the author of the rule *is* the human approver
+ * and the match is exact, never a similarity score (`payments.cash_flow_approved_by`'s own
+ * column comment names this actor shape). A rule can never be promoted from `propose` to
+ * `apply` by the system; only its author changes that.
+ */
+export const RULE_EFFECTS = ['propose', 'apply'] as const;
+export type RuleEffect = (typeof RULE_EFFECTS)[number];
+
+/**
+ * Work the system performs out of band (`system-architecture.md`, "a lightweight
+ * Postgres-backed job queue").
+ *
+ * A job never makes a financial decision. Each kind below is an *orchestration* of service
+ * calls that already refuse to write approved state without a person: importing a statement,
+ * normalizing what was imported, asking a model for proposals, or reading a receipt. What a
+ * job produces is a queue item, never an approval.
+ */
+export const JOB_KINDS = [
+  'import_bank_statement_csv',
+  'normalize_payments',
+  'classify_payments',
+  'extract_receipt',
+  'run_splitwise_audit',
+] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
+
+/**
+ * `queued -> running -> succeeded | failed`, with `failed` retryable by an explicit act.
+ *
+ * `cancelled` is terminal and only ever reached by a person: nothing here gives up on its own
+ * and quietly drops work the ledger is waiting for.
+ */
+export const JOB_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'cancelled'] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
+
 export const AUDIT_ACTIONS = ['create', 'update', 'supersede', 'delete'] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -376,6 +434,15 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[number];
  * able to attribute later, since everything extracted from that document inherits the link.
  */
 export const AUDITABLE_ENTITY_TYPES = [
+  // Master data. Onboarding writes real financial structure — an account nobody can name is
+  // an unreconcilable account, and a group membership decides who owed what — so creating or
+  // editing one is an attributable decision like any other (`invariants.md` #21).
+  'person',
+  'account',
+  'group',
+  'group_membership',
+  'import_batch',
+  'expense_occasion',
   'payment',
   'expense',
   'expense_item',

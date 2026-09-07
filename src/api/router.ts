@@ -43,6 +43,35 @@ import {
   postEvidenceNote,
 } from './evidence-routes.js';
 import { getExpenseItemsRoute, postExpenseItems } from './expense-item-routes.js';
+import {
+  getCounterpartyOptionsRoute,
+  getImportBatchRoute,
+  getImportsRoute,
+  getPaymentRoute,
+  getPaymentsRoute,
+  postBankCsvImport,
+  postCashFlowDecision,
+  postClassifyPayments,
+  postManualPayment,
+  postNormalizePayments,
+  postPaymentCounterparty,
+} from './payment-routes.js';
+import {
+  getGroupsRoute,
+  getMerchantsRoute,
+  getPeopleManagementRoute,
+  postAccount,
+  postAccountUpdate,
+  postGroup,
+  postGroupMember,
+  postGroupMembershipEnd,
+  postGroupUpdate,
+  postMerchant,
+  postMerchantAlias,
+  postMerchantUpdate,
+  postPerson,
+  postPersonUpdate,
+} from './master-data-routes.js';
 import { getExpenseRoute, getExpensesRoute } from './expense-ledger-routes.js';
 import { jsonResponse, toErrorResponse } from './http.js';
 import { getPeopleRoute } from './people-routes.js';
@@ -206,6 +235,43 @@ export const PAYMENT_CONTEXT_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/payments/:paymentId/context', handler: getPaymentContextRoute },
 ];
 
+/** Statement import and its history (`docs/roadmap.md` phase 6; audit rows 01–02). */
+export const IMPORT_ROUTES: readonly ApiRoute[] = [
+  { method: 'POST', path: '/api/imports/bank-csv', handler: postBankCsvImport },
+  { method: 'GET', path: '/api/imports', handler: getImportsRoute },
+  { method: 'GET', path: '/api/imports/:importBatchId', handler: getImportBatchRoute },
+];
+
+/**
+ * The payment workspace: every posted movement, what explains it, and the decisions a person
+ * makes about one (audit rows 02, 04–07, 36).
+ *
+ * The three literal third segments — `counterparty-options`, `normalize`, `classify` — are
+ * listed before `/api/payments/:paymentId`, which would otherwise read them as ids.
+ */
+export const PAYMENT_WORKSPACE_ROUTES: readonly ApiRoute[] = [
+  {
+    method: 'GET',
+    path: '/api/payments/counterparty-options',
+    handler: getCounterpartyOptionsRoute,
+  },
+  { method: 'POST', path: '/api/payments/normalize', handler: postNormalizePayments },
+  { method: 'POST', path: '/api/payments/classify', handler: postClassifyPayments },
+  { method: 'GET', path: '/api/payments', handler: getPaymentsRoute },
+  { method: 'POST', path: '/api/payments', handler: postManualPayment },
+  {
+    method: 'POST',
+    path: '/api/payments/:paymentId/counterparty',
+    handler: postPaymentCounterparty,
+  },
+  {
+    method: 'POST',
+    path: '/api/payments/:paymentId/cash-flow/:step',
+    handler: postCashFlowDecision,
+  },
+  { method: 'GET', path: '/api/payments/:paymentId', handler: getPaymentRoute },
+];
+
 /**
  * The expense ledger, queryable — `services.listExpenses` (`docs/roadmap.md` phase 13) — and
  * one row of it, which the phase 21 expense detail screen reads.
@@ -220,9 +286,40 @@ export const BALANCE_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/balances/:personAId/:personBId', handler: getBalanceRoute },
 ];
 
-/** The people roster `web/` renders names from — `services.listPeople` (phase 15). */
+/**
+ * The people roster `web/` renders names from — `services.listPeople` (phase 15) — and the
+ * management surface that lets a fresh installation build one (audit row 48).
+ *
+ * `/api/people/manage` is listed before nothing in particular: it is a literal path under a
+ * collection with no `:personId` GET, so no capture can swallow it. `POST /api/people/:personId`
+ * is the edit; a second POST verb on the collection would have been ambiguous.
+ */
 export const PEOPLE_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/people/manage', handler: getPeopleManagementRoute },
   { method: 'GET', path: '/api/people', handler: getPeopleRoute },
+  { method: 'POST', path: '/api/people', handler: postPerson },
+  { method: 'POST', path: '/api/people/:personId', handler: postPersonUpdate },
+];
+
+/** The merchant catalog and its aliases — what makes an unknown narration fixable by hand. */
+export const MERCHANT_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/merchants', handler: getMerchantsRoute },
+  { method: 'POST', path: '/api/merchants', handler: postMerchant },
+  { method: 'POST', path: '/api/merchants/:merchantId/aliases', handler: postMerchantAlias },
+  { method: 'POST', path: '/api/merchants/:merchantId', handler: postMerchantUpdate },
+];
+
+/** Groups and their membership stints (ADR-0009). A stint ends; it is never deleted. */
+export const GROUP_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/groups', handler: getGroupsRoute },
+  { method: 'POST', path: '/api/groups', handler: postGroup },
+  { method: 'POST', path: '/api/groups/:groupId/members', handler: postGroupMember },
+  { method: 'POST', path: '/api/groups/:groupId', handler: postGroupUpdate },
+  {
+    method: 'POST',
+    path: '/api/group-memberships/:membershipId/end',
+    handler: postGroupMembershipEnd,
+  },
 ];
 
 /**
@@ -231,6 +328,8 @@ export const PEOPLE_ROUTES: readonly ApiRoute[] = [
  */
 export const ACCOUNT_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/accounts', handler: getAccountsRoute },
+  { method: 'POST', path: '/api/accounts', handler: postAccount },
+  { method: 'POST', path: '/api/accounts/:accountId', handler: postAccountUpdate },
 ];
 
 /**
@@ -315,10 +414,14 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...ALLOCATION_ROUTES,
   ...SETTLEMENT_ROUTES,
   ...PAYMENT_CONTEXT_ROUTES,
+  ...IMPORT_ROUTES,
+  ...PAYMENT_WORKSPACE_ROUTES,
   ...EXPENSE_LEDGER_ROUTES,
   ...BALANCE_ROUTES,
   ...PEOPLE_ROUTES,
   ...ACCOUNT_ROUTES,
+  ...MERCHANT_ROUTES,
+  ...GROUP_ROUTES,
   ...PROOF_PACK_ROUTES,
   ...SPLITWISE_ROUTES,
   ...SPLITWISE_AUDIT_ROUTES,

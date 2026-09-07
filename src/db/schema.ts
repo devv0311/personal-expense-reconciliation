@@ -59,12 +59,16 @@ import {
   EXPENSE_STATES,
   EXTERNAL_INTEGRATION_STATUSES,
   EXTERNAL_INTEGRATION_TYPES,
+  JOB_KINDS,
+  JOB_STATUSES,
   PAYMENT_CHANNELS,
   PAYMENT_COUNTERPARTY_TYPES,
   PAYMENT_DIRECTIONS,
   PAYMENT_REFERENCE_TYPES,
   PAYMENT_STATES,
   RECONCILIATION_VERIFICATION_STATUSES,
+  RULE_ACTIONS,
+  RULE_EFFECTS,
   RULE_ORIGINS,
   SPLITWISE_AUDIT_FINDING_CLASSES,
   SPLITWISE_AUDIT_FINDING_KINDS,
@@ -999,14 +1003,111 @@ export const rules = pgTable(
   'rules',
   {
     id: id(),
+    /** What a person calls this rule in the list. Not an identifier. */
+    name: text('name').notNull().default(''),
     matchPattern: jsonb('match_pattern').notNull(),
     proposedClassification: jsonb('proposed_classification').notNull(),
     origin: text('origin').notNull(),
+    /** {@link RULE_ACTIONS} — what the rule asserts about a payment it matches. */
+    action: text('action').notNull().default('set_counterparty_type'),
+    /**
+     * {@link RULE_EFFECTS}. `propose` is the default and the safe one: a matched payment
+     * becomes a review-queue item. `apply` is opt-in per rule and writes with
+     * `actor = 'rule:<id>'`, which is only defensible because the match is exact and the
+     * rule's author is the human who approved it (`ai-boundary.md`).
+     */
+    effect: text('effect').notNull().default('propose'),
     active: boolean('active').notNull().default(true),
     timesApplied: integer('times_applied').notNull().default(0),
+    lastAppliedAt: timestamp('last_applied_at', { withTimezone: true }),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
-  () => [check('rules_origin_check', oneOf('origin', RULE_ORIGINS))],
+  (table) => [
+    check('rules_origin_check', oneOf('origin', RULE_ORIGINS)),
+    check('rules_action_check', oneOf('action', RULE_ACTIONS)),
+    check('rules_effect_check', oneOf('effect', RULE_EFFECTS)),
+    check(
+      'rules_pattern_shape_check',
+      sql`jsonb_typeof(${table.matchPattern}) = 'object'
+          and jsonb_typeof(${table.proposedClassification}) = 'object'`,
+    ),
+  ],
+);
+
+/* ====================================================================== sessions & jobs */
+
+/**
+ * One signed-in browser (`security-model.md`, "single-user session authentication").
+ *
+ * Only a **hash** of the session token is stored, for the same reason `users.password_hash`
+ * is a hash: this database holds a person's entire financial life, and a stolen dump must
+ * not also be a set of working credentials. `expires_at` is enforced on every read, not by a
+ * sweeper — an expired row is dead the moment it is read, whether or not anything deleted it.
+ */
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: id(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    tokenHash: text('token_hash').notNull().unique(),
+    createdAt: createdAt(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('sessions_user_idx').on(table.userId),
+    check('sessions_expiry_check', sql`${table.expiresAt} > ${table.createdAt}`),
+  ],
+);
+
+/**
+ * Out-of-band work (`system-architecture.md`'s "lightweight Postgres-backed job queue").
+ *
+ * A job is an orchestration record, never a financial one: nothing here holds an amount, and
+ * every kind it can run calls a service that already refuses to approve anything on its own.
+ * `attempts`/`last_error` exist so a failure is visible and retryable rather than silent —
+ * the same reason `import_batches` keeps a content hash.
+ */
+export const jobs = pgTable(
+  'jobs',
+  {
+    id: id(),
+    kind: text('kind').notNull(),
+    status: text('status').notNull().default('queued'),
+    /** The job's input. Never raw document bytes — those live in the evidence store. */
+    payload: jsonb('payload')
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    result: jsonb('result'),
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(3),
+    lastError: text('last_error'),
+    /** Who queued it — `'user'` or `'system'`, exactly as an `AuditEvent` actor. */
+    actor: text('actor').notNull(),
+    scheduledFor: timestamp('scheduled_for', { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index('jobs_status_scheduled_idx').on(table.status, table.scheduledFor),
+    check('jobs_kind_check', oneOf('kind', JOB_KINDS)),
+    check('jobs_status_check', oneOf('status', JOB_STATUSES)),
+    check('jobs_attempts_check', sql`${table.attempts} >= 0 and ${table.maxAttempts} >= 1`),
+    // A terminal job finished; a queued one has not started. Half-finished rows are how a
+    // queue quietly loses work.
+    check(
+      'jobs_terminal_check',
+      sql`(${table.status} in ('succeeded', 'failed', 'cancelled')) = (${table.finishedAt} is not null)
+          and (${table.status} = 'queued') = (${table.startedAt} is null)`,
+    ),
+  ],
 );
 
 /* ============================================================================ audit */
