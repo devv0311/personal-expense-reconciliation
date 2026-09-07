@@ -75,7 +75,12 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          # `web/`'s toolchain needs Node 22+: jsdom 30 declares `engines.node`
+          # `^22.22.2 || ^24.15.0 || >=26.0.0` and its undici 8 dependency needs `>=22.19.0`
+          # (undici's CacheStorage calls `util.markAsUncloneable`, added in Node 22.12). Node 20
+          # loads it and throws at import, crashing every test file. The `verify` job stays on
+          # 20 — it is a separate package with no such dependency.
+          node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
 
