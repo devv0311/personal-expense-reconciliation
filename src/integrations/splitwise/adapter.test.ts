@@ -22,24 +22,31 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const OPTIONS = { apiKey: 'k', connectedSplitwiseUserId: '1' };
 
+/** A `fetch` stub answering with one response — the adapter's only outside dependency. */
+function respondWith(response: Response): typeof fetch {
+  return () => Promise.resolve(response);
+}
+
 /** The JSON body of the one request a stubbed `fetch` received. */
 function requestBody(fetchImpl: { mock: { calls: unknown[][] } }): string {
   const init = fetchImpl.mock.calls[0]?.[1] as RequestInit | undefined;
-  if (init?.body === undefined || init.body === null) {
+  if (typeof init?.body !== 'string') {
     throw new Error('The adapter made no request, or sent no body.');
   }
-  return String(init.body);
+  return init.body;
 }
 
 describe('fetchBalances', () => {
   it('converts Splitwise decimal strings to exact paise', async () => {
-    const fetchImpl = vi.fn(async () =>
-      jsonResponse({
-        friends: [
-          { id: 42, balance: [{ currency_code: 'INR', amount: '1234.56' }] },
-          { id: 43, balance: [{ currency_code: 'INR', amount: '-900.00' }] },
-        ],
-      }),
+    const fetchImpl = vi.fn(
+      respondWith(
+        jsonResponse({
+          friends: [
+            { id: 42, balance: [{ currency_code: 'INR', amount: '1234.56' }] },
+            { id: 43, balance: [{ currency_code: 'INR', amount: '-900.00' }] },
+          ],
+        }),
+      ),
     );
     const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
 
@@ -52,18 +59,20 @@ describe('fetchBalances', () => {
   });
 
   it('skips a currency this system does not do arithmetic in', async () => {
-    const fetchImpl = vi.fn(async () =>
-      jsonResponse({
-        friends: [
-          {
-            id: 42,
-            balance: [
-              { currency_code: 'USD', amount: '10.00' },
-              { currency_code: 'INR', amount: '500.00' },
-            ],
-          },
-        ],
-      }),
+    const fetchImpl = vi.fn(
+      respondWith(
+        jsonResponse({
+          friends: [
+            {
+              id: 42,
+              balance: [
+                { currency_code: 'USD', amount: '10.00' },
+                { currency_code: 'INR', amount: '500.00' },
+              ],
+            },
+          ],
+        }),
+      ),
     );
     const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
     // ADR-0012 is INR-only; summing a USD figure into an INR total would be a silent lie.
@@ -73,15 +82,15 @@ describe('fetchBalances', () => {
   });
 
   it('throws rather than resolving empty when Splitwise cannot be read', async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({}, 503));
+    const fetchImpl = vi.fn(respondWith(jsonResponse({}, 503)));
     const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
     // Resolving `[]` here would report "connected, nothing owed" for an unreadable account.
     await expect(adapter.fetchBalances()).rejects.toThrow(SplitwiseTransportError);
   });
 
   it('throws on a 200 that carries an errors object', async () => {
-    const fetchImpl = vi.fn(async () =>
-      jsonResponse({ errors: { base: ['Invalid API request'] } }),
+    const fetchImpl = vi.fn(
+      respondWith(jsonResponse({ errors: { base: ['Invalid API request'] } })),
     );
     const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
     await expect(adapter.fetchBalances()).rejects.toThrow(/Invalid API request/);
@@ -90,28 +99,30 @@ describe('fetchBalances', () => {
 
 describe('fetchLedgerEntries', () => {
   it('reads each entry, its kind, and its own contribution to the pair balance', async () => {
-    const fetchImpl = vi.fn(async () =>
-      jsonResponse({
-        expenses: [
-          {
-            id: 900,
-            description: 'Dinner',
-            cost: '2400.00',
-            currency_code: 'INR',
-            date: '2026-07-04T00:00:00Z',
-            users: [{ user: { id: 42 }, net_balance: '1200.00' }],
-          },
-          {
-            id: 901,
-            payment: true,
-            description: 'Settle up',
-            cost: '1200.00',
-            currency_code: 'INR',
-            deleted_at: '2026-07-09T00:00:00Z',
-            users: [{ user: { id: 42 }, net_balance: '-1200.00' }],
-          },
-        ],
-      }),
+    const fetchImpl = vi.fn(
+      respondWith(
+        jsonResponse({
+          expenses: [
+            {
+              id: 900,
+              description: 'Dinner',
+              cost: '2400.00',
+              currency_code: 'INR',
+              date: '2026-07-04T00:00:00Z',
+              users: [{ user: { id: 42 }, net_balance: '1200.00' }],
+            },
+            {
+              id: 901,
+              payment: true,
+              description: 'Settle up',
+              cost: '1200.00',
+              currency_code: 'INR',
+              deleted_at: '2026-07-09T00:00:00Z',
+              users: [{ user: { id: 42 }, net_balance: '-1200.00' }],
+            },
+          ],
+        }),
+      ),
     );
     const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
 
@@ -141,7 +152,7 @@ describe('fetchLedgerEntries', () => {
       currency_code: 'INR',
       users: [{ user: { id: 42 }, net_balance: '50.00' }],
     }));
-    const fetchImpl = vi.fn(async () => jsonResponse({ expenses }));
+    const fetchImpl = vi.fn(respondWith(jsonResponse({ expenses })));
     const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
 
     const result = await adapter.fetchLedgerEntries!({ friendSplitwiseUserId: '42' });
@@ -152,7 +163,7 @@ describe('fetchLedgerEntries', () => {
 
 describe('writes', () => {
   it('sends exact major units and returns the id Splitwise assigned', async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({ expenses: [{ id: 555 }] }));
+    const fetchImpl = vi.fn(respondWith(jsonResponse({ expenses: [{ id: 555 }] })));
     const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
 
     const result = await adapter.createExpense({
@@ -167,7 +178,7 @@ describe('writes', () => {
     });
 
     expect(result.splitwiseExpenseId).toBe('555');
-    const body = JSON.parse(String(requestBody(fetchImpl))) as Record<string, unknown>;
+    const body = JSON.parse(requestBody(fetchImpl)) as Record<string, unknown>;
     // ₹1,240.05 — exact, never 1240.0499999999997.
     expect(body['cost']).toBe('1240.05');
     expect(body['users__0__owed_share']).toBe('620.03');
@@ -177,7 +188,7 @@ describe('writes', () => {
   });
 
   it('refuses to report success when Splitwise returns no id to audit against later', async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({ expenses: [{}] }));
+    const fetchImpl = vi.fn(respondWith(jsonResponse({ expenses: [{}] })));
     const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
     await expect(
       adapter.createExpense({
@@ -191,7 +202,7 @@ describe('writes', () => {
   });
 
   it('records a settlement as a payment between the two people', async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({ expenses: [{ id: 777 }] }));
+    const fetchImpl = vi.fn(respondWith(jsonResponse({ expenses: [{ id: 777 }] })));
     const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
 
     const result = await adapter.recordPayment({
@@ -200,7 +211,7 @@ describe('writes', () => {
       toSplitwiseUserId: '1',
     });
     expect(result.splitwiseTransactionId).toBe('777');
-    const body = JSON.parse(String(requestBody(fetchImpl))) as Record<string, unknown>;
+    const body = JSON.parse(requestBody(fetchImpl)) as Record<string, unknown>;
     expect(body['payment']).toBe(true);
     expect(body['cost']).toBe('900.00');
   });

@@ -37,5 +37,6 @@ export * from './refund-attribution.js';
 export * from './reconciliation.js';
 export * from './review.js';
 export * from './rounding.js';
+export * from './rules.js';
 export * from './splitwise-audit.js';
 export * from './splitwise-drift.js';

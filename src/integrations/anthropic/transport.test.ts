@@ -24,13 +24,18 @@ function textResponse(text: string): Response {
   return stubResponse({ content: [{ type: 'text', text }] });
 }
 
+/** A `fetch` stub answering with one response — the transport's only outside dependency. */
+function respondWith(response: Response): typeof fetch {
+  return () => Promise.resolve(response);
+}
+
 /** The JSON body of the one request a stubbed `fetch` received. */
 function requestBody(fetchImpl: { mock: { calls: unknown[][] } }): string {
   const init = fetchImpl.mock.calls[0]?.[1] as RequestInit | undefined;
-  if (init?.body === undefined || init.body === null) {
+  if (typeof init?.body !== 'string') {
     throw new Error('The transport made no request, or sent no body.');
   }
-  return String(init.body);
+  return init.body;
 }
 
 const CLASSIFY: ModelRequest = {
@@ -41,8 +46,8 @@ const CLASSIFY: ModelRequest = {
 
 describe('createAnthropicTransport', () => {
   it('returns the parsed JSON object the model produced', async () => {
-    const fetchImpl = vi.fn(async () =>
-      textResponse('{"proposedKind":"expense","confidence":"high"}'),
+    const fetchImpl = vi.fn(
+      respondWith(textResponse('{"proposedKind":"expense","confidence":"high"}')),
     );
     const transport = createAnthropicTransport({ apiKey: 'k', fetchImpl });
 
@@ -51,11 +56,11 @@ describe('createAnthropicTransport', () => {
   });
 
   it('sends the redacted payload and the prompt version, and nothing else', async () => {
-    const fetchImpl = vi.fn(async () => textResponse('{}'));
+    const fetchImpl = vi.fn(respondWith(textResponse('{}')));
     const transport = createAnthropicTransport({ apiKey: 'secret-key', fetchImpl });
     await transport.complete(CLASSIFY);
 
-    const body = JSON.parse(String(requestBody(fetchImpl))) as {
+    const body = JSON.parse(requestBody(fetchImpl)) as {
       messages: Array<{ content: string }>;
       system: string;
     };
@@ -72,21 +77,21 @@ describe('createAnthropicTransport', () => {
   });
 
   it('tolerates a fenced JSON block, because that is a formatting habit and not a different answer', async () => {
-    const fetchImpl = vi.fn(async () =>
-      textResponse('```json\n{"proposedKind":"settlement"}\n```'),
+    const fetchImpl = vi.fn(
+      respondWith(textResponse('```json\n{"proposedKind":"settlement"}\n```')),
     );
     const transport = createAnthropicTransport({ apiKey: 'k', fetchImpl });
     expect(await transport.complete(CLASSIFY)).toEqual({ proposedKind: 'settlement' });
   });
 
   it('discards an answer that is not JSON rather than guessing at it', async () => {
-    const fetchImpl = vi.fn(async () => textResponse('It looks like a grocery purchase.'));
+    const fetchImpl = vi.fn(respondWith(textResponse('It looks like a grocery purchase.')));
     const transport = createAnthropicTransport({ apiKey: 'k', fetchImpl });
     await expect(transport.complete(CLASSIFY)).rejects.toThrow(ModelTransportError);
   });
 
   it('reports a provider error as a transport failure, with its status', async () => {
-    const fetchImpl = vi.fn(async () => stubResponse({ error: 'overloaded' }, 529));
+    const fetchImpl = vi.fn(respondWith(stubResponse({ error: 'overloaded' }, 529)));
     const transport = createAnthropicTransport({ apiKey: 'k', fetchImpl });
     await expect(transport.complete(CLASSIFY)).rejects.toMatchObject({
       name: 'ModelTransportError',
@@ -95,21 +100,19 @@ describe('createAnthropicTransport', () => {
   });
 
   it('reports an unreachable provider rather than resolving with nothing', async () => {
-    const fetchImpl = vi.fn(async () => {
-      throw new Error('ECONNREFUSED');
-    });
+    const fetchImpl = vi.fn((): Promise<Response> => Promise.reject(new Error('ECONNREFUSED')));
     const transport = createAnthropicTransport({ apiKey: 'k', fetchImpl });
     await expect(transport.complete(CLASSIFY)).rejects.toThrow(/could not be reached/);
   });
 
   it('reports an empty response rather than proposing nothing as if it were an answer', async () => {
-    const fetchImpl = vi.fn(async () => stubResponse({ content: [] }));
+    const fetchImpl = vi.fn(respondWith(stubResponse({ content: [] })));
     const transport = createAnthropicTransport({ apiKey: 'k', fetchImpl });
     await expect(transport.complete(CLASSIFY)).rejects.toThrow(/no text content/);
   });
 
   it('refuses an operation it has no prompt for, by name', async () => {
-    const fetchImpl = vi.fn(async () => textResponse('{}'));
+    const fetchImpl = vi.fn(respondWith(textResponse('{}')));
     const transport = createAnthropicTransport({ apiKey: 'k', fetchImpl });
     await expect(
       transport.complete({

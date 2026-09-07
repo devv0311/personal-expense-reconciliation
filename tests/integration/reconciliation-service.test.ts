@@ -35,6 +35,11 @@ const JULY = {
   periodEnd: new Date('2026-08-01T00:00:00.000Z'),
 };
 
+/** The exact wording an unconnected integration reports (audit finding 8). */
+const NOT_CHECKED =
+  'Splitwise was not checked: no integration is connected, so no comparison ran. ' +
+  'This is not agreement — nothing was read.';
+
 let database: TestDatabase;
 let cast: Cast;
 let splitwise: ReturnType<typeof createMockSplitwisePort>;
@@ -119,7 +124,7 @@ async function syncedSettlementWith(friendId: PersonId): Promise<SettlementId> {
 }
 
 describe('runReconciliation — no Splitwise integration connected', () => {
-  it('never calls fetchBalances, and stores no snapshot or discrepancies', async () => {
+  it('never calls fetchBalances, and says plainly that nothing was checked', async () => {
     let called = false;
     const watchedPort = {
       ...splitwise,
@@ -137,7 +142,11 @@ describe('runReconciliation — no Splitwise integration connected', () => {
     });
 
     expect(called).toBe(false);
-    expect(result.discrepancies).toEqual([]);
+    // Not an empty list: an empty list renders as "the ledger matches", which would present
+    // an unchecked integration as a reconciled one (audit finding 8).
+    expect(result.discrepancies).toEqual([
+      { kind: 'splitwise_not_connected', detail: NOT_CHECKED },
+    ]);
     const stored = await getReconciliationRun(
       database.db,
       asId<'reconciliation_run'>(result.reconciliationRunId),

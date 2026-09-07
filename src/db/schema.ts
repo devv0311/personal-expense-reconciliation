@@ -1111,12 +1111,15 @@ export const jobs = pgTable(
     check('jobs_kind_check', oneOf('kind', JOB_KINDS)),
     check('jobs_status_check', oneOf('status', JOB_STATUSES)),
     check('jobs_attempts_check', sql`${table.attempts} >= 0 and ${table.maxAttempts} >= 1`),
-    // A terminal job finished; a queued one has not started. Half-finished rows are how a
-    // queue quietly loses work.
+    // Three one-directional rules, not two equivalences. A terminal job finished; a queued
+    // one has not started; a running one has. Deliberately *not* "queued ⟺ not started":
+    // a job cancelled before it ever ran is terminal with no `started_at`, which is the
+    // honest record of what happened to it, and an equivalence here would forbid saying so.
     check(
       'jobs_terminal_check',
       sql`(${table.status} in ('succeeded', 'failed', 'cancelled')) = (${table.finishedAt} is not null)
-          and (${table.status} = 'queued') = (${table.startedAt} is null)`,
+          and (${table.status} <> 'queued' or ${table.startedAt} is null)
+          and (${table.status} <> 'running' or ${table.startedAt} is not null)`,
     ),
   ],
 );

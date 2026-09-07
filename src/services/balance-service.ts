@@ -13,8 +13,10 @@ import {
   computeNetBalance,
   computeObligations,
   computeUnexplained,
+  netAmount,
   obligationEvidenceStatus,
   pairInternalTransfers,
+  undistributedAmount,
   validateAccountCashSnapshot,
   validateInternalTransferNeutrality,
   validateReconciliationTotals,
@@ -35,6 +37,7 @@ import type {
   ReconciliationRunId,
   ReconciliationTotals,
   ResolvedShare,
+  SettlementId,
 } from '../domain/index.js';
 import {
   getConnectedExternalIntegration,
@@ -48,10 +51,12 @@ import {
   listReconciliationAccountSnapshots,
   listReconciliationRuns,
   listSettlementClaimExpenseIds,
+  listSettlementRegister,
   listSyncedSplitwiseExpensesPaidBy,
   listSyncedSplitwiseSettlementsByCounterparty,
   loadBalanceInput,
   loadCashReconciliationInput,
+  loadExpenseDistributionTotals,
   loadReconciliationInput,
   markSplitwiseExpenseDrifted,
   markSplitwiseSettlementDrifted,
@@ -78,6 +83,36 @@ export interface BalanceResult {
   readonly evidenceStatus: ObligationEvidenceStatus;
   /** The individual obligations behind the figure, for explaining it. */
   readonly contributions: readonly ObligationContribution[];
+  /**
+   * The repayments already netted into `netBalance` (audit rows 7 and 30).
+   *
+   * Without these the page was arithmetically unexplainable: the audit found contributions of
+   * ₹1,600 and ₹900 displayed under a ₹900 net, with the settlement that reconciles them
+   * visible only in a proof pack. Gross obligations minus these settlements **is** the net,
+   * and a screen quoting one figure should be able to show both halves of it.
+   */
+  readonly settlements: readonly BalanceSettlementLine[];
+  /**
+   * Expenses contributing to this pair whose refund has been recorded but not yet distributed
+   * (audit row 25).
+   *
+   * A caveat, not a correction: `netBalance` is exactly what the current allocations say, and
+   * these expenses have a reduction that no allocation reflects yet. Ignoring them would let a
+   * screen present a figure as current when a pending distribution is about to move it.
+   */
+  readonly pendingRefundExpenseIds: readonly ExpenseId[];
+}
+
+/** One recorded repayment between the two people, as the balance read reports it. */
+export interface BalanceSettlementLine {
+  readonly settlementId: SettlementId;
+  readonly paymentId: PaymentId;
+  /** Who the payment moved *from*, derived from its direction and the ledger's own user. */
+  readonly fromPersonId: PersonId;
+  readonly toPersonId: PersonId;
+  readonly amount: Paise;
+  readonly occurredAt: Date;
+  readonly reason: string | null;
 }
 
 /**
@@ -124,7 +159,77 @@ export async function getBalance(
     personBId,
   });
 
-  return { personAId, personBId, netBalance, evidenceStatus, contributions };
+  const [settlements, pendingRefundExpenseIds] = await Promise.all([
+    loadPairSettlements(db, userPersonId, personAId, personBId),
+    findPendingRefundExpenses(
+      db,
+      contributions.map((obligation) => obligation.expenseId),
+    ),
+  ]);
+
+  return {
+    personAId,
+    personBId,
+    netBalance,
+    evidenceStatus,
+    contributions,
+    settlements,
+    pendingRefundExpenseIds,
+  };
+}
+
+/**
+ * Which contributing expenses have a refund recorded that no allocation reflects yet.
+ *
+ * `domain.undistributedAmount` is the authority, exactly as it is for
+ * `services.distributeAdjustment`: the database supplies three sums, and the domain decides
+ * what they mean. An expense with no current allocation is skipped rather than reported —
+ * it has no split to be out of date.
+ */
+async function findPendingRefundExpenses(
+  db: Executor,
+  expenseIds: readonly ExpenseId[],
+): Promise<readonly ExpenseId[]> {
+  const unique = [...new Set(expenseIds)];
+  const totals = await loadExpenseDistributionTotals(db, unique);
+  return totals
+    .filter((row) => {
+      if (!row.hasCurrentAllocation) return false;
+      const net = netAmount(row.grossAmount, [row.adjustmentTotal]);
+      return undistributedAmount(row.currentLineTotal, net) > 0n;
+    })
+    .map((row) => row.expenseId);
+}
+
+/**
+ * The settlements between two people, in the shape a screen can subtract with.
+ *
+ * Direction comes from the payment, which is where it lives: a `Settlement` has no direction
+ * column, deliberately — the payment says whether money left the user's account or arrived in
+ * it (`schema.ts`, `settlements`). For a pair neither of whom is the user there is no payment
+ * on either side, so there is nothing to list; that is `invariants.md` #9b, not a gap.
+ */
+async function loadPairSettlements(
+  db: Executor,
+  userPersonId: PersonId,
+  personAId: PersonId,
+  personBId: PersonId,
+): Promise<readonly BalanceSettlementLine[]> {
+  const counterparty =
+    personAId === userPersonId ? personBId : personBId === userPersonId ? personAId : null;
+  if (counterparty === null) return [];
+
+  const rows = await listSettlementRegister(db, { counterpartyPersonId: counterparty });
+  return rows.map((row) => ({
+    settlementId: row.id,
+    paymentId: row.paymentId,
+    // A debit left the user's account, so the user paid the counterparty; a credit arrived.
+    fromPersonId: row.direction === 'debit' ? userPersonId : counterparty,
+    toPersonId: row.direction === 'debit' ? counterparty : userPersonId,
+    amount: row.amount,
+    occurredAt: row.occurredAt,
+    reason: row.reason,
+  }));
 }
 
 /**
@@ -360,7 +465,22 @@ async function detectSplitwiseDrift(
       ? null
       : await getConnectedExternalIntegration(exec, ownerUser.userId, 'splitwise');
   if (integration === null) {
-    return { discrepancies: [], splitwiseBalancesSnapshot: null, balances: null };
+    // Reported rather than returned silently (audit finding 8). An empty discrepancy list
+    // renders as "No discrepancies — the ledger matches", which for an unconnected
+    // integration means "we did not look" being displayed as "we looked and agreed". The two
+    // are the difference between a reconciled ledger and an unchecked one.
+    return {
+      discrepancies: [
+        {
+          kind: 'splitwise_not_connected',
+          detail:
+            'Splitwise was not checked: no integration is connected, so no comparison ran. ' +
+            'This is not agreement — nothing was read.',
+        },
+      ],
+      splitwiseBalancesSnapshot: null,
+      balances: null,
+    };
   }
 
   let theirBalances: readonly SplitwiseFriendBalance[];

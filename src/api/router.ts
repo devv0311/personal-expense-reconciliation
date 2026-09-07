@@ -116,6 +116,27 @@ import {
 } from './session-routes.js';
 import { getSettlementsRoute, postSettlement } from './settlement-routes.js';
 import {
+  getJobRoute,
+  getJobsRoute,
+  getMonthlySpendRoute,
+  getOccasionsRoute,
+  getOutstandingRoute,
+  getOwnSpendRoute,
+  getResyncCandidatesRoute,
+  getRulesRoute,
+  getSpendingRoute,
+  getUnsettledRoute,
+  postApplyRules,
+  postExpenseOccasion,
+  postJob,
+  postJobCancel,
+  postJobRetry,
+  postOccasion,
+  postRule,
+  postRuleUpdate,
+  postSplitwiseResync,
+} from './workflow-routes.js';
+import {
   getSplitwiseAuditFindingRoute,
   getSplitwiseAuditFindingsRoute,
   getSplitwiseAuditRunRoute,
@@ -263,6 +284,7 @@ export const ALLOCATION_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/expenses/:expenseId/payment-links', handler: postExpenseFunding },
   { method: 'GET', path: '/api/expenses/:expenseId/items', handler: getExpenseItemsRoute },
   { method: 'GET', path: '/api/expenses/:expenseId/history', handler: getExpenseHistoryRoute },
+  { method: 'POST', path: '/api/expenses/:expenseId/occasion', handler: postExpenseOccasion },
   { method: 'POST', path: '/api/expenses/:expenseId/allocation', handler: postAllocation },
   {
     method: 'POST',
@@ -340,6 +362,43 @@ export const PAYMENT_WORKSPACE_ROUTES: readonly ApiRoute[] = [
  */
 export const AUDIT_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/audit/:entityType/:entityId', handler: getAuditTrailRoute },
+];
+
+/**
+ * Standing rules (audit row 43).
+ *
+ * `/api/rules/apply` is listed before `/api/rules/:ruleId`, which would otherwise read
+ * "apply" as an id — the one precedence rule this table has.
+ */
+export const RULE_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/rules', handler: getRulesRoute },
+  { method: 'POST', path: '/api/rules', handler: postRule },
+  { method: 'POST', path: '/api/rules/apply', handler: postApplyRules },
+  { method: 'POST', path: '/api/rules/:ruleId', handler: postRuleUpdate },
+];
+
+/** Aggregate reads over the ledger's own figures (audit rows 30 and 44). All reads. */
+export const ANALYTICS_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/analytics/spending', handler: getSpendingRoute },
+  { method: 'GET', path: '/api/analytics/monthly', handler: getMonthlySpendRoute },
+  { method: 'GET', path: '/api/analytics/own-spend', handler: getOwnSpendRoute },
+  { method: 'GET', path: '/api/analytics/outstanding', handler: getOutstandingRoute },
+  { method: 'GET', path: '/api/analytics/unsettled', handler: getUnsettledRoute },
+];
+
+/** Expense occasions — a label over a group of expenses, carrying no money (audit row 47). */
+export const OCCASION_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/occasions', handler: getOccasionsRoute },
+  { method: 'POST', path: '/api/occasions', handler: postOccasion },
+];
+
+/** The background job queue (audit row 51). A job orchestrates; it never approves. */
+export const JOB_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/jobs', handler: getJobsRoute },
+  { method: 'POST', path: '/api/jobs', handler: postJob },
+  { method: 'POST', path: '/api/jobs/:jobId/retry', handler: postJobRetry },
+  { method: 'POST', path: '/api/jobs/:jobId/cancel', handler: postJobCancel },
+  { method: 'GET', path: '/api/jobs/:jobId', handler: getJobRoute },
 ];
 
 /**
@@ -438,6 +497,12 @@ export const SPLITWISE_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/expenses/:expenseId/splitwise-sync', handler: postSyncExpense },
   {
     method: 'POST',
+    path: '/api/expenses/:expenseId/splitwise-resync',
+    handler: postSplitwiseResync,
+  },
+  { method: 'GET', path: '/api/splitwise/resync-candidates', handler: getResyncCandidatesRoute },
+  {
+    method: 'POST',
     path: '/api/settlements/:settlementId/splitwise-sync',
     handler: postSyncSettlement,
   },
@@ -489,6 +554,10 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...IMPORT_ROUTES,
   ...PAYMENT_WORKSPACE_ROUTES,
   ...AUDIT_ROUTES,
+  ...RULE_ROUTES,
+  ...ANALYTICS_ROUTES,
+  ...OCCASION_ROUTES,
+  ...JOB_ROUTES,
   ...EXPENSE_LEDGER_ROUTES,
   ...BALANCE_ROUTES,
   ...PEOPLE_ROUTES,

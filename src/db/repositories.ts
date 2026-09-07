@@ -4614,3 +4614,189 @@ function requireRow<T>(row: T | undefined, table: string): T {
   }
   return row;
 }
+
+/**
+ * The three totals that decide whether an expense's allocation is up to date (audit row 25).
+ *
+ * Aggregation only. Whether the numbers *mean* a distribution is pending is
+ * `domain.undistributedAmount`'s call, made by the service — this returns the sums it needs
+ * per expense, so the rule stays in one place rather than becoming a `WHERE` clause that
+ * approximates it.
+ */
+export interface ExpenseDistributionTotals {
+  readonly expenseId: ExpenseId;
+  readonly grossAmount: Paise;
+  readonly adjustmentTotal: Paise;
+  /** The **current** allocation's lines; zero when the expense has no allocation yet. */
+  readonly currentLineTotal: Paise;
+  readonly hasCurrentAllocation: boolean;
+}
+
+export async function loadExpenseDistributionTotals(
+  exec: Executor,
+  expenseIds: readonly ExpenseId[],
+): Promise<ExpenseDistributionTotals[]> {
+  if (expenseIds.length === 0) return [];
+  const ids = [...expenseIds];
+
+  const [expenseRows, adjustmentRows, allocationRows] = await Promise.all([
+    exec
+      .select({ id: expenses.id, amount: expenses.amount })
+      .from(expenses)
+      .where(inArray(expenses.id, ids)),
+    exec
+      .select({
+        expenseId: expenseAdjustments.originalExpenseId,
+        total: sql<string>`coalesce(sum(${expenseAdjustments.amount}), 0)`,
+      })
+      .from(expenseAdjustments)
+      .where(inArray(expenseAdjustments.originalExpenseId, ids))
+      .groupBy(expenseAdjustments.originalExpenseId),
+    exec
+      .select({
+        expenseId: allocations.expenseId,
+        total: sql<string>`coalesce(sum(${allocationLines.amount}), 0)`,
+      })
+      .from(allocations)
+      .leftJoin(allocationLines, eq(allocationLines.allocationId, allocations.id))
+      .where(and(inArray(allocations.expenseId, ids), isNull(allocations.supersededAt)))
+      .groupBy(allocations.expenseId),
+  ]);
+
+  const adjustments = new Map(adjustmentRows.map((row) => [row.expenseId, BigInt(row.total)]));
+  const allocated = new Map(allocationRows.map((row) => [row.expenseId, BigInt(row.total)]));
+
+  return expenseRows.map((row) => ({
+    expenseId: row.id as ExpenseId,
+    grossAmount: row.amount as Paise,
+    adjustmentTotal: (adjustments.get(row.id) ?? 0n) as Paise,
+    currentLineTotal: (allocated.get(row.id) ?? 0n) as Paise,
+    hasCurrentAllocation: allocated.has(row.id),
+  }));
+}
+
+/* ------------------------------------------------------ Splitwise re-sync (audit row 40) */
+
+export interface SplitwiseExpenseDetailRow {
+  readonly id: SplitwiseExpenseId;
+  readonly expenseId: ExpenseId;
+  readonly splitwiseExpenseId: string;
+  readonly syncedAt: Date;
+  readonly ourSnapshot: unknown;
+  readonly theirSnapshot: unknown;
+  readonly syncStatus: SplitwiseExpenseSyncStatus;
+}
+
+export async function getSplitwiseExpenseRow(
+  exec: Executor,
+  id: SplitwiseExpenseId,
+): Promise<SplitwiseExpenseDetailRow | null> {
+  const [row] = await exec.select().from(splitwiseExpenses).where(eq(splitwiseExpenses.id, id));
+  return row === undefined
+    ? null
+    : {
+        id: row.id as SplitwiseExpenseId,
+        expenseId: row.expenseId as ExpenseId,
+        splitwiseExpenseId: row.splitwiseExpenseId,
+        syncedAt: row.syncedAt,
+        ourSnapshot: row.ourSnapshot,
+        theirSnapshot: row.theirSnapshot,
+        syncStatus: row.syncStatus as SplitwiseExpenseSyncStatus,
+      };
+}
+
+/**
+ * Every synced row a person could choose to repair — `stale` (our side moved) or `drifted`
+ * (theirs did).
+ *
+ * `synced` rows are excluded: re-syncing a row both ledgers agree about would write a
+ * duplicate into somebody else's ledger for nothing.
+ */
+export async function listResyncableSplitwiseExpenses(exec: Executor): Promise<
+  Array<{
+    splitwiseExpenseId: SplitwiseExpenseId;
+    expenseId: ExpenseId;
+    externalId: string;
+    syncStatus: string;
+    syncedAt: Date;
+    syncedSnapshot: unknown;
+    currentNetAmount: string;
+    description: string | null;
+  }>
+> {
+  const rows = await exec
+    .select({
+      id: splitwiseExpenses.id,
+      expenseId: splitwiseExpenses.expenseId,
+      externalId: splitwiseExpenses.splitwiseExpenseId,
+      syncStatus: splitwiseExpenses.syncStatus,
+      syncedAt: splitwiseExpenses.syncedAt,
+      ourSnapshot: splitwiseExpenses.ourSnapshot,
+      description: expenses.description,
+      grossAmount: expenses.amount,
+    })
+    .from(splitwiseExpenses)
+    .innerJoin(expenses, eq(expenses.id, splitwiseExpenses.expenseId))
+    .where(inArray(splitwiseExpenses.syncStatus, ['stale', 'drifted']))
+    .orderBy(desc(splitwiseExpenses.syncedAt));
+  if (rows.length === 0) return [];
+
+  const adjustmentRows = await exec
+    .select({
+      expenseId: expenseAdjustments.originalExpenseId,
+      total: sql<string>`coalesce(sum(${expenseAdjustments.amount}), 0)`,
+    })
+    .from(expenseAdjustments)
+    .where(
+      inArray(
+        expenseAdjustments.originalExpenseId,
+        rows.map((row) => row.expenseId),
+      ),
+    )
+    .groupBy(expenseAdjustments.originalExpenseId);
+  const adjustments = new Map(adjustmentRows.map((row) => [row.expenseId, BigInt(row.total)]));
+
+  return rows.map((row) => ({
+    splitwiseExpenseId: row.id as SplitwiseExpenseId,
+    expenseId: row.expenseId as ExpenseId,
+    externalId: row.externalId,
+    syncStatus: row.syncStatus,
+    syncedAt: row.syncedAt,
+    syncedSnapshot: row.ourSnapshot,
+    // `domain.netAmount` does the subtraction, exactly as the ledger read does.
+    currentNetAmount: netAmount(row.grossAmount as Paise, [
+      (adjustments.get(row.expenseId) ?? 0n) as Paise,
+    ]).toString(),
+    description: row.description,
+  }));
+}
+
+/**
+ * Replaces what a `SplitwiseExpense` row records about the last successful push.
+ *
+ * The only update this table permits beyond the drift/stale status flags, and it exists for
+ * one caller: `services.resyncExpenseToSplitwise`, after Splitwise has already accepted the
+ * corrected entry. Nothing here can invent a sync that did not happen.
+ */
+export async function updateSplitwiseExpenseSync(
+  exec: Executor,
+  id: SplitwiseExpenseId,
+  next: {
+    readonly splitwiseExpenseId: string;
+    readonly syncedAt: Date;
+    readonly ourSnapshot: unknown;
+    readonly theirSnapshot: unknown;
+    readonly syncStatus: SplitwiseExpenseSyncStatus;
+  },
+): Promise<void> {
+  await exec
+    .update(splitwiseExpenses)
+    .set({
+      splitwiseExpenseId: next.splitwiseExpenseId,
+      syncedAt: next.syncedAt,
+      ourSnapshot: next.ourSnapshot,
+      theirSnapshot: next.theirSnapshot,
+      syncStatus: next.syncStatus,
+    })
+    .where(eq(splitwiseExpenses.id, id));
+}

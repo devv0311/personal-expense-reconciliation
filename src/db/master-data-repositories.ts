@@ -22,6 +22,7 @@ import type {
   GroupMembershipId,
   MerchantId,
   PersonId,
+  RuleId,
   SessionId,
   UserId,
 } from '../domain/ids.js';
@@ -36,6 +37,7 @@ import {
   merchantAliases,
   merchants,
   people,
+  rules,
   sessions,
   users,
 } from './schema.js';
@@ -703,4 +705,101 @@ export async function touchSession(exec: Executor, sessionId: SessionId, at: Dat
 
 export async function revokeSession(exec: Executor, tokenHash: string, at: Date): Promise<void> {
   await exec.update(sessions).set({ revokedAt: at }).where(eq(sessions.tokenHash, tokenHash));
+}
+
+/* ============================================================================== rules */
+
+export interface RuleRow {
+  readonly id: RuleId;
+  readonly name: string;
+  readonly matchPattern: unknown;
+  readonly proposedClassification: unknown;
+  readonly action: string;
+  readonly effect: string;
+  readonly origin: string;
+  readonly active: boolean;
+  readonly timesApplied: number;
+  readonly lastAppliedAt: Date | null;
+  readonly archivedAt: Date | null;
+  readonly createdAt: Date;
+}
+
+/**
+ * Every rule, active first, then oldest first.
+ *
+ * The order is the evaluation order, so it has to be stable and it has to be one a person can
+ * predict: they wrote these in a sequence, and first-match-wins means the sequence decides.
+ */
+export async function listRuleRows(exec: Executor): Promise<RuleRow[]> {
+  const rows = await exec
+    .select()
+    .from(rules)
+    .orderBy(desc(rules.active), asc(rules.createdAt), asc(rules.id));
+  return rows.map((row) => ({ ...row, id: row.id as RuleId }));
+}
+
+export async function insertRule(
+  exec: Executor,
+  draft: {
+    readonly name: string;
+    readonly matchPattern: unknown;
+    readonly proposedClassification: unknown;
+    readonly action: string;
+    readonly effect: string;
+    readonly origin: string;
+  },
+): Promise<RuleId> {
+  const [row] = await exec
+    .insert(rules)
+    .values({
+      name: draft.name,
+      matchPattern: draft.matchPattern,
+      proposedClassification: draft.proposedClassification,
+      action: draft.action,
+      effect: draft.effect,
+      origin: draft.origin,
+    })
+    .returning({ id: rules.id });
+  if (row === undefined) throw new Error('Insert into rules returned no row.');
+  return row.id as RuleId;
+}
+
+export async function updateRuleRow(
+  exec: Executor,
+  ruleId: RuleId,
+  patch: {
+    readonly name?: string;
+    readonly matchPattern?: unknown;
+    readonly proposedClassification?: unknown;
+    readonly action?: string;
+    readonly effect?: string;
+    readonly active?: boolean;
+  },
+): Promise<void> {
+  const values: Record<string, unknown> = { updatedAt: new Date() };
+  if (patch.name !== undefined) values['name'] = patch.name;
+  if (patch.matchPattern !== undefined) values['matchPattern'] = patch.matchPattern;
+  if (patch.proposedClassification !== undefined) {
+    values['proposedClassification'] = patch.proposedClassification;
+  }
+  if (patch.action !== undefined) values['action'] = patch.action;
+  if (patch.effect !== undefined) values['effect'] = patch.effect;
+  if (patch.active !== undefined) values['active'] = patch.active;
+  await exec.update(rules).set(values).where(eq(rules.id, ruleId));
+}
+
+export async function archiveRule(
+  exec: Executor,
+  ruleId: RuleId,
+  archivedAt: Date | null,
+): Promise<void> {
+  await exec.update(rules).set({ archivedAt, updatedAt: new Date() }).where(eq(rules.id, ruleId));
+}
+
+/** Counts one application. Bookkeeping, not a financial fact — hence no audit event here. */
+export async function markRuleApplied(exec: Executor, ruleId: RuleId, at: Date): Promise<void> {
+  await exec
+    .update(rules)
+    .set({ timesApplied: sql`${rules.timesApplied} + 1`, lastAppliedAt: at, updatedAt: at })
+    .where(eq(rules.id, ruleId));
 }
