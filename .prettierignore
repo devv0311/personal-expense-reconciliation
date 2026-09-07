@@ -18,3 +18,8 @@ web/
 
 # Browser-verification artifacts — a driven browser writes these, Prettier does not own them.
 .playwright-mcp/
+
+# The capability audit's own evidence (report, matrix, API inventory, screenshots). It is a
+# record of one external review, quoted throughout the work that closed its findings —
+# reformatting it would edit the evidence.
+audit-results/
