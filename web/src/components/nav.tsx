@@ -3,17 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useShortcuts } from "@/components/app-shell/shortcuts";
+import { Button } from "@/components/ui/button";
 import { useReviewQueue } from "@/lib/queries";
 
-/**
- * One row, one entry per workflow — six, matching `CLAUDE.md`'s six pillars, with evidence and
- * receipts reached from the queue and the ledger rather than given a seventh tab of their own
- * (a document is always about a payment or an expense; a list of loose documents is not a
- * workflow).
- *
- * The review count is the product's only live figure outside a screen: it is what makes the
- * queue a place you go back to. It is a count, not money, so it is never toned `debit`.
- */
 const SECTIONS = [
   { href: "/review", label: "Review" },
   { href: "/reconciliation", label: "Reconciliation" },
@@ -25,46 +17,73 @@ const SECTIONS = [
 
 export function Nav() {
   const pathname = usePathname();
-  const { openCommandPalette } = useShortcuts();
+  const { openCommandPalette, openShortcutHelp } = useShortcuts();
   const queue = useReviewQueue({ limit: 1 });
 
   return (
-    <header className="border-b border-rule bg-paper">
-      <div className="mx-auto flex max-w-5xl flex-col gap-3 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center justify-between gap-4">
-          <Link href="/" className="text-emphasis font-semibold tracking-tight text-ink">
+    <header className="border-b border-rule bg-panel">
+      <div className="mx-auto max-w-5xl px-4 sm:px-6">
+        <div className="flex items-center justify-between gap-4 py-4">
+          <Link
+            href="/"
+            className="flex items-center gap-2.5 text-emphasis font-semibold tracking-tight text-ink"
+          >
+            <svg
+              aria-hidden="true"
+              width="24"
+              height="28"
+              viewBox="0 0 24 28"
+              fill="none"
+              className="text-accent"
+            >
+              <rect
+                x="2"
+                y="2"
+                width="20"
+                height="24"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+              <path d="M7 7v14M5 9h13M5 14h13M5 19h13" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
             Ledger
           </Link>
-          <button
-            type="button"
-            onClick={openCommandPalette}
-            className="flex items-center gap-2 rounded-sm border border-rule px-2.5 py-1 text-meta text-ink-muted transition-colors hover:border-rule-strong hover:text-ink lg:order-last"
-          >
-            Search
-            <span aria-hidden="true" className="font-mono text-micro text-ink-faint">
-              ⌘K
-            </span>
-            <span className="sr-only">Open the command palette</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={openShortcutHelp}
+              className="hidden sm:inline-flex"
+            >
+              Keyboard shortcuts
+            </Button>
+            <Button variant="outline" size="sm" onClick={openCommandPalette}>
+              Search
+              <kbd aria-hidden="true" className="ml-3 font-mono text-micro text-ink-faint">
+                ⌘ K
+              </kbd>
+              <span className="sr-only">Open the command palette</span>
+            </Button>
+          </div>
         </div>
-        <nav aria-label="Main" className="flex flex-wrap gap-x-6 gap-y-2 text-body">
+        <nav
+          aria-label="Main"
+          className="grid grid-cols-3 gap-x-2 text-meta sm:flex sm:gap-x-7 sm:text-body"
+        >
           {SECTIONS.map((section) => {
-            const active = pathname?.startsWith(section.href) ?? false;
-            const pending = section.href === "/review" ? (queue.data?.total ?? 0) : 0;
+            const active = pathname === section.href || pathname?.startsWith(`${section.href}/`);
+            const pending = section.href === "/review" ? queue.data?.total : undefined;
             return (
               <Link
                 key={section.href}
                 href={section.href}
                 aria-current={active ? "page" : undefined}
-                className={`border-b-2 pb-1 transition-colors ${
-                  active
-                    ? "border-accent font-medium text-ink"
-                    : "border-transparent text-ink-muted hover:text-ink"
-                }`}
+                className={`flex min-h-11 items-center justify-center gap-1.5 border-b-2 px-1 transition-colors sm:justify-start ${active ? "border-accent font-medium text-accent" : "border-transparent text-ink-muted hover:border-rule-strong hover:text-ink"}`}
               >
                 {section.label}
-                {pending > 0 && (
-                  <span className="ml-1.5 font-mono text-micro text-attention">
+                {pending !== undefined && pending > 0 && (
+                  <span className="font-mono text-micro text-attention">
                     {pending}
                     <span className="sr-only"> items waiting</span>
                   </span>

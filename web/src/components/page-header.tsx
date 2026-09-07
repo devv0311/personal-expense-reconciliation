@@ -17,11 +17,11 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="flex flex-wrap items-start justify-between gap-4 border-b border-rule pb-6">
       <div>
-        <h1 className="text-h1 font-medium text-ink">{title}</h1>
+        <h1 className="text-h1 font-semibold tracking-tight text-ink">{title}</h1>
         {description !== undefined && (
-          <p className="mt-1 max-w-prose text-body text-ink-muted">{description}</p>
+          <p className="mt-2 max-w-prose text-body leading-relaxed text-ink-muted">{description}</p>
         )}
       </div>
       {actions !== undefined && <div className="flex flex-wrap gap-3">{actions}</div>}

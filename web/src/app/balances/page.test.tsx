@@ -88,3 +88,14 @@ describe("BalancesPage", () => {
     expect(balanceCalls).toHaveLength(0);
   });
 });
+
+it("starts with the owner selected, and never shows a loading balance for the same person", async () => {
+  global.fetch = vi.fn().mockResolvedValue(jsonResponse(200, { people: PEOPLE }));
+  const user = userEvent.setup();
+  renderWithQuery(<BalancesPage />);
+  expect(await screen.findByLabelText("Person A")).toHaveValue("p-dev");
+  expect(screen.getByText(/Choose two people/)).toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("Person B"), "p-dev");
+  expect(screen.queryByText("Computing balance…")).not.toBeInTheDocument();
+  expect(screen.getByText(/Choose two different people/)).toBeInTheDocument();
+});

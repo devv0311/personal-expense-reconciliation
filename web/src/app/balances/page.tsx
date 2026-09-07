@@ -46,9 +46,9 @@ function BalancesContent() {
 
   const userPersonId = peopleQuery.data?.find((person) => person.isUser)?.id ?? null;
 
-  // `?with=` supplies the *default* pair rather than being copied into state: an explicit
-  // choice always wins, and no effect has to race the people query to apply the link.
-  const personAId = chosenA ?? (requestedWith === null ? null : userPersonId);
+  // Start with the owner and use `?with=` for the other person. Explicit choices always
+  // win; no effect races the people query to apply the link.
+  const personAId = chosenA ?? userPersonId;
   const personBId = chosenB ?? requestedWith;
   const balanceQuery = useBalance(personAId, personBId);
 
@@ -58,7 +58,7 @@ function BalancesContent() {
         title="Balances"
         description="Who owes whom, computed from every shared expense — in either direction, since the payer isn't always you."
         actions={
-          personBId !== null && personBId !== userPersonId ? (
+          personAId === userPersonId && personBId !== null && personBId !== userPersonId ? (
             <Link
               href={`/proof-packs?recipient=${personBId}`}
               className="text-meta text-accent underline-offset-2 hover:underline"
@@ -91,7 +91,7 @@ function BalancesContent() {
               value={personAId}
               onChange={setChosenA}
             />
-            <span aria-hidden="true" className="pb-2 text-ink-faint">
+            <span aria-hidden="true" className="hidden pb-2 text-ink-faint sm:block">
               &harr;
             </span>
             <PersonSelect
@@ -103,15 +103,23 @@ function BalancesContent() {
             />
           </div>
 
+          {(personAId === null || personBId === null) && (
+            <EmptyBlock>
+              Choose two people to see their balance and the expenses behind it.
+            </EmptyBlock>
+          )}
           {personAId !== null && personBId !== null && personAId === personBId && (
             <EmptyBlock>Choose two different people to see a balance.</EmptyBlock>
           )}
 
-          {balanceQuery.isPending && personAId !== null && personBId !== null && (
-            <LoadingStatus label="Computing balance…">
-              <FigureSkeleton />
-            </LoadingStatus>
-          )}
+          {balanceQuery.isPending &&
+            personAId !== null &&
+            personBId !== null &&
+            personAId !== personBId && (
+              <LoadingStatus label="Computing balance…">
+                <FigureSkeleton />
+              </LoadingStatus>
+            )}
           {balanceQuery.isError && (
             <ErrorBlock error={balanceQuery.error} onRetry={() => void balanceQuery.refetch()} />
           )}

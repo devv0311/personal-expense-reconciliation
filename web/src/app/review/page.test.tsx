@@ -97,7 +97,8 @@ describe("the review queue", () => {
 
     expect(await screen.findByText("What the model proposed")).toBeInTheDocument();
     expect(screen.getByText("Medium confidence")).toBeInTheDocument();
-    expect(screen.getByText("scripted-classifier-v1")).toBeInTheDocument();
+    await user.click(screen.getByText("Model and provenance"));
+    expect(screen.getByText("scripted-classifier-v1")).toBeVisible();
     expect(screen.getByText(/A proposal, not state/)).toBeInTheDocument();
     expect(api.callsTo("/decision")).toHaveLength(0);
   });
@@ -190,7 +191,7 @@ describe("the review queue", () => {
     await waitFor(() =>
       expect(screen.getByText(/Nothing is waiting for a decision/)).toBeInTheDocument(),
     );
-    expect(screen.getByText(/the counts above are the whole ledger/)).toBeInTheDocument();
+    expect(screen.getByText(/not whether your accounts reconcile/)).toBeInTheDocument();
   });
 
   it("announces a loading state, then a retryable error", async () => {
@@ -269,5 +270,84 @@ describe("keyboard triage in the review queue", () => {
     const reason = screen.getByLabelText(/reason/i);
     await user.type(reason, "jk");
     expect(reason).toHaveValue("jk");
+  });
+});
+
+describe("review workspace refinements", () => {
+  it("distinguishes missing evidence amounts from an evidenced zero", async () => {
+    renderReview([
+      {
+        ...UNMATCHED_EVIDENCE_ITEM,
+        id: "missing",
+        amount: "0",
+        receiptTotal: null,
+        observation: null,
+      },
+      { ...UNMATCHED_EVIDENCE_ITEM, id: "zero", amount: "0", receiptTotal: "0", observation: null },
+    ]);
+    const list = await screen.findByRole("list", { name: "Items waiting for a decision" });
+    expect(within(list).getAllByText("Not evidenced")).toHaveLength(1);
+    expect(within(list).getAllByText("₹0.00")).toHaveLength(1);
+  });
+
+  it("reaches items beyond the first 50 in the API's priority order and resets on a new filter", async () => {
+    const items = Array.from({ length: 51 }, (_, index) => ({
+      ...CLASSIFICATION_ITEM,
+      id: `inf-${index}`,
+      payment: { ...CLASSIFICATION_ITEM.payment, description: `Payment ${index}` },
+    }));
+    const api = mockApi({
+      "/api/review": (url: string) => {
+        const limit = Number(new URL(url, "http://localhost").searchParams.get("limit"));
+        return {
+          ...reviewQueue(items),
+          items: items.slice(0, limit),
+          truncated: limit < items.length,
+        };
+      },
+    });
+    renderWithQuery(
+      <ShortcutProvider renderOverlays={() => null}>
+        <ReviewPage />
+      </ShortcutProvider>,
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Show more items" }));
+    await screen.findByRole("button", { name: /Payment 50/ });
+    const rows = within(
+      screen.getByRole("list", { name: "Items waiting for a decision" }),
+    ).getAllByRole("button");
+    expect(rows[0]).toHaveTextContent("Payment 0");
+    expect(rows.at(-1)).toHaveTextContent("Payment 50");
+    expect(screen.queryByRole("button", { name: "Show more items" })).not.toBeInTheDocument();
+    await user.selectOptions(
+      screen.getByLabelText("Filter review items"),
+      "classification_decision",
+    );
+    await waitFor(() =>
+      expect(
+        api.calls.some((call) => call.url.includes("kinds=classification_decision&limit=50")),
+      ).toBe(true),
+    );
+    expect(screen.getByRole("button", { name: /Everything 51/ })).toBeInTheDocument();
+  });
+
+  it("restores focus to the chosen row on close and lets Enter activate an inspector action", async () => {
+    const api = renderReview();
+    const user = userEvent.setup();
+    const row = await screen.findByRole("button", { name: /UPI-ZOMATO4471/ });
+    await user.click(row);
+    expect(document.activeElement?.id).toBe("review-inspector");
+    await user.click(screen.getByRole("button", { name: /Back to queue/ }));
+    expect(document.activeElement).toBe(row);
+    await user.keyboard("{Enter}");
+    const accept = await screen.findByRole("button", { name: /Accept this proposal/ });
+    accept.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await user.keyboard("jk{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(row).toHaveAttribute("aria-current", "true");
+    expect(api.calls.filter((call) => call.method === "POST")).toHaveLength(0);
   });
 });

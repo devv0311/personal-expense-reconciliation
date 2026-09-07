@@ -53,7 +53,7 @@ function ProofPacksContent() {
     <div className="flex flex-col gap-8">
       <PageHeader
         title="Proof packs"
-        description="A summary of one person's position — what was spent, what came back, what their share is, and what is still open. Derived from the ledger every time; never a second record of the debt."
+        description="Prepare a private summary for one person: expenses, refunds, settlements and what remains. Review the exact content before copying; nothing is sent automatically."
       />
 
       {people.isPending && (
@@ -77,8 +77,8 @@ function ProofPacksContent() {
 
           {recipientId === null && (
             <EmptyBlock>
-              Choose who this pack is for. A pack only ever names you and that one person — no third
-              party is ever passed to the assembler.
+              Choose who this pack is for. A pack only ever names you and that one person — no other
+              person&apos;s details are included.
             </EmptyBlock>
           )}
 
@@ -88,7 +88,7 @@ function ProofPacksContent() {
             </LoadingStatus>
           )}
           {pack.isError && <ErrorBlock error={pack.error} onRetry={() => void pack.refetch()} />}
-          {pack.isSuccess && <ProofPackPreview preview={pack.data} />}
+          {pack.isSuccess && <ProofPackPreview key={recipientId} preview={pack.data} />}
         </>
       )}
     </div>

@@ -29,7 +29,9 @@ export function Fact({
         {label}
         {hint !== undefined && <span className="block text-micro text-ink-faint">{hint}</span>}
       </dt>
-      <dd className={cn("text-body text-ink", mono && "tabular font-mono")}>{children}</dd>
+      <dd className={cn("min-w-0 max-w-full text-body text-ink", mono && "tabular font-mono")}>
+        {children}
+      </dd>
     </div>
   );
 }

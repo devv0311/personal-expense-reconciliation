@@ -71,7 +71,7 @@ export function ErrorBlock({ error, onRetry }: { error: unknown; onRetry?: () =>
 
 export function EmptyBlock({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-sm border border-dashed border-rule-strong px-4 py-8 text-center text-body text-ink-muted">
+    <div className="border-y border-rule px-4 py-8 text-body leading-relaxed text-ink-muted">
       {children}
     </div>
   );

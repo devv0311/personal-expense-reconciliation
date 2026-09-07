@@ -72,21 +72,27 @@ function ClassificationInspector({ item }: { item: ClassificationDecisionItem })
           <Fact label="Confidence">
             <Confidence level={item.confidence} />
           </Fact>
-          <Fact label="Proposed" mono>
-            {formatDateTime(item.proposedAt)}
-          </Fact>
-          <Fact label="Model">
-            {item.model.name ?? <UnknownValue>Not recorded</UnknownValue>}
-            {item.model.provider !== null && (
-              <span className="ml-2 text-meta text-ink-muted">{item.model.provider}</span>
-            )}
-          </Fact>
-          {item.model.promptVersion !== null && (
-            <Fact label="Prompt version" mono>
-              {item.model.promptVersion}
-            </Fact>
-          )}
         </Facts>
+
+        <details className="mt-3 text-meta text-ink-muted">
+          <summary className="cursor-pointer py-2 text-accent">Model and provenance</summary>
+          <Facts>
+            <Fact label="Proposed" mono>
+              {formatDateTime(item.proposedAt)}
+            </Fact>
+            <Fact label="Model">
+              {item.model.name ?? <UnknownValue>Not recorded</UnknownValue>}
+              {item.model.provider !== null && (
+                <span className="ml-2 text-meta text-ink-muted">{item.model.provider}</span>
+              )}
+            </Fact>
+            {item.model.promptVersion !== null && (
+              <Fact label="Prompt version" mono>
+                {item.model.promptVersion}
+              </Fact>
+            )}
+          </Facts>
+        </details>
 
         {item.proposal !== null && (
           <div className="mt-4">

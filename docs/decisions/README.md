@@ -87,3 +87,4 @@ Copy `0001-record-architecture-decisions.md` as a template. Each ADR has: `Statu
 | [0047](0047-proof-packs-are-a-derived-read-not-a-second-ledger.md)      | A proof pack is a derived read, redacted and fail-closed, never a second ledger | Accepted                                                     |
 | [0048](0048-phase-21-ui-reads-the-ledger-and-never-recomputes-it.md)    | The Phase 21 UI reads the ledger; it never recomputes it                        | Accepted                                                     |
 | [0049](0049-keyboard-first-navigation-never-completes-a-decision.md)    | Keyboard-first navigation; a shortcut never completes a decision                | Accepted                                                     |
+| [0050](0050-modal-isolation-and-review-workspace.md)                    | Modal decision isolation and responsive review navigation                       | Accepted                                                     |

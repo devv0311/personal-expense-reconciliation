@@ -59,7 +59,7 @@ describe("the dialog primitive", () => {
     screen.getByRole("button", { name: "Confirm" }).focus();
     await user.tab();
     expect(dialog.contains(document.activeElement)).toBe(true);
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "First" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close dialog" }));
 
     await user.tab({ shift: true });
     expect(dialog.contains(document.activeElement)).toBe(true);
@@ -136,4 +136,39 @@ describe("the table primitive", () => {
 
     if (scrollWidth !== undefined) Object.defineProperty(proto, "scrollWidth", scrollWidth);
   });
+});
+
+it("isolates background controls and restores their previous state and scroll behavior", async () => {
+  const { container } = render(<Harness />);
+  const user = userEvent.setup();
+  document.body.style.overflow = "auto";
+  await user.click(screen.getByRole("button", { name: "Open it" }));
+  expect(container.inert).toBe(true);
+  expect(document.body.style.overflow).toBe("hidden");
+  expect(container.contains(screen.getByRole("dialog"))).toBe(false);
+  await user.click(screen.getByRole("button", { name: "Close dialog" }));
+  expect(container.inert).toBeFalsy();
+  expect(document.body.style.overflow).toBe("auto");
+  document.body.style.overflow = "";
+});
+
+it("cannot be dismissed while a decision is being recorded", async () => {
+  const onClose = vi.fn();
+  const { rerender } = render(
+    <Dialog open dismissible={false} onClose={onClose} title="Recording decision">
+      Please wait
+    </Dialog>,
+  );
+  const user = userEvent.setup();
+  expect(screen.getByRole("button", { name: "Close dialog" })).toBeDisabled();
+  await user.keyboard("{Escape}");
+  await user.click(screen.getByRole("dialog").previousElementSibling!);
+  expect(onClose).not.toHaveBeenCalled();
+  rerender(
+    <Dialog open onClose={onClose} title="Recording decision">
+      Done
+    </Dialog>,
+  );
+  await user.keyboard("{Escape}");
+  expect(onClose).toHaveBeenCalledOnce();
 });

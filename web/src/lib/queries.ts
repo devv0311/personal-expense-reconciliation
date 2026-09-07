@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "./api";
 import type {
   AuditFindingFilter,
@@ -104,6 +104,7 @@ export function useReviewQueue(filter: ReviewQueueFilter) {
   return useQuery({
     queryKey: queryKeys.reviewQueue(filter),
     queryFn: () => api.getReviewQueue(filter),
+    placeholderData: keepPreviousData,
   });
 }
 

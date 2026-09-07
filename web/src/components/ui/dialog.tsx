@@ -1,25 +1,15 @@
 "use client";
 
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
- * A modal dialog, hand-built.
- *
- * `Design.md` says to reach for a headless primitive only when a control needs behavior HTML
- * does not provide, and to say which behavior justified it. Three do, and `<dialog>`'s own
- * `showModal()` is not usable here (jsdom, which every test in this package runs in, does not
- * implement it): **focus containment** while open, **restoring focus** to whatever opened it,
- * and **Escape** closing it. That is the whole of this file — about sixty lines — rather than a
- * headless component library and its transitive tree, which ADR-0043 declined for the same
- * reason it declined shadcn's CLI.
- *
- * Two consequences the callers depend on:
- *
- * - Every consequential action inside a dialog is still a button a person presses. Opening a
- *   dialog with a keyboard shortcut never pre-selects one (ADR-0049).
- * - The backdrop closes on click and the container is `role="dialog" aria-modal="true"`,
- *   labelled by the title this renders — never by a `title` attribute.
+ * Hand-owned modal isolation (ADR-0049/0050). A body portal lets the background become inert
+ * without disabling the dialog itself. Focus starts on the panel, never a confirm button;
+ * Tab stays inside, and close restores focus and the previous background state. Pending
+ * decisions can disable dismissal without changing the explicit button-only approval path.
  */
 export function Dialog({
   open,
@@ -29,6 +19,7 @@ export function Dialog({
   children,
   footer,
   className,
+  dismissible = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -37,7 +28,9 @@ export function Dialog({
   children: ReactNode;
   footer?: ReactNode;
   className?: string;
+  dismissible?: boolean;
 }) {
+  const layerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
@@ -48,8 +41,20 @@ export function Dialog({
     restoreRef.current = document.activeElement as HTMLElement | null;
     // Focus the panel itself, not its first control: a dialog that lands on the first button
     // is one Enter away from an action the reader has not read yet.
+    const background = Array.from(document.body.children).filter(
+      (element): element is HTMLElement =>
+        element instanceof HTMLElement && element !== layerRef.current,
+    );
+    const previous = background.map((element) => ({ element, inert: element.inert }));
+    for (const { element } of previous) element.inert = true;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     panelRef.current?.focus();
-    return () => restoreRef.current?.focus?.();
+    return () => {
+      for (const { element, inert } of previous) element.inert = inert;
+      document.body.style.overflow = overflow;
+      restoreRef.current?.focus?.();
+    };
   }, [open]);
 
   useEffect(() => {
@@ -57,7 +62,7 @@ export function Dialog({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        if (dismissible) onClose();
         return;
       }
       if (event.key !== "Tab") return;
@@ -80,15 +85,20 @@ export function Dialog({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  }, [open, onClose, dismissible]);
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8">
+  return createPortal(
+    <div
+      ref={layerRef}
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain p-3 sm:p-8"
+    >
       <div
         aria-hidden="true"
-        onClick={onClose}
+        onClick={() => {
+          if (dismissible) onClose();
+        }}
         className="fixed inset-0 bg-ink/25 dark:bg-paper/40"
       />
       <div
@@ -103,15 +113,33 @@ export function Dialog({
           className,
         )}
       >
-        <div className="border-b border-rule px-5 py-4">
-          <h2 id={titleId} className="text-emphasis font-semibold text-ink">
-            {title}
-          </h2>
-          {description !== undefined && (
-            <p id={descriptionId} className="mt-1 text-meta text-ink-muted">
-              {description}
-            </p>
-          )}
+        <div className="flex items-start justify-between gap-4 border-b border-rule px-5 py-4">
+          <div>
+            <h2 id={titleId} className="text-emphasis font-semibold text-ink">
+              {title}
+            </h2>
+            {description !== undefined && (
+              <p id={descriptionId} className="mt-1 text-meta text-ink-muted">
+                {description}
+              </p>
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Close dialog"
+            disabled={!dismissible}
+            onClick={onClose}
+          >
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path
+                d="m4 4 8 8M12 4l-8 8"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </Button>
         </div>
         <div className="px-5 py-4">{children}</div>
         {footer !== undefined && (
@@ -120,7 +148,8 @@ export function Dialog({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

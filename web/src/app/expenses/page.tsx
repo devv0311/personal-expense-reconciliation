@@ -6,6 +6,7 @@ import { ExpenseStateTag, sentenceCaseState } from "@/components/expense-state-t
 import { Money } from "@/components/money";
 import { EmptyBlock, ErrorBlock, LoadingStatus, TableSkeleton } from "@/components/status";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import {
@@ -29,6 +30,7 @@ const DATE_FORMAT = new Intl.DateTimeFormat("en-IN", {
 });
 
 export default function ExpensesPage() {
+  const [search, setSearch] = useState("");
   const [state, setState] = useState<ExpenseState | "">("");
   const [paidBy, setPaidBy] = useState<string | null>(null);
   const peopleQuery = usePeople();
@@ -45,14 +47,37 @@ export default function ExpensesPage() {
     return peopleQuery.isError ? "Unknown (couldn't load people)" : "…";
   };
 
+  const query = search.trim().toLocaleLowerCase();
+  const visibleExpenses = (expensesQuery.data ?? []).filter(
+    (expense) =>
+      query.length === 0 ||
+      (expense.description ?? "Untitled expense").toLocaleLowerCase().includes(query),
+  );
+  const filtered = state !== "" || paidBy !== null || search !== "";
+  const clearFilters = () => {
+    setState("");
+    setPaidBy(null);
+    setSearch("");
+  };
+
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
         title="Expenses"
-        description="Every expense in the ledger, newest first. Net amount is gross minus any refund or reimbursement recorded against it — open one to see its items, who benefited, and what came back."
+        description="Trace each expense from its original cost to its current net amount. Open a row for items, beneficiaries and refunds."
       />
 
       <div className="flex flex-wrap items-end gap-4">
+        <div className="flex w-full flex-col gap-1.5 sm:w-auto sm:flex-1">
+          <Label htmlFor="expense-search">Search expenses</Label>
+          <Input
+            id="expense-search"
+            type="search"
+            placeholder="Find a description…"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="state-filter">State</Label>
           <Select
@@ -89,6 +114,11 @@ export default function ExpensesPage() {
             </Select>
           </div>
         )}
+        {filtered && (
+          <Button variant="ghost" onClick={clearFilters}>
+            Clear filters
+          </Button>
+        )}
         {peopleQuery.isError && (
           <p className="text-meta text-debit">
             Couldn&apos;t load people.{" "}
@@ -121,10 +151,20 @@ export default function ExpensesPage() {
           }}
         />
       )}
-      {expensesQuery.isSuccess && expensesQuery.data.length === 0 && (
-        <EmptyBlock>No expenses match these filters.</EmptyBlock>
+      {expensesQuery.isSuccess && (
+        <p role="status" className="text-meta text-ink-muted">
+          {visibleExpenses.length} {visibleExpenses.length === 1 ? "expense" : "expenses"}
+          {filtered ? " matching your filters" : " in the ledger"} · Newest first
+        </p>
       )}
-      {expensesQuery.isSuccess && expensesQuery.data.length > 0 && (
+      {expensesQuery.isSuccess && visibleExpenses.length === 0 && (
+        <EmptyBlock>
+          {filtered
+            ? "No expenses match these filters. Clear the filters or try another description."
+            : "No expenses have been recorded yet. Review your payments to begin explaining them."}
+        </EmptyBlock>
+      )}
+      {expensesQuery.isSuccess && visibleExpenses.length > 0 && (
         <>
           <Table className="hidden min-w-[560px] sm:table">
             <TableCaption>Expense ledger</TableCaption>
@@ -139,10 +179,13 @@ export default function ExpensesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {expensesQuery.data.map((expense) => {
+              {visibleExpenses.map((expense) => {
                 const hasAdjustment = expense.netAmount !== expense.grossAmount;
                 return (
-                  <TableRow key={expense.id} className="align-top">
+                  <TableRow
+                    key={expense.id}
+                    className="align-top transition-colors hover:bg-accent-bg/40"
+                  >
                     <TableCell>
                       <Link
                         href={`/expenses/${expense.id}`}
@@ -173,7 +216,7 @@ export default function ExpensesPage() {
           </Table>
 
           <ul className="flex flex-col gap-3 sm:hidden">
-            {expensesQuery.data.map((expense) => {
+            {visibleExpenses.map((expense) => {
               const hasAdjustment = expense.netAmount !== expense.grossAmount;
               return (
                 <li key={expense.id} className="border-b border-rule pb-3 last:border-b-0">
@@ -193,7 +236,7 @@ export default function ExpensesPage() {
                       )}
                     </span>
                   </div>
-                  <div className="mt-1 flex items-center justify-between text-meta text-ink-muted">
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-meta text-ink-muted">
                     <span>
                       {DATE_FORMAT.format(new Date(expense.occurredAt))} ·{" "}
                       {nameFor(expense.paidByPersonId)}

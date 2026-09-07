@@ -70,6 +70,7 @@ function DecisionDialogBody({
       open
       onClose={onClose}
       title={title}
+      dismissible={!pending}
       footer={
         <>
           <Button variant="outline" onClick={onClose} disabled={pending}>
@@ -86,7 +87,9 @@ function DecisionDialogBody({
       }
     >
       <div className="flex flex-col gap-4">
-        <div className="text-body text-ink-muted">{consequence}</div>
+        <div className="border-l-2 border-accent pl-3 text-body leading-relaxed text-ink">
+          {consequence}
+        </div>
         {children}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="decision-reason">
@@ -95,6 +98,7 @@ function DecisionDialogBody({
           </Label>
           <Textarea
             id="decision-reason"
+            disabled={pending}
             value={reason}
             placeholder={reasonPlaceholder}
             onChange={(event) => setReason(event.target.value)}

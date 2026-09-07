@@ -26,6 +26,55 @@ decision record and the audit that motivated it.
 > The bar these are held to: axe reports **0 violations** on every screen in desktop light,
 > desktop dark and mobile, and that is a gate, not an aspiration.
 
+## Post-Phase-21 refinement (2026-09-07)
+
+The product keeps its existing palette, IBM Plex faces, 64rem container, exact figures and
+six workflows. This refinement makes the active workflow, selected item and next step easier
+to distinguish. It adds no runtime dependency and changes no backend code.
+
+- Navigation has a brand/search row and a workflow row. The six links form a three-column
+  grid below `sm`, keeping every destination visible with 44px touch targets. Shortcut help
+  is a visible desktop button as well as `?`.
+- The page title is now 30px, semibold with tight tracking; the existing seven token names
+  remain. Header descriptions have a relaxed line height and a separating rule. Main gutters
+  are 16px on phones and 24px from `sm`; the content width remains 64rem.
+- Shared table headers use a restrained tinted band, with consistent cell padding. Empty
+  states use rules and readable, left-aligned text rather than dashed placeholder boxes.
+- The default border color belongs to Tailwind's **base layer**. An unlayered universal rule
+  was overriding `border-accent` and `border-transparent`, making inactive navigation appear
+  underlined and removing selected-state contrast. Keep utilities able to override defaults.
+- Native inputs/selects use 44px height on phones and 40px from `sm`. Form text is 16px on
+  phones to avoid focus zoom. Buttons have 44px mobile touch targets; compact desktop buttons
+  remain available. Native pickers and reduced-motion behavior are preserved.
+- Review is a 22rem queue beside an inspector on desktop. Below `lg`, opening an item replaces
+  the list with its inspector; Back to queue restores focus to the originating row. `j`/`k`
+  select, Enter opens, and native links/buttons retain their own Enter behavior. No decision
+  is preselected. Model provenance is available through a native disclosure; the stored
+  proposal and its confidence remain visible before approval.
+- Review kind filters become a native select below `sm`. Whole-ledger counts stay separate
+  from the filtered list. The list shows its visible/total count and loads another 50 through
+  the existing API limit when `truncated` is true, preserving domain priority order. A new
+  kind resets both the limit and the selection. A filtered empty result explicitly offers
+  Everything; an empty queue does not claim that accounts reconcile.
+- An unmatched document with neither a receipt total nor an observed amount says **Not
+  evidenced**. The backend's zero materiality fallback is a sorting value, not evidence of a
+  zero payment. An actual recorded zero still renders exactly as zero.
+- Expense search filters descriptions in the returned ledger without sorting or computing
+  figures. Clear filters resets description, state and payer together. Balances starts with
+  the owner in Person A; both people remain editable. An identical-person selection shows
+  guidance, never an endless loading state. The proof-pack shortcut is offered only when the
+  selected pair is the owner and the recipient.
+- Dialogs render in a body portal, make the background inert, lock background scrolling and
+  restore both on close. Global shortcuts and queue triage suspend while a modal is present.
+  The panel still receives initial focus, and a visible close control supports touch. Pending
+  decisions cannot be dismissed by Escape, backdrop or close button. See
+  [ADR-0050](../docs/decisions/0050-modal-isolation-and-review-workspace.md).
+
+The concept established the navigation, spacing, selection rail, restrained panels and type
+hierarchy. Intentional departures preserve the authoritative system: 64rem content width rather
+than the concept's full-width rendering, no gradient on buttons, complete source/proposal data
+instead of the concept's shortened examples, and a choice prompt until the user selects an item.
+
 ## Visual direction
 
 This is a personal financial reconciliation ledger, not a SaaS dashboard, not a consumer app,
@@ -108,7 +157,7 @@ in a new component is a sign the scale is missing something, not a reason to byp
 | `text-meta`     | 13px | Form labels, table column headers, timestamps.                   |
 | `text-body`     | 14px | Default body and table-cell text.                                |
 | `text-emphasis` | 15px | A section heading (`From these expenses`, `Splitwise`).          |
-| `text-h1`       | 24px | The one page-title heading per screen.                           |
+| `text-h1`       | 30px | The one page-title heading per screen.                           |
 | `text-figure`   | 28px | A secondary hero — the balance headline amount.                  |
 | `text-display`  | 40px | **The** hero — `ledgerUnexplainedTotal` on a reconciliation run. |
 
@@ -143,7 +192,7 @@ custom color token is registered under `text-color`, every custom size token und
 
 ### Spacing, surfaces, borders, radius
 
-- One page container everywhere: `max-w-5xl` (64rem), `px-6`. Don't widen it for a
+- One page container everywhere: `max-w-5xl` (64rem), `px-4 sm:px-6`. Don't widen it for a
   table — a wider column of figures is harder to scan, not easier.
 - Section rhythm is `gap-8` (2rem) down a page; a form/filter row is `gap-4`.
 - **Cards exist only where grouping communicates something real** — the two person-pickers on
@@ -188,7 +237,7 @@ can't be restyled. That's an accepted tradeoff, not an oversight.
 justified each** (ADR-0049):
 
 - **`Dialog`** (`src/components/ui/dialog.tsx`) — focus containment while open, focus
-  restoration on close, and Escape-to-close. `<dialog>`'s own `showModal()` is not usable here
+  restoration on close, and Escape-to-close (except while recording a decision). `<dialog>`'s own `showModal()` is not usable here
   (jsdom, where every test in this package runs, does not implement it). Hand-built in about
   sixty lines rather than pulling in a headless library, which is the same trade ADR-0043 made
   when it took shadcn's authoring style without its CLI or Radix.
@@ -285,8 +334,8 @@ One breakpoint is used throughout: `sm` (640px). Below it:
 - Phase 21's two-pane screens (the review queue's list + inspector) collapse at `lg`, not `sm` —
   an inspector needs more room than a table row does, and one column is the right answer for the
   whole tablet range.
-- The nav and the two-person-picker panel wrap via `flex-wrap`/`flex-col sm:flex-row` rather than
-  a bespoke mobile layout.
+- The nav uses a three-column mobile grid; person pickers use full-width native controls on
+  mobile. The review kind filter uses a native select rather than a wrapped row of buttons.
 
 ### Accessibility expectations
 

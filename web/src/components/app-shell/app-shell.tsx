@@ -39,7 +39,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           Skip to content
         </a>
         <Nav />
-        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
+        <main
+          id="main"
+          tabIndex={-1}
+          className="mx-auto w-full max-w-5xl flex-1 px-4 py-7 sm:px-6 sm:py-10"
+        >
           {children}
         </main>
       </ShortcutProvider>

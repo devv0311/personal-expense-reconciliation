@@ -21,7 +21,7 @@ export default function ReviewPage() {
     <div className="flex flex-col gap-8">
       <PageHeader
         title="Review"
-        description="Every financial decision waiting for you — a model's proposal, two payments that resemble each other, money with no explanation, a document attached to nothing. Nothing here becomes state until you say so."
+        description="Resolve proposals, possible duplicates and unmatched evidence. Every decision stays yours to review."
       />
 
       {counts.isPending && (
@@ -34,7 +34,7 @@ export default function ReviewPage() {
         <ReviewCounts counts={counts.data.counts} active={kind} onSelect={setKind} />
       )}
 
-      <ReviewQueue kind={kind} />
+      <ReviewQueue key={kind ?? "all"} kind={kind} />
     </div>
   );
 }

@@ -193,3 +193,18 @@ describe("global keyboard shortcuts", () => {
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 });
+
+it("keeps global navigation and other overlays out of an open dialog", async () => {
+  renderShell();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+  const dialog = await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
+  dialog.focus();
+  await user.keyboard("gb?{Meta>}k{/Meta}");
+  expect(pushedRoutes).toEqual([]);
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  expect(screen.getByRole("dialog")).toBe(dialog);
+  await user.click(within(dialog).getByRole("button", { name: "Close dialog" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+});

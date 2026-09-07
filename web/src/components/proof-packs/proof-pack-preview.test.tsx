@@ -152,7 +152,7 @@ describe("the proof-packs screen", () => {
     renderWithQuery(<ProofPacksPage />);
 
     await waitFor(() => expect(screen.getByLabelText("Recipient")).toBeInTheDocument());
-    expect(screen.getByText(/no third party is ever passed to the assembler/i)).toBeInTheDocument();
+    expect(screen.getByText(/no other person.s details are included/i)).toBeInTheDocument();
     expect(api.callsTo("/api/proof-packs/")).toHaveLength(0);
   });
 

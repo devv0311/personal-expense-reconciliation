@@ -16,13 +16,13 @@ export function PersonSelect({
   onChange: (personId: string | null) => void;
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex w-full min-w-0 flex-col gap-1.5 sm:w-auto">
       <Label htmlFor={id}>{label}</Label>
       <Select
         id={id}
         value={value ?? ""}
         onChange={(event) => onChange(event.target.value === "" ? null : event.target.value)}
-        className="min-w-[180px]"
+        className="sm:min-w-[180px]"
       >
         <option value="" disabled>
           Choose a person

@@ -72,13 +72,15 @@
   --text-meta: 0.8125rem;
   --text-body: 0.875rem;
   --text-emphasis: 0.9375rem;
-  --text-h1: 1.5rem;
+  --text-h1: 1.875rem;
   --text-figure: 1.75rem;
   --text-display: 2.5rem;
 }
 
-* {
-  border-color: var(--rule);
+@layer base {
+  * {
+    border-color: var(--rule);
+  }
 }
 
 html {
@@ -106,5 +108,18 @@ body {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* Keep long source identifiers readable without widening the page. */
+main {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 639px) {
+  input,
+  select,
+  textarea {
+    font-size: 1rem;
   }
 }

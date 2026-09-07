@@ -121,6 +121,10 @@ export function ShortcutProvider({
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) {
+        clearPending();
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         clearPending();

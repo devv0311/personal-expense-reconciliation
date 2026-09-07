@@ -57,7 +57,7 @@ export function TableCaption({ className, ...props }: ComponentProps<"caption">)
 }
 
 export function TableHeader({ className, ...props }: ComponentProps<"thead">) {
-  return <thead className={className} {...props} />;
+  return <thead className={cn("border-b border-rule bg-accent-bg/40", className)} {...props} />;
 }
 
 export function TableBody({ className, ...props }: ComponentProps<"tbody">) {
@@ -71,12 +71,12 @@ export function TableRow({ className, ...props }: ComponentProps<"tr">) {
 export function TableHead({ className, ...props }: ComponentProps<"th">) {
   return (
     <th
-      className={cn("py-2 text-left text-meta font-normal text-ink-muted", className)}
+      className={cn("px-3 py-3 text-left text-meta font-medium text-ink-muted", className)}
       {...props}
     />
   );
 }
 
 export function TableCell({ className, ...props }: ComponentProps<"td">) {
-  return <td className={cn("py-2.5", className)} {...props} />;
+  return <td className={cn("px-3 py-3.5", className)} {...props} />;
 }

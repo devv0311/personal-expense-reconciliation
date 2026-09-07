@@ -13,8 +13,8 @@ export function Select({ className, children, ...props }: ComponentProps<"select
     <div className="relative">
       <select
         className={cn(
-          "h-9 w-full appearance-none rounded-sm border border-rule bg-panel py-1.5 pr-8 pl-2.5 text-body text-ink",
-          "hover:border-rule-strong",
+          "h-11 min-w-0 max-w-full sm:h-10 w-full appearance-none rounded-sm border border-rule bg-panel py-1.5 pr-8 pl-2.5 text-body text-ink",
+          "transition-colors hover:border-rule-strong",
           "disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}

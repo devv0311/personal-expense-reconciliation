@@ -34,6 +34,8 @@ never a `Number`) without ever recomputing it.
   as a dependency. `class-variance-authority` + `clsx` + `tailwind-merge` are the only
   dependencies it added. See `Design.md` and ADR-0043.
 
+Requires Node.js 22.22.2+ for the web test toolchain (the backend remains Node 20+).
+
 ## Running it
 
 Two processes, from the repository root:
@@ -59,7 +61,7 @@ Neither process connects to a real bank, card, AI provider, or Splitwise account
 ## Verifying
 
 ```bash
-npm run typecheck   # tsc --noEmit
+npm run typecheck   # next typegen && tsc --noEmit
 npm run lint        # eslint
 npm run format:check
 npm test            # vitest run
