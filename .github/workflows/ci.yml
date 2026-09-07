@@ -60,3 +60,39 @@ jobs:
         # Runs the same suite the way a developer without Docker runs it, so the fallback
         # path cannot silently rot.
         run: npm test
+
+  # `web/` is a separate package with its own lockfile, tsconfig, ESLint config and Prettier
+  # standard (ADR-0042), so it gets its own job rather than extra steps in `verify` — a
+  # frontend gap phase 15 left open deliberately and phase 21 closes.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

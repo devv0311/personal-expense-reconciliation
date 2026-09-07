@@ -255,3 +255,25 @@ is for `splitwise_audit_findings`, which is a different, addressable record (ADR
 
 Not built: any WhatsApp/messaging transport, a persisted proof-pack table, and a "recorded that
 this was shared" event — generating a pack is a read and stays one (ADR-0047).
+
+## Phase 21 (ADR-0048) — three reads, and no new arithmetic
+
+Phase 21 is a UI phase, and its whole footprint in this layer is reads that already-stored rows
+needed a caller for:
+
+- **`account-service.ts` — `listAccounts`.** Every account by name, including archived ones
+  (each flagged), for the same reason `db.listAccountsForCashReconciliation` includes them: a
+  closed account still posted real movements in a past period, and a snapshot naming it must stay
+  renderable. `last4` is a redacted tail the schema already constrains; no full account or card
+  number exists in this system to return.
+- **`expense-ledger-service.ts` — `getExpenseLedgerRow`.** One expense in the same row shape the
+  listing produces, implemented as that listing with an id filter rather than a second query, so
+  a detail screen and the ledger row that linked to it cannot disagree about `netAmount`.
+- **`evidence-enrichment-service.ts` — `getEvidenceObservation`.** The recorded reading of one
+  document, or `null`. `null` is a real answer: a photograph with no extraction and no text has
+  no reading.
+
+`services.getReconciliationAccountSnapshots` already existed (Phase 16) and gained its first
+`src/api` caller. Nothing in this layer computes anything new for Phase 21 — that is the point
+of ADR-0048, and the reason `web/` can be a rendering of the ledger rather than a second opinion
+about it.

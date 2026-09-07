@@ -1,7 +1,24 @@
 # CLAUDE.md — Engineering Context for This Repository
 
-> **Current decisions (2026-09-06).** Phases 16–20 are complete. Next is Phase 21, the **`web/`
-> UI/UX overhaul** — the last numbered phase before the unnumbered later work.
+> **Current decisions (2026-09-07).** **The numbered sequence is complete: phases 1–21 are all
+> done.** [Phase 21](docs/roadmap.md) shipped the **`web/` UI/UX overhaul**
+> ([ADR-0048](docs/decisions/0048-phase-21-ui-reads-the-ledger-and-never-recomputes-it.md),
+> [ADR-0049](docs/decisions/0049-keyboard-first-navigation-never-completes-a-decision.md)),
+> which makes all six pillars reachable through end-to-end flows across six sections — Review,
+> Reconciliation, Expenses, Balances, Splitwise, Proof packs — plus evidence, payment-context and
+> audit-finding detail screens. Two rules govern it and hold everywhere in `web/`: **the frontend
+> performs no financial arithmetic** (where a figure had no HTTP surface, the _read_ was added —
+> `GET /api/accounts`, `GET /api/expenses/:expenseId`,
+> `GET /api/reconciliation/runs/:id/account-snapshots`,
+> `GET /api/evidence/:evidenceId/observation`, and `accountBoundaries` on
+> `POST /api/reconciliation/runs` — never the calculation), and **no keyboard shortcut completes
+> a decision** (`Cmd+K`, `?`, `g`-pairs and `j`/`k`/`Enter` navigate and open; every
+> consequential act is a button behind a dialog that states its consequence). The account
+> waterfall renders ADR-0017's second identity term by term and never shows a verified ₹0 over
+> incomplete evidence: a missing statement balance reads "not evidenced" and
+> `verificationStatus` comes from the database `CHECK`, not the screen. Everything that remains —
+> rules/learning, analytics, the natural-language interface, concrete external adapters and stale
+> Splitwise re-sync — is deliberately unnumbered later work.
 > [Phase 20](docs/roadmap.md) shipped **derived proof packs**
 > ([ADR-0047](docs/decisions/0047-proof-packs-are-a-derived-read-not-a-second-ledger.md)):
 > `domain.buildProofPack` + `services.buildProofPackPreview` +
@@ -115,9 +132,15 @@ source evidence, interpretation, decision and audit history, plus refined micro-
 that communicate selection, progress and completion. Honor reduced motion, loading/error/empty
 states, responsive layouts and keyboard accessibility. Test rendered flows with synthetic data.
 
-The existing frontend and ADRs 0042/0043 are the starting point. Phase 21 carries the complete
-UI overhaul after the domain phases; a prior design pass is not evidence that all six pillars
-or their interactions have shipped.
+`web/Design.md` is authoritative for how this is realised, and ADRs 0042/0043/0048/0049 record
+the decisions behind it. **Phase 21 delivered this standard across all six pillars**: six
+sections plus five detail screens, a `Cmd+K` command palette, `j`/`k`/`Enter` triage, the
+account-level cash waterfall, the interactive item-refund splitter, the evidence inspector with
+per-signal match verdicts, the Splitwise finding review, and the proof-pack export review. It
+holds a hard bar — axe reports 0 violations on every screen in desktop light, desktop dark and
+mobile — and closed two accessibility defects inherited from earlier phases (a contrast failure
+in the `ink-faint` token, and scroll containers no keyboard could reach). A change to `web/`
+starts by reading `Design.md`.
 
 ## The 6 Core Pillars
 
@@ -155,7 +178,9 @@ or their interactions have shipped.
    and pseudonymize before any external AI call; keep reversible mappings local, block unsafe
    payloads, and exclude raw PII from logs, fixtures and Git. Send only minimal task-relevant
    sanitized context. Proof packs use a separate explicit recipient preview/redaction step;
-   preserving local evidence is not permission to export it.
+   preserving local evidence is not permission to export it. Phase 21's UI holds the same line:
+   the evidence inspector shows a raw notification verbatim because that surface is local, and
+   the proof-pack screen redacts separately and gates copying behind an explicit review.
 
 ## Non-negotiable domain principles
 
@@ -318,17 +343,22 @@ Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
   fixtures → import → normalization → classification → human review → receipt ingestion →
   item extraction → beneficiary allocation → expense ledger → Splitwise integration →
   reconciliation → schema/domain extensions → context re-attachment → item refund allocation
-  → Splitwise auditing → proof packs → UI overhaul). Rules/learning, analytics and the
-  natural-language interface remain unnumbered later work after Phase 21.
+  → Splitwise auditing → proof packs → UI overhaul). **All twenty-one are complete.**
+  Rules/learning, analytics, the natural-language interface, concrete external adapters and
+  stale Splitwise re-sync remain unnumbered later work; none is a prerequisite for anything
+  already shipped, and each needs its own ADR before it starts.
 - **Do not jump ahead of the current phase.** Building later-phase features before earlier
   ones are solid re-creates the exact "messy, unreconciled" problem this system exists to
   solve, just in code form.
 - Do not connect real bank accounts, real Splitwise accounts, or use real financial
   credentials during development. Build adapters/interfaces now; wire real connections later,
   deliberately, per `docs/security/security-model.md`.
-- Deliver Phase 16–20 domain capabilities before the Phase 21 UI overhaul. Apply the Tier-1
-  design standard to every shipped UI change; the existing `web/` application is a real
-  product surface, not a placeholder.
+- Apply the Tier-1 design standard to every shipped UI change; `web/` is a real product
+  surface, not a placeholder. Three rules there are not stylistic and outrank any visual
+  preference (ADR-0048/0049): **`web/` performs no financial arithmetic** — if a screen needs a
+  figure that does not exist over HTTP, add the read to the API, however trivial the subtraction
+  looks; **never render a verified zero over incomplete evidence**; and **no keyboard shortcut
+  completes a decision**.
 
 ## Where things live
 

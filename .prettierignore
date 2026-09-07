@@ -15,3 +15,6 @@ drizzle/meta/
 # scripts (ADR-0042, corrected — checking it against this root config was tried first and
 # immediately disagreed with every file create-next-app generated).
 web/
+
+# Browser-verification artifacts — a driven browser writes these, Prettier does not own them.
+.playwright-mcp/

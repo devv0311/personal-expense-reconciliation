@@ -24,6 +24,16 @@ correctness invariants in `docs/domain/invariants.md`.
 > and now runs behind `src/server.ts` (`node:http`, still no framework); `web/`, a standalone
 > Next.js app, is a client of that API over `fetch`, not a co-located route tree. Nothing about
 > layering, the domain/services boundary, or the database changed.
+>
+> **Addendum (2026-09-07, phase 21, ADR-0048).** `web/` now covers all six product pillars, and
+> the layering rule extends to it in a specific form: **the frontend performs no financial
+> arithmetic.** It is a client of `src/api` in the strict sense — it renders figures the domain
+> computed and derives none of its own, so a screen cannot hold an opinion that disagrees with
+> the ledger. Where a figure the UI needed had no HTTP surface, the read was added to `src/api`
+> (four of them) rather than the calculation to the browser. `src/domain` and `src/services`
+> gained no arithmetic in that phase; the three service functions it added
+> (`listAccounts`, `getExpenseLedgerRow`, `getEvidenceObservation`) are reads over rows that
+> already existed.
 
 ## Stack decision
 
