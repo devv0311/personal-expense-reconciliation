@@ -19,16 +19,37 @@ import type { AiInferenceType } from '../domain/index.js';
 
 import { parseClassificationResponse } from './contract.js';
 import type {
+  AllocationSuggestion,
+  AnomalyExplanation,
+  BeneficiarySuggestion,
   Inference,
+  MerchantNormalization,
   ModelInfo,
+  OccasionSuggestion,
   ReceiptDraft,
   ReceiptItemDraft,
+  RuleProposal,
   TransactionClassification,
 } from './contract.js';
 import {
   extractReceiptItems as extractReceiptItemsOperation,
   parseReceipt as parseReceiptOperation,
 } from './receipt-extraction.js';
+import {
+  explainAnomaly as explainAnomalyOperation,
+  groupIntoOccasion as groupIntoOccasionOperation,
+  normalizeMerchant as normalizeMerchantOperation,
+  proposeRule as proposeRuleOperation,
+  suggestAllocation as suggestAllocationOperation,
+  suggestBeneficiaries as suggestBeneficiariesOperation,
+} from './suggestions.js';
+import type {
+  AnomalyInput,
+  ExpenseContextInput,
+  MerchantNarrationInput,
+  OccasionCandidatesInput,
+  RuleEvidenceInput,
+} from './suggestions.js';
 import { redactPaymentForInference } from './redaction.js';
 import type {
   ClassifiablePayment,
@@ -76,13 +97,14 @@ export interface ModelTransport {
 }
 
 /**
- * The typed AI interface `src/services` depends on.
+ * The typed AI interface `src/services` depends on — all nine operations
+ * `ai-boundary.md` specifies.
  *
- * Three operations now (phase 8's `classifyTransaction`, phase 11's `parseReceipt` and
- * `extractReceiptItems`). The other six arrive with the phases that need them (allocation
- * suggestions in 12, rules in 16) — declaring them now as unimplemented members would be a
- * promise the module cannot keep, and `ai-boundary.md` is where the full interface is
- * specified.
+ * The last six arrived with phase 22 (audit row 46). Each keeps the same line the first three
+ * do: a proposal with a confidence, validated before `src/services` sees it, and never
+ * authoritative. Two of them are worth naming here because they are the ones most easily let
+ * across it — `suggestAllocation` proposes a *method* and never resolved amounts, and
+ * `proposeRule` always proposes `effect: 'propose'`, never a rule that writes unattended.
  */
 export interface AiService {
   classifyTransaction(
@@ -93,6 +115,14 @@ export interface AiService {
   extractReceiptItems(
     evidence: ClassifiableReceiptEvidence,
   ): Promise<Inference<readonly ReceiptItemDraft[]>>;
+  normalizeMerchant(input: MerchantNarrationInput): Promise<Inference<MerchantNormalization>>;
+  suggestBeneficiaries(input: ExpenseContextInput): Promise<Inference<BeneficiarySuggestion>>;
+  /** A method and its inputs. Never amounts — those are `domain.buildAllocationLines`'s. */
+  suggestAllocation(input: ExpenseContextInput): Promise<Inference<AllocationSuggestion>>;
+  groupIntoOccasion(input: OccasionCandidatesInput): Promise<Inference<OccasionSuggestion>>;
+  /** Prose about one figure, and only prose: nothing here has a field a service could write. */
+  explainAnomaly(input: AnomalyInput): Promise<Inference<AnomalyExplanation>>;
+  proposeRule(input: RuleEvidenceInput): Promise<Inference<RuleProposal>>;
 }
 
 /**
@@ -125,5 +155,11 @@ export function createAiService(transport: ModelTransport): AiService {
     },
     parseReceipt: (evidence) => parseReceiptOperation(transport, evidence),
     extractReceiptItems: (evidence) => extractReceiptItemsOperation(transport, evidence),
+    normalizeMerchant: (input) => normalizeMerchantOperation(transport, input),
+    suggestBeneficiaries: (input) => suggestBeneficiariesOperation(transport, input),
+    suggestAllocation: (input) => suggestAllocationOperation(transport, input),
+    groupIntoOccasion: (input) => groupIntoOccasionOperation(transport, input),
+    explainAnomaly: (input) => explainAnomalyOperation(transport, input),
+    proposeRule: (input) => proposeRuleOperation(transport, input),
   };
 }

@@ -444,3 +444,341 @@ function describe(value: unknown): string {
   if (typeof value === 'string') return `"${value}"`;
   return typeof value;
 }
+
+/* ================================================ the six operations phase 22 added */
+
+/**
+ * `ai.normalizeMerchant`'s proposal (`ai-boundary.md`).
+ *
+ * Names a merchant and, optionally, the alias that should have matched. It proposes a
+ * **catalogue entry**, never a resolution: `services.normalizePayments` still matches an alias
+ * exactly, and a person deciding to add the alias is what makes the next payment resolve
+ * deterministically (ADR-0022). The model shortens the typing, not the decision.
+ */
+export interface MerchantNormalization {
+  readonly canonicalName: string;
+  /** The narration fragment to catalogue as an alias, or `null` when none is obvious. */
+  readonly aliasHint: string | null;
+  readonly suggestedCategory: string | null;
+}
+
+const MERCHANT_NORMALIZATION_KEYS = ['canonicalName', 'aliasHint', 'suggestedCategory'];
+
+export function parseNormalizeMerchantResponse(raw: unknown): {
+  readonly proposedOutput: MerchantNormalization;
+  readonly confidence: ConfidenceLevel;
+} {
+  const response = requireObject(raw, 'response');
+  const confidence = requireEnum(response['confidence'], CONFIDENCE_LEVELS, 'confidence');
+  const draft = requireObject(response['proposedOutput'], 'proposedOutput');
+  requireNoUnexpectedKeys(draft, MERCHANT_NORMALIZATION_KEYS, 'proposedOutput');
+  requireNoUnexpectedKeys(response, ['confidence', 'proposedOutput'], 'response');
+  return {
+    confidence,
+    proposedOutput: {
+      canonicalName: requireNonEmptyString(draft['canonicalName'], 'proposedOutput.canonicalName'),
+      aliasHint: optionalNonEmptyString(draft['aliasHint'], 'proposedOutput.aliasHint'),
+      suggestedCategory: optionalNonEmptyString(
+        draft['suggestedCategory'],
+        'proposedOutput.suggestedCategory',
+      ),
+    },
+  };
+}
+
+/**
+ * `ai.suggestBeneficiaries`'s proposal — **who**, never how much.
+ *
+ * Deliberately carries no amounts. Naming the people at a dinner is a reading of the evidence;
+ * deciding what each of them owes is the arithmetic this system keeps deterministic
+ * (`ai-boundary.md`, and `invariants.md` #12's single split algorithm). A shape that could
+ * carry amounts would eventually carry them.
+ */
+export interface BeneficiarySuggestion {
+  readonly people: readonly PersonRef[];
+  /** Why these people — quoted back so a reviewer can judge the reasoning, not just the list. */
+  readonly rationale: string | null;
+}
+
+const BENEFICIARY_SUGGESTION_KEYS = ['people', 'rationale'];
+
+export function parseSuggestBeneficiariesResponse(raw: unknown): {
+  readonly proposedOutput: BeneficiarySuggestion;
+  readonly confidence: ConfidenceLevel;
+} {
+  const response = requireObject(raw, 'response');
+  const confidence = requireEnum(response['confidence'], CONFIDENCE_LEVELS, 'confidence');
+  const draft = requireObject(response['proposedOutput'], 'proposedOutput');
+  requireNoUnexpectedKeys(draft, BENEFICIARY_SUGGESTION_KEYS, 'proposedOutput');
+  requireNoUnexpectedKeys(response, ['confidence', 'proposedOutput'], 'response');
+
+  const rawPeople = draft['people'];
+  if (!Array.isArray(rawPeople) || rawPeople.length === 0) {
+    throw new AiContractError(
+      rawPeople === undefined || rawPeople === null ? 'FIELD_MISSING' : 'FIELD_INVALID',
+      `Expected "proposedOutput.people" to be a non-empty array, received ${describe(rawPeople)}.`,
+      { field: 'proposedOutput.people', received: describe(rawPeople) },
+    );
+  }
+  return {
+    confidence,
+    proposedOutput: {
+      people: rawPeople.map((entry, index) =>
+        requirePersonRef(entry, `proposedOutput.people[${index}]`),
+      ),
+      rationale: optionalNonEmptyString(draft['rationale'], 'proposedOutput.rationale'),
+    },
+  };
+}
+
+/**
+ * `ai.suggestAllocation`'s proposal — a **method and its inputs**, never resolved amounts.
+ *
+ * This is the sharpest line on the whole boundary. A model may say "split this equally between
+ * these three", or "these are the percentages the group agreed"; it may not say what each
+ * person's share comes to in paise. `domain.buildAllocationLines` computes that, with the
+ * Largest Remainder Method, once — and an `exact` method is deliberately not proposable at all,
+ * because an exact split *is* a set of amounts.
+ */
+export type AllocationSuggestion =
+  | { readonly method: 'equal'; readonly beneficiaries: readonly PersonRef[] }
+  | {
+      readonly method: 'percentage';
+      readonly lines: readonly {
+        readonly beneficiary: PersonRef;
+        /** An exact decimal with at most two places. The domain still checks they sum to 100. */
+        readonly percentage: string;
+      }[];
+    };
+
+export function parseSuggestAllocationResponse(raw: unknown): {
+  readonly proposedOutput: AllocationSuggestion;
+  readonly confidence: ConfidenceLevel;
+} {
+  const response = requireObject(raw, 'response');
+  const confidence = requireEnum(response['confidence'], CONFIDENCE_LEVELS, 'confidence');
+  const draft = requireObject(response['proposedOutput'], 'proposedOutput');
+  requireNoUnexpectedKeys(response, ['confidence', 'proposedOutput'], 'response');
+
+  // `equal` and `percentage` only. `exact`, `custom` and the item-sourced methods are absent
+  // by construction: each of those *is* a set of amounts, and amounts are the domain's.
+  const method = requireEnum(
+    draft['method'],
+    ['equal', 'percentage'] as const,
+    'proposedOutput.method',
+  );
+
+  if (method === 'equal') {
+    requireNoUnexpectedKeys(draft, ['method', 'beneficiaries'], 'proposedOutput');
+    const rawPeople = draft['beneficiaries'];
+    if (!Array.isArray(rawPeople) || rawPeople.length === 0) {
+      throw new AiContractError(
+        'FIELD_INVALID',
+        `Expected "proposedOutput.beneficiaries" to be a non-empty array, received ${describe(rawPeople)}.`,
+        { field: 'proposedOutput.beneficiaries', received: describe(rawPeople) },
+      );
+    }
+    return {
+      confidence,
+      proposedOutput: {
+        method,
+        beneficiaries: rawPeople.map((entry, index) =>
+          requirePersonRef(entry, `proposedOutput.beneficiaries[${index}]`),
+        ),
+      },
+    };
+  }
+
+  requireNoUnexpectedKeys(draft, ['method', 'lines'], 'proposedOutput');
+  const rawLines = draft['lines'];
+  if (!Array.isArray(rawLines) || rawLines.length === 0) {
+    throw new AiContractError(
+      'FIELD_INVALID',
+      `Expected "proposedOutput.lines" to be a non-empty array, received ${describe(rawLines)}.`,
+      { field: 'proposedOutput.lines', received: describe(rawLines) },
+    );
+  }
+  return {
+    confidence,
+    proposedOutput: {
+      method,
+      lines: rawLines.map((entry, index) => {
+        const line = requireObject(entry, `proposedOutput.lines[${index}]`);
+        requireNoUnexpectedKeys(
+          line,
+          ['beneficiary', 'percentage'],
+          `proposedOutput.lines[${index}]`,
+        );
+        return {
+          beneficiary: requirePersonRef(
+            line['beneficiary'],
+            `proposedOutput.lines[${index}].beneficiary`,
+          ),
+          percentage: requirePercentageString(
+            line['percentage'],
+            `proposedOutput.lines[${index}].percentage`,
+          ),
+        };
+      }),
+    },
+  };
+}
+
+/** `ai.groupIntoOccasion`'s proposal — which expenses were one evening, and what to call it. */
+export interface OccasionSuggestion {
+  readonly name: string;
+  /** Expense ids from the candidate set. A proposal naming anything else is rejected. */
+  readonly expenseIds: readonly string[];
+  readonly rationale: string | null;
+}
+
+export function parseGroupIntoOccasionResponse(raw: unknown): {
+  readonly proposedOutput: OccasionSuggestion;
+  readonly confidence: ConfidenceLevel;
+} {
+  const response = requireObject(raw, 'response');
+  const confidence = requireEnum(response['confidence'], CONFIDENCE_LEVELS, 'confidence');
+  const draft = requireObject(response['proposedOutput'], 'proposedOutput');
+  requireNoUnexpectedKeys(draft, ['name', 'expenseIds', 'rationale'], 'proposedOutput');
+  requireNoUnexpectedKeys(response, ['confidence', 'proposedOutput'], 'response');
+
+  const rawIds = draft['expenseIds'];
+  if (!Array.isArray(rawIds) || rawIds.length < 2) {
+    throw new AiContractError(
+      'FIELD_INVALID',
+      'An occasion groups at least two expenses; one expense on its own is just an expense.',
+      { field: 'proposedOutput.expenseIds', received: describe(rawIds) },
+    );
+  }
+  return {
+    confidence,
+    proposedOutput: {
+      name: requireNonEmptyString(draft['name'], 'proposedOutput.name'),
+      expenseIds: rawIds.map((entry, index) =>
+        requireNonEmptyString(entry, `proposedOutput.expenseIds[${index}]`),
+      ),
+      rationale: optionalNonEmptyString(draft['rationale'], 'proposedOutput.rationale'),
+    },
+  };
+}
+
+/**
+ * `ai.explainAnomaly`'s proposal — words about a number, and nothing else.
+ *
+ * The only operation on this boundary whose output is purely prose, and the only one that
+ * could not become state if it tried: there is no field here a service could write anywhere.
+ * An explanation of an unexplained ₹4,000 credit is a hypothesis for a person to check, and
+ * the shape makes that its only possible use.
+ */
+export interface AnomalyExplanation {
+  readonly summary: string;
+  /** Ordered most-likely first. Each is a hypothesis, never a finding. */
+  readonly possibleCauses: readonly string[];
+  /** What a person could look at to settle it. */
+  readonly suggestedChecks: readonly string[];
+}
+
+export function parseExplainAnomalyResponse(raw: unknown): {
+  readonly proposedOutput: AnomalyExplanation;
+  readonly confidence: ConfidenceLevel;
+} {
+  const response = requireObject(raw, 'response');
+  const confidence = requireEnum(response['confidence'], CONFIDENCE_LEVELS, 'confidence');
+  const draft = requireObject(response['proposedOutput'], 'proposedOutput');
+  requireNoUnexpectedKeys(
+    draft,
+    ['summary', 'possibleCauses', 'suggestedChecks'],
+    'proposedOutput',
+  );
+  requireNoUnexpectedKeys(response, ['confidence', 'proposedOutput'], 'response');
+  return {
+    confidence,
+    proposedOutput: {
+      summary: requireNonEmptyString(draft['summary'], 'proposedOutput.summary'),
+      possibleCauses: requireStringList(draft['possibleCauses'], 'proposedOutput.possibleCauses'),
+      suggestedChecks: requireStringList(
+        draft['suggestedChecks'],
+        'proposedOutput.suggestedChecks',
+      ),
+    },
+  };
+}
+
+/**
+ * `ai.proposeRule`'s proposal — a standing rule for a person to accept, reject or edit.
+ *
+ * The proposal always arrives as `effect: 'propose'`. A model may notice that four payments
+ * were classified the same way; it may not decide that the fifth should be written unattended.
+ * Promoting a rule to `apply` is a separate act by the person who will live with it
+ * (`services.updateRule`).
+ */
+export interface RuleProposal {
+  readonly name: string;
+  readonly descriptionOperator: 'contains' | 'equals' | 'startsWith';
+  readonly description: string;
+  readonly action: 'set_counterparty_type' | 'set_cash_flow_category' | 'set_expense_category';
+  readonly value: string;
+  readonly rationale: string | null;
+}
+
+export function parseProposeRuleResponse(raw: unknown): {
+  readonly proposedOutput: RuleProposal;
+  readonly confidence: ConfidenceLevel;
+} {
+  const response = requireObject(raw, 'response');
+  const confidence = requireEnum(response['confidence'], CONFIDENCE_LEVELS, 'confidence');
+  const draft = requireObject(response['proposedOutput'], 'proposedOutput');
+  requireNoUnexpectedKeys(
+    draft,
+    ['name', 'descriptionOperator', 'description', 'action', 'value', 'rationale'],
+    'proposedOutput',
+  );
+  requireNoUnexpectedKeys(response, ['confidence', 'proposedOutput'], 'response');
+  return {
+    confidence,
+    proposedOutput: {
+      name: requireNonEmptyString(draft['name'], 'proposedOutput.name'),
+      descriptionOperator: requireEnum(
+        draft['descriptionOperator'],
+        ['contains', 'equals', 'startsWith'] as const,
+        'proposedOutput.descriptionOperator',
+      ),
+      description: requireNonEmptyString(draft['description'], 'proposedOutput.description'),
+      action: requireEnum(
+        draft['action'],
+        ['set_counterparty_type', 'set_cash_flow_category', 'set_expense_category'] as const,
+        'proposedOutput.action',
+      ),
+      value: requireNonEmptyString(draft['value'], 'proposedOutput.value'),
+      rationale: optionalNonEmptyString(draft['rationale'], 'proposedOutput.rationale'),
+    },
+  };
+}
+
+/* ------------------------------------------------- internals the six operations added */
+
+const PERCENTAGE_RESPONSE_PATTERN = /^\d{1,3}(?:\.\d{1,2})?$/;
+
+function requirePercentageString(value: unknown, field: string): string {
+  const text = requireNonEmptyString(value, field);
+  if (!PERCENTAGE_RESPONSE_PATTERN.test(text) || Number(text) > 100) {
+    throw new AiContractError(
+      'FIELD_INVALID',
+      `"${field}" must be a percentage between 0 and 100 with at most two decimal places, ` +
+        `received ${describe(value)}.`,
+      { field, received: describe(value) },
+    );
+  }
+  return text;
+}
+
+function requireStringList(value: unknown, field: string): readonly string[] {
+  if (!Array.isArray(value)) {
+    throw new AiContractError(
+      value === undefined || value === null ? 'FIELD_MISSING' : 'FIELD_INVALID',
+      `Expected "${field}" to be an array of strings, received ${describe(value)}.`,
+      { field, received: describe(value) },
+    );
+  }
+  return value.map((entry, index) => requireNonEmptyString(entry, `${field}[${index}]`));
+}
