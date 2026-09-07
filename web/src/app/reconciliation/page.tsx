@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Money } from "@/components/money";
+import { PageHeader } from "@/components/page-header";
 import { RunReconciliationForm } from "@/components/run-reconciliation-form";
 import { EmptyBlock, ErrorBlock, LoadingStatus, TableSkeleton } from "@/components/status";
 import {
@@ -23,13 +24,10 @@ export default function ReconciliationPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-h1 font-medium text-ink">Reconciliation</h1>
-        <p className="mt-1 max-w-prose text-body text-ink-muted">
-          Compares what left your accounts against what the ledger has explained — expenses,
-          transfers, investments, and settlements — for a period you choose.
-        </p>
-      </div>
+      <PageHeader
+        title="Reconciliation"
+        description="Two independent checks over one period: how much of what left your accounts the ledger has explained, and whether each account's statement actually closes. Neither is derived from the other."
+      />
 
       <section aria-labelledby="run-heading">
         <h2 id="run-heading" className="sr-only">

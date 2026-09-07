@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
-import { Nav } from "@/components/nav";
-import { QueryProvider } from "@/components/query-provider";
+import { AppShell } from "@/components/app-shell/app-shell";
 import "./globals.css";
 
 const plexSans = IBM_Plex_Sans({
@@ -26,10 +25,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${plexSans.variable} ${plexMono.variable} h-full`}>
       <body className="flex min-h-full flex-col bg-paper font-sans text-ink antialiased">
-        <QueryProvider>
-          <Nav />
-          <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">{children}</main>
-        </QueryProvider>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

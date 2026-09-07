@@ -40,3 +40,18 @@ export function formatDateTime(iso: string): string {
     timeZone: "UTC",
   }).format(new Date(iso));
 }
+
+/** A date on its own, in the ledger's `en-IN` UTC convention — `5 Aug 2026`. */
+export function formatDate(iso: string): string {
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(iso));
+}
+
+/** `Date` → the `datetime-local`-free ISO instant the API's timestamp fields expect. */
+export function nowIso(): string {
+  return new Date().toISOString();
+}

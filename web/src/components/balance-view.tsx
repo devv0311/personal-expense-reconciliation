@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { EvidenceStatus } from "@/components/evidence-status";
 import { Money } from "@/components/money";
 import {
@@ -54,9 +55,13 @@ export function BalanceView({
       </div>
 
       <section aria-labelledby="obligations-heading">
-        <h2 id="obligations-heading" className="mb-3 text-emphasis font-medium text-ink">
+        <h2 id="obligations-heading" className="mb-1 text-emphasis font-medium text-ink">
           From these expenses
         </h2>
+        <p className="mb-3 max-w-prose text-meta text-ink-muted">
+          Every obligation behind the figure above. Open one to see its items, what came back, and
+          how the share was decided.
+        </p>
         {balance.contributions.length === 0 ? (
           <p className="text-body text-ink-muted">
             No shared expenses between these two people yet.
@@ -80,7 +85,12 @@ export function BalanceView({
                     <TableCell>{nameFor(people, contribution.debtorId)}</TableCell>
                     <TableCell>{nameFor(people, contribution.creditorId)}</TableCell>
                     <TableCell className="text-right">
-                      <Money paise={contribution.amount} />
+                      <Link
+                        href={`/expenses/${contribution.expenseId}`}
+                        className="underline-offset-2 hover:underline"
+                      >
+                        <Money paise={contribution.amount} />
+                      </Link>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -98,7 +108,12 @@ export function BalanceView({
                     <span className="text-ink-faint"> owes </span>
                     {nameFor(people, contribution.creditorId)}
                   </span>
-                  <Money paise={contribution.amount} />
+                  <Link
+                    href={`/expenses/${contribution.expenseId}`}
+                    className="underline-offset-2 hover:underline"
+                  >
+                    <Money paise={contribution.amount} />
+                  </Link>
                 </li>
               ))}
             </ul>

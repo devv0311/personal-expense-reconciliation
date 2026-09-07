@@ -7,6 +7,25 @@ design pass (2026-09, after phase 15 shipped the first production UI) that treat
 UI's visual quality as a defect to fix, not a phase to build on top of — see ADR-0043 for the
 decision record and the audit that motivated it.
 
+> **Phase 21 update (2026-09-07).** The product grew from four screens to eleven, covering all
+> six of `CLAUDE.md`'s pillars ([ADR-0048](../docs/decisions/0048-phase-21-ui-reads-the-ledger-and-never-recomputes-it.md),
+> [ADR-0049](../docs/decisions/0049-keyboard-first-navigation-never-completes-a-decision.md)).
+> This pass **extended** the system below rather than replacing any of it: same palette, same
+> seven-size type scale, same one-hero-figure rule, same native-controls-first stance, no icon
+> library, no animation library, no component library. What it added is recorded inline under
+> each heading, and four things are worth knowing before you read further:
+>
+> - **`--ink-faint` was darkened** in both themes to meet AA. It was below 4.5:1 on `paper` and
+>   `panel` and had been since phase 15 — a real defect, found by an axe sweep and fixed at the
+>   token so every screen inherits it. See "Color".
+> - **One primitive was added**: `Dialog`, hand-built, ~60 lines, no dependency. See "Dialogs".
+> - **`Table` now makes an overflowing scroll container keyboard-reachable**, named by its own
+>   caption, and only when it actually scrolls. See "Responsive rules".
+> - **A keyboard layer exists**, and it is navigational only. See "Keyboard".
+>
+> The bar these are held to: axe reports **0 violations** on every screen in desktop light,
+> desktop dark and mobile, and that is a gate, not an aspiration.
+
 ## Visual direction
 
 This is a personal financial reconciliation ledger, not a SaaS dashboard, not a consumer app,
@@ -41,21 +60,21 @@ token.
 
 ### Color
 
-| Token          | Light     | Dark      | Meaning — the only thing it may be used for                             |
-| -------------- | --------- | --------- | ------------------------------------------------------------------------- |
-| `paper`        | `#fafaf7` | `#14161c` | Page background.                                                          |
-| `panel`        | `#ffffff` | `#1b1e26` | A raised surface (the grouped person-picker panel).                       |
-| `ink`          | `#1b2333` | `#eceef4` | Primary text.                                                             |
-| `ink-muted`    | `#5b6478` | `#a2a9bb` | Secondary text, labels, table headers.                                    |
-| `ink-faint`    | `#8b93a3` | `#6b7284` | Tertiary text (a subtraction sign, a "…" placeholder).                    |
-| `rule`         | `#d8d9cd` | `#2c2f3a` | Hairline borders/dividers.                                                |
-| `rule-strong`  | `#b7bba8` | `#3c4050` | A heavier rule (the double rule above a hero total; a hover border).      |
-| `debit`/`-bg`  | `#a33b2e` | `#e08678` | A figure that is **bad news in this context** — unexplained money, a rejected expense. Never used for a system error alone (pair with `attention` for that). |
-| `credit`/`-bg` | `#2f6e4f` | `#7fbb9c` | A figure that is **good news in this context** — fully explained, settled, confirmed. Never derived from a raw sign; always an explicit caller judgment (`money.tsx`'s own comment). |
-| `accent`/`-bg` | `#2a3a6b` | `#8b9be0` | The one interactive/brand color — links, the primary button, the active nav tab, in-flow states moving toward completion. |
-| `accent-ink`   | `#ffffff` | `#14161c` | Text set **on top of** `accent` (a filled button's label). Never `text-white`/`text-black` literally — dark mode inverts which one is readable. |
-| `attention`/`-bg` | `#8a5a17` | `#d3a24e` | A finding that needs a look but is not wrong: a Splitwise mismatch, an expense sitting in `review_required`. Distinct from `debit` on purpose — see "Color carries exactly one meaning" below. |
-| `focus-ring`   | `#2a3a6b` | `#8b9be0` | The universal `:focus-visible` outline. Same value as `accent`, kept as its own token because the two could diverge later. |
+| Token             | Light     | Dark      | Meaning — the only thing it may be used for                                                                                                                                                                                                                                                                                                                              |
+| ----------------- | --------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `paper`           | `#fafaf7` | `#14161c` | Page background.                                                                                                                                                                                                                                                                                                                                                         |
+| `panel`           | `#ffffff` | `#1b1e26` | A raised surface (the grouped person-picker panel).                                                                                                                                                                                                                                                                                                                      |
+| `ink`             | `#1b2333` | `#eceef4` | Primary text.                                                                                                                                                                                                                                                                                                                                                            |
+| `ink-muted`       | `#5b6478` | `#a2a9bb` | Secondary text, labels, table headers.                                                                                                                                                                                                                                                                                                                                   |
+| `ink-faint`       | `#6b7387` | `#828a9e` | Tertiary text (a subtraction sign, an annotation under a figure). **Darkened in phase 21**: the old `#8b93a3`/`#6b7284` pair was ~2.95:1 on `paper` and ~3.76:1 in dark, below AA for the 12px text it is used for. Both values now clear 4.5:1 on `paper` **and** on `panel`, in both themes, and `src/design-system.test.tsx` recomputes that rather than trusting it. |
+| `rule`            | `#d8d9cd` | `#2c2f3a` | Hairline borders/dividers.                                                                                                                                                                                                                                                                                                                                               |
+| `rule-strong`     | `#b7bba8` | `#3c4050` | A heavier rule (the double rule above a hero total; a hover border).                                                                                                                                                                                                                                                                                                     |
+| `debit`/`-bg`     | `#a33b2e` | `#e08678` | A figure that is **bad news in this context** — unexplained money, a rejected expense. Never used for a system error alone (pair with `attention` for that).                                                                                                                                                                                                             |
+| `credit`/`-bg`    | `#2f6e4f` | `#7fbb9c` | A figure that is **good news in this context** — fully explained, settled, confirmed. Never derived from a raw sign; always an explicit caller judgment (`money.tsx`'s own comment).                                                                                                                                                                                     |
+| `accent`/`-bg`    | `#2a3a6b` | `#8b9be0` | The one interactive/brand color — links, the primary button, the active nav tab, in-flow states moving toward completion.                                                                                                                                                                                                                                                |
+| `accent-ink`      | `#ffffff` | `#14161c` | Text set **on top of** `accent` (a filled button's label). Never `text-white`/`text-black` literally — dark mode inverts which one is readable.                                                                                                                                                                                                                          |
+| `attention`/`-bg` | `#8a5a17` | `#d3a24e` | A finding that needs a look but is not wrong: a Splitwise mismatch, an expense sitting in `review_required`. Distinct from `debit` on purpose — see "Color carries exactly one meaning" below.                                                                                                                                                                           |
+| `focus-ring`      | `#2a3a6b` | `#8b9be0` | The universal `:focus-visible` outline. Same value as `accent`, kept as its own token because the two could diverge later.                                                                                                                                                                                                                                               |
 
 **Color carries exactly one meaning, and only one token owns each meaning.** Before phase 15's
 design pass, a Splitwise discrepancy and an API network failure were both rendered in `debit`
@@ -83,15 +102,15 @@ Tailwind v4 does not recognize as a namespace at all; see the postmortem note in
 `src/lib/utils.ts` before you add an eighth). Always reach for a name; a bracketed `text-[Npx]`
 in a new component is a sign the scale is missing something, not a reason to bypass it.
 
-| Token           | Size      | Used for                                                             |
-| --------------- | --------- | --------------------------------------------------------------------- |
-| `text-micro`    | 12px      | A secondary annotation under a figure (`of ₹1,800.00`).               |
-| `text-meta`     | 13px      | Form labels, table column headers, timestamps.                       |
-| `text-body`     | 14px      | Default body and table-cell text.                                     |
-| `text-emphasis` | 15px      | A section heading (`From these expenses`, `Splitwise`).               |
-| `text-h1`       | 24px      | The one page-title heading per screen.                                |
-| `text-figure`   | 28px      | A secondary hero — the balance headline amount.                       |
-| `text-display`  | 40px      | **The** hero — `ledgerUnexplainedTotal` on a reconciliation run.       |
+| Token           | Size | Used for                                                         |
+| --------------- | ---- | ---------------------------------------------------------------- |
+| `text-micro`    | 12px | A secondary annotation under a figure (`of ₹1,800.00`).          |
+| `text-meta`     | 13px | Form labels, table column headers, timestamps.                   |
+| `text-body`     | 14px | Default body and table-cell text.                                |
+| `text-emphasis` | 15px | A section heading (`From these expenses`, `Splitwise`).          |
+| `text-h1`       | 24px | The one page-title heading per screen.                           |
+| `text-figure`   | 28px | A secondary hero — the balance headline amount.                  |
+| `text-display`  | 40px | **The** hero — `ledgerUnexplainedTotal` on a reconciliation run. |
 
 **One hero number per screen.** A reconciliation run detail exists to answer one question ("how
 much is still unexplained?"); a balance screen exists to answer one question ("who owes whom,
@@ -101,6 +120,15 @@ explicitly rather than relying on a paired theme line-height, so it's decided in
 place). Every other figure on the same screen — the subtraction chain, a contributing expense
 row — stays at `text-body` or smaller. Resist the urge to make more than one thing big; if two
 numbers compete for attention, the hierarchy has failed.
+
+**The run detail is the one screen with two, and phase 21 made that deliberate rather than
+accidental.** ADR-0016's `ledgerUnexplainedTotal` (`text-display`) and ADR-0017's per-account
+`cashBalanceDelta` (`text-figure`) are two **independent identities**: neither is derived from
+the other, and a period can explain every rupee of outflow while a statement still fails to
+close. They live in separate `<section>`s under their own headings, at different sizes, so they
+read as two questions answered in sequence rather than two answers to one question. Blending
+them into a single score would be the actual design failure. Do not take this as licence for a
+second hero elsewhere: if a new screen wants one, it is probably two screens.
 
 **A custom `text-*` token must be registered in both places.** Adding a token to `globals.css`'s
 `@theme inline` block makes the utility exist; it does **not** teach `tailwind-merge` which
@@ -123,7 +151,7 @@ custom color token is registered under `text-color`, every custom size token und
   jointly one control ("pick a pair"), not because every block of content gets a box. Everywhere
   else, a hairline (`border-rule` on a `<tr>`, a `border-t-2 border-double` above a total) carries
   the hierarchy instead. If you're about to wrap a new section in `rounded-sm border border-rule
-  p-5` purely for visual tidiness, that's the old pattern this pass moved away from — ask whether
+p-5` purely for visual tidiness, that's the old pattern this pass moved away from — ask whether
   whitespace alone would do the job.
 - One radius, `rounded-sm`, on every bordered element (buttons, inputs, panels, alerts). No
   second radius scale.
@@ -155,6 +183,56 @@ control genuinely needs one**, and say which behavior justified it when you do.
 
 The one real cost of this choice: an open `<select>`'s dropdown list is still OS-rendered and
 can't be restyled. That's an accepted tradeoff, not an oversight.
+
+**Phase 21 found the first two controls that genuinely needed more, and says which behavior
+justified each** (ADR-0049):
+
+- **`Dialog`** (`src/components/ui/dialog.tsx`) — focus containment while open, focus
+  restoration on close, and Escape-to-close. `<dialog>`'s own `showModal()` is not usable here
+  (jsdom, where every test in this package runs, does not implement it). Hand-built in about
+  sixty lines rather than pulling in a headless library, which is the same trade ADR-0043 made
+  when it took shadcn's authoring style without its CLI or Radix.
+- **The command palette's search field** — a `role="combobox"` over a `role="listbox"` driven by
+  `aria-activedescendant`, so the input keeps focus while the arrow keys move the highlight. A
+  real `<select>` cannot be that.
+
+Two `Dialog` details are decisions rather than defaults, and a new caller should not "fix" them:
+focus lands on the **panel**, never on the first button (a dialog focused on its confirm button
+is one Enter away from an act nobody read), and `DecisionDialog` is **mounted only while open**,
+so its reason field starts empty every time.
+
+### Dialogs: `DecisionDialog` is the only shape a recorded decision takes
+
+Every consequential act in the product — accepting a proposal, confirming a duplicate, attaching
+evidence, recording a refund, distributing one, reviewing an audit finding — goes through
+`src/components/review/decision-dialog.tsx`. It forces three things on its caller, so no screen
+can quietly skip one:
+
+1. **A `consequence`, in words**, stating what the button will actually do ("this discards the
+   later payment"; "this authorizes no write to Splitwise"). It is a required prop.
+2. **A required reason where the service requires one.** The confirm button stays disabled until
+   one is typed — the service would refuse anyway, and refusing here means the person finds out
+   before the request rather than after.
+3. **No keystroke submits.** Enter inside the reason field types a newline; the only path to the
+   mutation is the button.
+
+When you add an action, add it here. A bare `<Button onClick={mutate}>` on a financially
+consequential path is the pattern this component exists to prevent.
+
+### Keyboard
+
+`src/components/app-shell/` holds the keyboard layer, and its one rule is worth restating
+because it shapes everything: **a shortcut moves you somewhere or opens something; it never
+completes a decision** (ADR-0049).
+
+- `Cmd K` / `Ctrl K` opens the command palette; `?` lists every shortcut that currently applies,
+  including the ones the open screen registered through `useShortcutSection`; `g` then a letter
+  goes to one of the six sections; `j`/`k`/`Enter`/`Esc` triage the review queue.
+- Every global listener ignores events from an `input`, `textarea`, `select` or
+  `contenteditable`, so typing "go" into a reason box does not navigate away mid-sentence.
+- There is deliberately **no** `a`-to-accept. If a future screen wants bulk action, design it as
+  an explicit multi-select with one confirmation over the set, not as a per-item key.
+- A skip link is the first tab stop, and `<main>` is its target (`tabIndex={-1}`).
 
 ### Buttons, tables, alerts, skeletons
 
@@ -197,22 +275,42 @@ One breakpoint is used throughout: `sm` (640px). Below it:
   future one like it) rely on the `Table` primitive's automatic horizontal-scroll wrapper instead
   of a second stacked-list markup — a deliberate scope line, not an oversight: at two columns and
   a handful of rows, horizontal scroll is not a degraded experience.
+- **A scroll container a mouse can pan and a keyboard cannot reach is a WCAG failure**
+  (axe's `scrollable-region-focusable`), and phase 21's denser tables started tripping it at
+  360px. `Table` now measures itself and, **only when it actually overflows**, becomes
+  `tabIndex={0}` with `role="group"` named by its own `sr-only` caption. Measuring rather than
+  always setting `tabIndex` avoids putting a useless tab stop in front of every small table;
+  `group` rather than `region` avoids the landmark-uniqueness rule two scrollable tables on one
+  screen would otherwise break.
+- Phase 21's two-pane screens (the review queue's list + inspector) collapse at `lg`, not `sm` —
+  an inspector needs more room than a table row does, and one column is the right answer for the
+  whole tablet range.
 - The nav and the two-person-picker panel wrap via `flex-wrap`/`flex-col sm:flex-row` rather than
   a bespoke mobile layout.
 
 ### Accessibility expectations
 
-- Lighthouse accessibility: 100 on all four screens, desktop and mobile, as of this pass — treat
-  a regression below that as a shipped bug, not a nitpick.
+- **axe-core: 0 violations on every screen**, in desktop light, desktop dark and mobile —
+  re-verified across all eleven screens in phase 21, and a regression is a shipped bug, not a
+  nitpick. That sweep is what caught the `ink-faint` contrast defect and the unreachable scroll
+  containers, both of which had been shipping since earlier phases and neither of which a
+  screenshot review would ever have surfaced. Run it against a live app; the frontend suite
+  covers roles, labels, focus and the token contrast, but only a browser catches the rest.
 - Every focusable element gets the app-wide `:focus-visible { outline: 2px solid
-  var(--focus-ring) }` rule (`globals.css`) — never suppressed per-component.
+var(--focus-ring) }` rule (`globals.css`) — never suppressed per-component.
 - `role="alert"` is reserved for a real, singular system failure (`ErrorBlock`); a list of domain
   findings is plain content (see `Alert` above).
 - Every table keeps an `sr-only` `<caption>` and correct `scope` on header cells — a convention
   phase 15 established that this pass preserved rather than reinvented.
 - `prefers-reduced-motion: reduce` already collapses every animation/transition duration to
   ~0 globally (`globals.css`) — new motion never needs its own reduced-motion branch as long as
-  it's a CSS `transition`/`animation`, not a JS-driven one.
+  it's a CSS `transition`/`animation`, not a JS-driven one. Phase 21 added no JS-driven motion,
+  and verified in a browser that a reduced-motion context reports **zero** non-trivial durations
+  while a normal one still has them (so the rule is doing work, not vacuously passing).
+- A figure a screen does not have is rendered as **absent**, never as `₹0.00`. `UnknownValue`
+  (`src/components/facts.tsx`) is the component for it. This is an accessibility rule as much as
+  a financial one: "not evidenced" and "zero" are different facts, and a reader using a screen
+  reader has even less context to tell them apart from a bare number.
 
 ### Interaction and motion
 
@@ -226,7 +324,7 @@ change, feedback) before adding it, and default to none.
 
 Stack is unchanged from phase 15 (ADR-0042): **Next.js 16 (App Router), React 19, Tailwind CSS
 v4, TanStack Query**, `web/` a self-contained package that only ever talks to the real API over
-`fetch`. This pass added exactly three things on top, all justified above and in ADR-0043:
+`fetch`. The design pass added exactly three things on top, all justified above and in ADR-0043:
 
 1. `src/components/ui/` — the primitive layer (`button`, `select`, `input`, `label`, `table`,
    `alert`, `skeleton`).
@@ -237,6 +335,36 @@ v4, TanStack Query**, `web/` a self-contained package that only ever talks to th
    zero-or-near-zero-transitive-dependency, no install scripts, reviewed before committing (see
    ADR-0043). No component library, animation library, or icon library was added.
 
+**Phase 21 added no dependency at all.** What it did add:
+
+- `src/components/ui/dialog.tsx` and `textarea.tsx` — two more hand-owned primitives.
+- `src/components/app-shell/` — the shell: `ShortcutProvider` (the keyboard layer),
+  `CommandPalette`, `ShortcutHelp` and `AppShell`, which composes them with the nav and the skip
+  link. `app/layout.tsx` renders `AppShell` and nothing else.
+- `src/components/{review,evidence,expenses,reconciliation,splitwise,proof-packs}/` — one
+  directory per pillar, plus `facts.tsx` (the label/value inspector layout), `annotations.tsx`
+  (confidence, signal verdicts, notes, state words), `page-header.tsx` (`PageHeader`/`Section`)
+  and `payment-summary.tsx`, all shared.
+- `src/lib/labels.ts` — human wording for every closed enum the API sends. Two rules hold
+  throughout: every map **falls back to the raw value**, never to "Unknown", so a value this file
+  has not been taught still renders; and a label never softens a state ("Incomplete" is not
+  "Pending").
+- `src/test-support/` grew `api-mock.ts` (a route map in front of `fetch`, where an unrouted
+  request is a loud failure and every call keeps its body), `fixtures.ts` (API-shaped synthetic
+  responses) and `next-navigation.ts` (the App Router hooks, replaced once in `vitest.setup.ts`).
+
+### Data flow
+
+Every screen reads through `src/lib/queries.ts` (TanStack Query hooks) over `src/lib/api.ts`,
+which is still the one place a request leaves this package. Two conventions are worth keeping:
+
+- **A mutation invalidates everything it can change, not just what it wrote.** A refund moves the
+  net amount, the allocation, the pairwise balance and what a proof pack would say — see
+  `invalidateExpense`.
+- **A proof pack is fetched with `staleTime: 0`**, unlike every other read. It is what you are
+  about to show another person, so it is re-derived when the preview opens rather than served
+  from a cache that predates the last refund.
+
 ## What the next phase inherits
 
 - Reach for a token name (`text-h1`, `text-attention`, `gap-8`) before a bracketed value. If the
@@ -246,6 +374,15 @@ v4, TanStack Query**, `web/` a self-contained package that only ever talks to th
   wants two, that's a sign the screen is answering two questions and might be two screens.
 - Default to a styled native control. Reach for a headless primitive only when a control needs
   behavior HTML doesn't provide, and record which behavior when you do.
-- `review/evidence/receipts` screens (phases 9–11's own surfaces, still not built per
-  `docs/roadmap.md`) and frontend CI are still open — this pass did not add them, per its own
-  scope (a design-quality pass on the four existing screens, not new product surface).
+- ~~`review/evidence/receipts` screens and frontend CI~~ — **both shipped in phase 21.** The
+  review queue, the evidence inspector, the payment-context screen and the receipt view all
+  exist, and CI has a `web` job running typecheck, lint, format, test and build.
+- **`web/` performs no financial arithmetic, and that is not negotiable** (ADR-0048). If a screen
+  needs a number that does not exist over HTTP, add the _read_ to the API — do not compute it
+  here, however trivial the subtraction looks. The two exceptions are parsing what a person typed
+  into exact paise (`parseRupeeInput`, pure string handling, no `Number`) and echoing a form's own
+  entry total, which is labelled as an entry check and never rendered with ledger semantics.
+- **Never render a verified zero over incomplete evidence.** `verificationStatus` comes from a
+  database `CHECK`; a screen renders that word and never derives it. The same instinct applies
+  everywhere: an empty findings list under a failed external read is not agreement, and an empty
+  review queue is not the same as a filter hiding something. Say which.
