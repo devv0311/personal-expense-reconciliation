@@ -13,6 +13,8 @@ import type {
   BalanceResult,
   ClassificationDecisionItem,
   CounterpartyOptions,
+  EvidenceLibraryResult,
+  EvidenceLibraryRow,
   EvidenceMatchCandidateView,
   EvidenceRecord,
   ExpenseLedgerRow,
@@ -26,6 +28,7 @@ import type {
   PossibleDuplicateItem,
   ProofPackPreview,
   ReconciliationAccountSnapshot,
+  ReceiptView,
   ReconciliationRun,
   RefundAllocationState,
   ReviewQueueResult,
@@ -212,6 +215,7 @@ export const EVIDENCE: EvidenceRecord = {
   linkedPaymentId: null,
   linkedExpenseId: null,
   createdAt: "2026-09-01T10:00:00.000Z",
+  receiptId: null,
 };
 
 /* -------------------------------------------------------------- expenses and refunds */
@@ -675,6 +679,16 @@ export const CLASSIFIED_CREDIT: PaymentWorkspaceItem = {
   unexplainedTotal: "40000",
 };
 
+/** An unexplained credit — what a refund's money looks like before anything names it. */
+export const CREDIT_PAYMENT: PaymentWorkspaceItem = {
+  ...UNEXPLAINED_PAYMENT,
+  id: "pay-credit",
+  amount: "40000",
+  direction: "credit",
+  rawDescription: "REFUND SWIGGY ORDER 5512",
+  unexplainedTotal: "40000",
+};
+
 /** Explained by an expense link — the case that must never read as an unverified zero. */
 export const EXPLAINED_PAYMENT: PaymentWorkspaceItem = {
   ...UNEXPLAINED_PAYMENT,
@@ -780,4 +794,75 @@ export const GROUP: GroupDetail = {
       leftAt: "2026-08-01T00:00:00.000Z",
     },
   ],
+};
+
+/* --------------------------------------------------------------------- evidence library */
+
+export const LIBRARY_ROWS: readonly EvidenceLibraryRow[] = [
+  {
+    id: "ev-1",
+    type: "upi_notification",
+    noteKind: null,
+    storageRef: null,
+    mediaType: null,
+    byteSize: null,
+    rawText: "Rs.640.00 debited from A/c XX4821 on 08-Aug-26 to PEPPERMILL CAFE.",
+    capturedAt: "2026-08-08T11:31:00.000Z",
+    createdAt: "2026-09-01T10:00:00.000Z",
+    linkedPaymentId: null,
+    linkedExpenseId: null,
+    hasReceipt: false,
+    hasObservation: true,
+  },
+  {
+    id: "ev-2",
+    type: "receipt_image",
+    noteKind: null,
+    storageRef: "sha256/abc.jpg",
+    mediaType: "image/jpeg",
+    byteSize: 20481,
+    rawText: null,
+    capturedAt: "2026-08-05T09:20:00.000Z",
+    createdAt: "2026-09-01T10:05:00.000Z",
+    linkedPaymentId: "pay-1",
+    linkedExpenseId: null,
+    hasReceipt: true,
+    hasObservation: false,
+  },
+];
+
+export function evidenceLibrary(
+  rows: readonly EvidenceLibraryRow[] = LIBRARY_ROWS,
+): EvidenceLibraryResult {
+  return { evidence: rows, total: rows.length, limit: 25, offset: 0 };
+}
+
+export const RECEIPT_VIEW: ReceiptView = {
+  receipt: {
+    id: "rec-1",
+    evidenceId: "ev-2",
+    merchantId: null,
+    subtotal: "180000",
+    tax: "9000",
+    total: "189000",
+    currency: "INR",
+    extractionConfidence: "medium",
+    extractedAt: "2026-09-01T10:06:00.000Z",
+    confirmedByUser: false,
+    createdAt: "2026-09-01T10:06:00.000Z",
+  },
+  items: [
+    {
+      id: "ri-1",
+      receiptId: "rec-1",
+      description: "Paneer tikka",
+      quantity: "1",
+      unitPrice: "60000",
+      lineTotal: "60000",
+      suggestedCategory: null,
+    },
+  ],
+  itemsSubtotalDiscrepancy: "120000",
+  paymentDiscrepancy: null,
+  candidateMatches: [],
 };

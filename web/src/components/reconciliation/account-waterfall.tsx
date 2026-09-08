@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { NoteList } from "@/components/annotations";
 import { Fact, Facts, UnknownValue } from "@/components/facts";
 import { Money } from "@/components/money";
@@ -43,7 +44,21 @@ import { cn } from "@/lib/utils";
  * The bar widths are geometry — a proportion of the largest magnitude on the row set — and
  * carry no figure of their own. Every number rendered is one the run already computed.
  */
-export function AccountWaterfalls({ reconciliationRunId }: { reconciliationRunId: string }) {
+export function AccountWaterfalls({
+  reconciliationRunId,
+  periodStart,
+  periodEnd,
+}: {
+  reconciliationRunId: string;
+  /**
+   * The run's own period, used only to build drill-through links.
+   *
+   * Passed in rather than re-read: a link that filtered by a different period than the run
+   * would list movements the figure above it never counted, which is worse than no link.
+   */
+  periodStart?: string;
+  periodEnd?: string;
+}) {
   const snapshots = useAccountSnapshots(reconciliationRunId);
   const accounts = useAccounts();
 
@@ -83,6 +98,8 @@ export function AccountWaterfalls({ reconciliationRunId }: { reconciliationRunId
           key={snapshot.id}
           snapshot={snapshot}
           account={accounts.data?.find((entry) => entry.id === snapshot.accountId)}
+          {...(periodStart === undefined ? {} : { periodStart })}
+          {...(periodEnd === undefined ? {} : { periodEnd })}
         />
       ))}
     </div>
@@ -145,9 +162,13 @@ function PeriodVerdict({
 export function AccountWaterfall({
   snapshot,
   account,
+  periodStart,
+  periodEnd,
 }: {
   snapshot: ReconciliationAccountSnapshot;
   account?: AccountSummary;
+  periodStart?: string;
+  periodEnd?: string;
 }) {
   const scale = largestMagnitude([
     snapshot.openingBalance,
@@ -158,6 +179,28 @@ export function AccountWaterfall({
   ]);
 
   const headingId = `account-${snapshot.id}`;
+
+  /**
+   * The movements behind one term of this account's identity.
+   *
+   * Same account, same period, same direction as the figure it sits under — which is what makes
+   * it a drill-through rather than a link to a general list. `unexplained` narrows it further to
+   * the movements nothing accounts for, which is the term a reader actually chases.
+   */
+  const drillThrough = (
+    direction: "debit" | "credit",
+    options: { unexplained?: boolean } = {},
+  ): string | undefined => {
+    if (periodStart === undefined || periodEnd === undefined) return undefined;
+    const params = new URLSearchParams({
+      accountId: snapshot.accountId,
+      direction,
+      from: periodStart.slice(0, 10),
+      to: periodEnd.slice(0, 10),
+    });
+    if (options.unexplained === true) params.set("onlyUnexplained", "true");
+    return `/payments?${params.toString()}`;
+  };
 
   return (
     <Section
@@ -190,8 +233,20 @@ export function AccountWaterfall({
             scale={scale}
             unknownLabel="Not evidenced"
           />
-          <WaterfallRow label="Credits" paise={snapshot.totalCredits} scale={scale} sign="+" />
-          <WaterfallRow label="Debits" paise={snapshot.totalDebits} scale={scale} sign="−" />
+          <WaterfallRow
+            label="Credits"
+            paise={snapshot.totalCredits}
+            scale={scale}
+            sign="+"
+            {...hrefProp(drillThrough("credit"))}
+          />
+          <WaterfallRow
+            label="Debits"
+            paise={snapshot.totalDebits}
+            scale={scale}
+            sign="−"
+            {...hrefProp(drillThrough("debit"))}
+          />
           <WaterfallRow
             label="Expected closing"
             paise={snapshot.expectedEndingBalance}
@@ -230,10 +285,12 @@ export function AccountWaterfall({
             <Money paise={snapshot.explainedDebits} />
           </Fact>
           <Fact label="Unexplained debits" mono>
-            <Money
-              paise={snapshot.unexplainedDebits}
-              tone={snapshot.unexplainedDebits === "0" ? "neutral" : "debit"}
-            />
+            <DrillLink href={drillThrough("debit", { unexplained: true })}>
+              <Money
+                paise={snapshot.unexplainedDebits}
+                tone={snapshot.unexplainedDebits === "0" ? "neutral" : "debit"}
+              />
+            </DrillLink>
           </Fact>
           <Fact label="Internal transfers out" mono hint="A subset of debits, not a new term">
             <Money paise={snapshot.internalTransferDebits} />
@@ -244,10 +301,12 @@ export function AccountWaterfall({
             <Money paise={snapshot.explainedCredits} />
           </Fact>
           <Fact label="Unexplained credits" mono>
-            <Money
-              paise={snapshot.unexplainedCredits}
-              tone={snapshot.unexplainedCredits === "0" ? "neutral" : "debit"}
-            />
+            <DrillLink href={drillThrough("credit", { unexplained: true })}>
+              <Money
+                paise={snapshot.unexplainedCredits}
+                tone={snapshot.unexplainedCredits === "0" ? "neutral" : "debit"}
+              />
+            </DrillLink>
           </Fact>
           <Fact label="Internal transfers in" mono hint="A subset of credits, not a new term">
             <Money paise={snapshot.internalTransferCredits} />
@@ -317,6 +376,7 @@ function WaterfallRow({
   sign,
   strong = false,
   unknownLabel,
+  href,
 }: {
   label: string;
   paise: string | null;
@@ -324,6 +384,8 @@ function WaterfallRow({
   sign?: "+" | "−";
   strong?: boolean;
   unknownLabel?: string;
+  /** Where this term's contributing movements are. A term nobody can open is a dead end. */
+  href?: string;
 }) {
   return (
     <tr className={cn(strong && "border-t border-rule")}>
@@ -352,11 +414,33 @@ function WaterfallRow({
         ) : (
           <>
             {sign !== undefined && <span className="text-ink-faint">{sign} </span>}
-            <Money paise={paise} className={cn(strong && "font-medium")} />
+            {href === undefined ? (
+              <Money paise={paise} className={cn(strong && "font-medium")} />
+            ) : (
+              <Link href={href} className="underline-offset-2 hover:underline">
+                <Money paise={paise} className={cn(strong && "font-medium")} />
+                <span className="sr-only"> — open the movements behind {label.toLowerCase()}</span>
+              </Link>
+            )}
           </>
         )}
       </td>
     </tr>
+  );
+}
+
+/** Spreads `href` only when there is one, so the prop stays absent rather than `undefined`. */
+function hrefProp(href: string | undefined): { href?: string } {
+  return href === undefined ? {} : { href };
+}
+
+/** A figure that can be opened, when there is somewhere to open it. */
+function DrillLink({ href, children }: { href?: string; children: ReactNode }) {
+  if (href === undefined) return <>{children}</>;
+  return (
+    <Link href={href} className="underline-offset-2 hover:underline">
+      {children}
+    </Link>
   );
 }
 

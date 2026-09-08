@@ -141,3 +141,51 @@ describe("the account cash waterfall", () => {
     expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
   });
 });
+
+describe("drilling through a waterfall term", () => {
+  function renderWithPeriod() {
+    mockApi({
+      "/api/reconciliation/runs/run-1/account-snapshots": SNAPSHOT_UNRECONCILED,
+      "/api/accounts": { accounts: [ACCOUNT] },
+    });
+    return renderWithQuery(
+      <AccountWaterfalls
+        reconciliationRunId="run-1"
+        periodStart="2026-08-01T00:00:00.000Z"
+        periodEnd="2026-09-01T00:00:00.000Z"
+      />,
+    );
+  }
+
+  it("links each term to its own account, period and direction — not to a general list", async () => {
+    renderWithPeriod();
+
+    await waitFor(() => expect(screen.getByText("HDFC Savings")).toBeInTheDocument());
+    const credits = screen.getByRole("link", { name: /open the movements behind credits/i });
+    expect(credits).toHaveAttribute(
+      "href",
+      `/payments?accountId=${ACCOUNT.id}&direction=credit&from=2026-08-01&to=2026-09-01`,
+    );
+    const debits = screen.getByRole("link", { name: /open the movements behind debits/i });
+    expect(debits.getAttribute("href")).toContain("direction=debit");
+  });
+
+  it("narrows the unexplained figures to the movements nothing accounts for", async () => {
+    const { container } = renderWithPeriod();
+
+    await waitFor(() => expect(screen.getByText("HDFC Savings")).toBeInTheDocument());
+    const links = [...container.querySelectorAll("a")].map((link) => link.getAttribute("href"));
+    expect(links).toContain(
+      `/payments?accountId=${ACCOUNT.id}&direction=debit&from=2026-08-01&to=2026-09-01&onlyUnexplained=true`,
+    );
+  });
+
+  it("renders the figures without links when no period was passed, rather than a wrong one", async () => {
+    renderWaterfall(SNAPSHOT_UNRECONCILED);
+
+    await waitFor(() => expect(screen.getByText("HDFC Savings")).toBeInTheDocument());
+    expect(
+      screen.queryByRole("link", { name: /open the movements behind credits/i }),
+    ).not.toBeInTheDocument();
+  });
+});

@@ -12,7 +12,9 @@ import { useReviewQueue } from "@/lib/queries";
  *
  * Phase 21 shipped six, matching `CLAUDE.md`'s six pillars. **Payments** joins them because the
  * pillars all start from a cash movement, and until this row existed there was no screen where
- * an imported statement line could be seen at all — the audit's first finding. **Setup** sits
+ * an imported statement line could be seen at all — the audit's first finding. **Evidence** is
+ * here for the same reason: a document attached to nothing only ever surfaced if the review
+ * queue happened to raise it, and a library is not a work queue. **Setup** sits
  * apart, next to search: master data changes what the ledger can say, never what it says, and
  * a roster editor is not a workflow to return to daily.
  *
@@ -22,6 +24,7 @@ import { useReviewQueue } from "@/lib/queries";
 const SECTIONS = [
   { href: "/review", label: "Review" },
   { href: "/payments", label: "Payments" },
+  { href: "/evidence", label: "Evidence" },
   { href: "/reconciliation", label: "Reconciliation" },
   { href: "/expenses", label: "Expenses" },
   { href: "/balances", label: "Balances" },

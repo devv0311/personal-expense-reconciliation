@@ -322,6 +322,8 @@ export interface EvidenceRecord {
   readonly linkedPaymentId: string | null;
   readonly linkedExpenseId: string | null;
   readonly createdAt: string;
+  /** The `Receipt` extracted from this document, if one was. A pointer, not the extraction. */
+  readonly receiptId: string | null;
 }
 
 export interface EvidenceMatchesResult {
@@ -1090,4 +1092,50 @@ export interface ExpenseHistoryResult {
     readonly evidenceIds: readonly string[];
     readonly settlementIds: readonly string[];
   };
+}
+
+/* --------------------------------------------------------------------- evidence library */
+
+export const EVIDENCE_TYPES = [
+  "bank_line",
+  "upi_notification",
+  "receipt_image",
+  "screenshot",
+  "email_receipt",
+  "manual_note",
+] as const;
+export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
+
+/** Everything except `manual_note`, which is typed rather than uploaded. */
+export const EVIDENCE_DOCUMENT_TYPES = EVIDENCE_TYPES.filter((type) => type !== "manual_note");
+
+/** The two shapes the deterministic parser knows how to read (`NOTIFICATION_EVIDENCE_TYPES`). */
+export const NOTIFICATION_EVIDENCE_TYPES = ["bank_line", "upi_notification"] as const;
+export type NotificationEvidenceType = (typeof NOTIFICATION_EVIDENCE_TYPES)[number];
+
+export const EVIDENCE_NOTE_KINDS = ["documentation", "settlement_claim"] as const;
+export type EvidenceNoteKind = (typeof EVIDENCE_NOTE_KINDS)[number];
+
+export interface EvidenceLibraryRow {
+  readonly id: string;
+  readonly type: EvidenceType;
+  readonly noteKind: EvidenceNoteKind | null;
+  readonly storageRef: string | null;
+  readonly mediaType: string | null;
+  readonly byteSize: number | null;
+  readonly rawText: string | null;
+  readonly capturedAt: string;
+  readonly createdAt: string;
+  readonly linkedPaymentId: string | null;
+  readonly linkedExpenseId: string | null;
+  /** Whether a `Receipt` was extracted from it — a flag, never the extraction itself. */
+  readonly hasReceipt: boolean;
+  readonly hasObservation: boolean;
+}
+
+export interface EvidenceLibraryResult {
+  readonly evidence: readonly EvidenceLibraryRow[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
 }

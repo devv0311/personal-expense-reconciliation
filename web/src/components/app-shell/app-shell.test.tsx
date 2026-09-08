@@ -51,6 +51,7 @@ describe("the application shell", () => {
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
       "/review",
       "/payments",
+      "/evidence",
       "/reconciliation",
       "/expenses",
       "/balances",

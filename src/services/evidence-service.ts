@@ -35,12 +35,14 @@ import type {
   EvidenceType,
   ExpenseId,
   PaymentId,
+  ReceiptId,
 } from '../domain/index.js';
 import {
   findEvidenceByStorageRef,
   getEvidenceById,
   getExpenseById,
   getPaymentById,
+  getReceiptByEvidenceId,
   insertEvidence,
   updateEvidenceLinks,
 } from '../db/index.js';
@@ -333,9 +335,23 @@ export async function requireEvidenceRow(
   return requireEvidence(exec, evidenceId);
 }
 
+/**
+ * One evidence row, plus the id of the `Receipt` extracted from it, if any.
+ *
+ * The `receiptId` is a pointer, not an extraction: it is what lets a reader open the receipt
+ * this document produced. Without it the only surface that could ever show a receipt was the
+ * review queue, which carries the id already — an inspector reached any other way had no way
+ * to ask for one (audit row 15). A read, added rather than computed anywhere else (ADR-0048).
+ */
+export interface EvidenceDetail extends EvidenceRow {
+  readonly receiptId: ReceiptId | null;
+}
+
 /** One evidence row. @throws ServiceError `ENTITY_NOT_FOUND` */
-export async function getEvidence(db: Database, evidenceId: EvidenceId): Promise<EvidenceRow> {
-  return requireEvidence(db, evidenceId);
+export async function getEvidence(db: Database, evidenceId: EvidenceId): Promise<EvidenceDetail> {
+  const evidence = await requireEvidence(db, evidenceId);
+  const receipt = await getReceiptByEvidenceId(db, evidenceId);
+  return { ...evidence, receiptId: receipt?.id ?? null };
 }
 
 export interface ReadEvidenceDocumentInput {

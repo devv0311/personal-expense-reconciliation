@@ -79,7 +79,11 @@ export function ReconciliationRunDetail({ id }: { id: string }) {
         headingId="cash-heading"
         description="A second, independent identity: the statement's opening balance, every movement on it gross and counted once, and the closing balance it should have reached."
       >
-        <AccountWaterfalls reconciliationRunId={id} />
+        <AccountWaterfalls
+          reconciliationRunId={id}
+          periodStart={run.periodStart}
+          periodEnd={run.periodEnd}
+        />
       </Section>
 
       <Section

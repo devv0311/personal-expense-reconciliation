@@ -20,9 +20,12 @@ import type {
   CounterpartyOptions,
   CreateExpenseResult,
   DecideEvidenceMatchResult,
+  EvidenceLibraryResult,
   EvidenceMatchesResult,
+  EvidenceNoteKind,
   EvidenceObservationView,
   EvidenceRecord,
+  EvidenceType,
   ExpenseAdjustmentKind,
   ExpenseFundingLink,
   ExpenseHistoryResult,
@@ -36,6 +39,7 @@ import type {
   MatchEvidenceContextResult,
   MerchantDetail,
   NormalizePaymentsResult,
+  NotificationEvidenceType,
   PaymentChannel,
   PaymentContextResult,
   PaymentCounterpartyType,
@@ -339,6 +343,14 @@ export interface RecordAdjustmentInput {
   readonly occurredAt: string;
   readonly reason?: string;
   /**
+   * The credit this refund actually arrived on.
+   *
+   * Optional because a reimbursement may be recorded before its money shows up. But without
+   * it the expense drops while the incoming cash stays unexplained on the account — the exact
+   * shape that makes a statement fail to close later (audit row 27).
+   */
+  readonly adjustmentPaymentId?: string;
+  /**
    * The complete `{ expenseItemId, amount }` set for an item-attributed refund, or omitted
    * for ADR-0008's whole-expense one. A partial set is refused by the service, not padded.
    */
@@ -357,6 +369,9 @@ export async function recordAdjustment(input: RecordAdjustmentInput): Promise<un
       amount: input.amount,
       occurredAt: input.occurredAt,
       ...(input.reason === undefined ? {} : { reason: input.reason }),
+      ...(input.adjustmentPaymentId === undefined
+        ? {}
+        : { adjustmentPaymentId: input.adjustmentPaymentId }),
       ...(input.itemAttributions === undefined || input.itemAttributions.length === 0
         ? {}
         : { itemAttributions: input.itemAttributions }),
@@ -364,16 +379,26 @@ export async function recordAdjustment(input: RecordAdjustmentInput): Promise<un
   });
 }
 
-/** Folds every recorded-but-undistributed adjustment into a new `Allocation` version. */
+/**
+ * Folds every recorded-but-undistributed adjustment into a new `Allocation` version.
+ *
+ * `customWeights` is a non-proportional distribution of the **unattributed** whole-expense
+ * reduction, positionally aligned with the current allocation's lines. Omit it for the
+ * proportional-to-existing-share default. Where an item-attributed refund lands is decided by
+ * its attribution, never by these weights — the API refuses them outright in that case rather
+ * than ignoring them (ADR-0018).
+ */
 export async function distributeAdjustment(input: {
   readonly expenseId: string;
   readonly reason?: string;
+  readonly customWeights?: readonly string[];
 }): Promise<unknown> {
   return request(`/api/expenses/${input.expenseId}/adjustments/distribute`, {
     method: "POST",
     body: JSON.stringify({
       actor: ACTOR,
       ...(input.reason === undefined ? {} : { reason: input.reason }),
+      ...(input.customWeights === undefined ? {} : { customWeights: input.customWeights }),
     }),
   });
 }
@@ -965,4 +990,198 @@ export async function listSettlements(
 
 export async function getExpenseHistory(expenseId: string): Promise<ExpenseHistoryResult> {
   return request<ExpenseHistoryResult>(`/api/expenses/${expenseId}/history`);
+}
+
+/* --------------------------------------------------------------------- evidence library */
+
+export interface EvidenceLibraryFilter {
+  readonly type?: EvidenceType;
+  readonly noteKind?: EvidenceNoteKind;
+  /** `linked` — attached to something; `unlinked` — attached to nothing yet. */
+  readonly linkage?: "linked" | "unlinked";
+  readonly linkedPaymentId?: string;
+  readonly linkedExpenseId?: string;
+  readonly search?: string;
+  readonly from?: string;
+  readonly to?: string;
+  readonly limit?: number;
+  readonly offset?: number;
+}
+
+export async function listEvidence(
+  filter: EvidenceLibraryFilter = {},
+): Promise<EvidenceLibraryResult> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filter)) {
+    if (value === undefined || value === "") continue;
+    params.set(key, String(value));
+  }
+  const query = params.toString();
+  return request<EvidenceLibraryResult>(`/api/evidence${query.length > 0 ? `?${query}` : ""}`);
+}
+
+/** A note is evidence of a belief, never a payment and never an authoritative settlement. */
+export async function recordEvidenceNote(input: {
+  readonly text: string;
+  readonly noteKind: EvidenceNoteKind;
+  readonly capturedAt: string;
+  readonly linkedPaymentId?: string;
+  readonly linkedExpenseId?: string;
+  readonly reason?: string;
+}): Promise<{ readonly evidenceId: string }> {
+  return request("/api/evidence/notes", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
+  });
+}
+
+/** The immutable source text of a bank SMS or UPI push, plus whatever was read off it. */
+export async function recordEvidenceNotification(input: {
+  readonly type: NotificationEvidenceType;
+  readonly text: string;
+  readonly capturedAt: string;
+  readonly linkedPaymentId?: string;
+  readonly reason?: string;
+}): Promise<{ readonly outcome: string; readonly evidenceId: string }> {
+  return request("/api/evidence/notifications", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
+  });
+}
+
+/**
+ * Uploads a document.
+ *
+ * Multipart rather than JSON, and the only request in this package that is: the file is bytes,
+ * and base64-ing it through a JSON body to keep one parser would double its size for nothing.
+ */
+export async function uploadEvidenceFile(input: {
+  readonly file: File;
+  readonly type: EvidenceType;
+  readonly capturedAt: string;
+  readonly linkedPaymentId?: string;
+  readonly linkedExpenseId?: string;
+  readonly reason?: string;
+}): Promise<{ readonly evidenceId: string }> {
+  const form = new FormData();
+  form.set("file", input.file);
+  form.set("type", input.type);
+  form.set("capturedAt", input.capturedAt);
+  form.set("actor", ACTOR);
+  if (input.linkedPaymentId !== undefined) form.set("linkedPaymentId", input.linkedPaymentId);
+  if (input.linkedExpenseId !== undefined) form.set("linkedExpenseId", input.linkedExpenseId);
+  if (input.reason !== undefined) form.set("reason", input.reason);
+  // `request` sets a JSON content type; a multipart body must let the browser set its own
+  // boundary, so this one call goes direct.
+  return requestMultipart(`/api/evidence/files`, form);
+}
+
+/**
+ * Records or corrects the structured reading of a document.
+ *
+ * It replaces the reading, never the document: the `Evidence` row is source and stays exactly
+ * as it arrived (`invariants.md` #2). A field sent as `null` is cleared; an absent field is
+ * left alone.
+ */
+export async function recordEvidenceObservation(input: {
+  readonly evidenceId: string;
+  readonly observedAmount?: string | null;
+  readonly observedDirection?: PaymentDirection | null;
+  readonly observedReference?: string | null;
+  readonly observedReferenceType?: PaymentReferenceType | null;
+  readonly observedMerchantText?: string | null;
+  readonly observedOccurredAt?: string | null;
+  readonly reason?: string;
+}): Promise<unknown> {
+  const { evidenceId, ...rest } = input;
+  return request(`/api/evidence/${evidenceId}/observation`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined)),
+    }),
+  });
+}
+
+/** Attaches a document to what it is evidence of. Write-once: a wrong link cannot be repointed. */
+export async function linkEvidence(input: {
+  readonly evidenceId: string;
+  readonly linkedPaymentId?: string;
+  readonly linkedExpenseId?: string;
+  readonly reason?: string;
+}): Promise<EvidenceRecord> {
+  const { evidenceId, ...rest } = input;
+  return request<EvidenceRecord>(`/api/evidence/${evidenceId}/link`, {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(rest) }),
+  });
+}
+
+/* ------------------------------------------------------------------------- receipts */
+
+export async function confirmReceipt(input: {
+  readonly receiptId: string;
+  readonly reason?: string;
+}): Promise<ReceiptView> {
+  return request<ReceiptView>(`/api/receipts/${input.receiptId}/confirm`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+    }),
+  });
+}
+
+/**
+ * Overwrites what extraction read.
+ *
+ * Each money field is `null` to clear it, an exact paise string to set it, or absent to leave
+ * it as extraction left it — three distinct meanings, so this body is built explicitly rather
+ * than through `compact`.
+ */
+export async function correctReceipt(input: {
+  readonly receiptId: string;
+  readonly subtotal?: string | null;
+  readonly tax?: string | null;
+  readonly total?: string | null;
+  readonly items?: readonly {
+    readonly description: string;
+    readonly quantity?: string;
+    readonly unitPrice?: string;
+    readonly lineTotal: string;
+  }[];
+  readonly reason?: string;
+}): Promise<ReceiptView> {
+  const { receiptId, ...rest } = input;
+  return request<ReceiptView>(`/api/receipts/${receiptId}/correct`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined)),
+    }),
+  });
+}
+
+async function requestMultipart<T>(path: string, form: FormData): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { method: "POST", body: form });
+  } catch {
+    throw new ApiError(0, {
+      error: {
+        code: "NETWORK_ERROR",
+        message: "Couldn't reach the API. Check that src/server.ts is running (see web/README.md).",
+      },
+    });
+  }
+  if (!response.ok) {
+    const body = (await response.json().catch(
+      () =>
+        ({
+          error: { code: "UNKNOWN_ERROR", message: `Request failed with ${response.status}.` },
+        }) satisfies ApiErrorBody,
+    )) as ApiErrorBody;
+    throw new ApiError(response.status, body);
+  }
+  return (await response.json()) as T;
 }

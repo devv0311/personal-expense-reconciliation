@@ -53,6 +53,7 @@ export function useShortcuts(): ShortcutContextValue {
 export const GO_TO_DESTINATIONS = [
   { key: "v", href: "/review", label: "Review queue" },
   { key: "m", href: "/payments", label: "Payments" },
+  { key: "d", href: "/evidence", label: "Evidence" },
   { key: "r", href: "/reconciliation", label: "Reconciliation" },
   { key: "e", href: "/expenses", label: "Expenses" },
   { key: "b", href: "/balances", label: "Balances" },

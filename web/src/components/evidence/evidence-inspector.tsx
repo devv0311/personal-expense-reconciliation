@@ -1,23 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { Confidence, NoteList } from "@/components/annotations";
+import { NoteList } from "@/components/annotations";
 import { EvidenceMatchCandidates } from "@/components/evidence/match-candidates";
 import { EvidenceObservationFacts } from "@/components/evidence/observation";
+import { ObservationEditor } from "@/components/evidence/observation-editor";
+import { ReceiptReview } from "@/components/evidence/receipt-review";
 import { Fact, Facts, UnknownValue } from "@/components/facts";
-import { Money } from "@/components/money";
 import { PageHeader, Section } from "@/components/page-header";
 import { EmptyBlock, ErrorBlock, LoadingStatus, TableSkeleton } from "@/components/status";
 import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatDateTime } from "@/lib/dates";
 import { evidenceTypeLabel } from "@/lib/labels";
 import {
@@ -26,7 +18,6 @@ import {
   useEvidenceMatches,
   useEvidenceObservation,
 } from "@/lib/queries";
-import type { ReceiptView } from "@/lib/types";
 
 /**
  * One evidence record, in full: what it is, what was read off it, what it could be about, and
@@ -135,6 +126,11 @@ export function EvidenceInspector({ evidenceId }: { evidenceId: string }) {
         title="What was read off it"
         headingId="evidence-observation"
         description="A structured reading, derived deterministically — never by a model."
+        actions={
+          observation.isSuccess ? (
+            <ObservationEditor evidenceId={evidenceId} observation={observation.data} />
+          ) : undefined
+        }
       >
         {observation.isPending && (
           <LoadingStatus label="Loading the reading…">
@@ -154,6 +150,8 @@ export function EvidenceInspector({ evidenceId }: { evidenceId: string }) {
             </EmptyBlock>
           ))}
       </Section>
+
+      {record.receiptId !== null && <ReceiptReview receiptId={record.receiptId} />}
 
       <Section
         title="Payments this could be about"
@@ -210,100 +208,6 @@ export function EvidenceInspector({ evidenceId }: { evidenceId: string }) {
           />
         )}
       </Section>
-    </div>
-  );
-}
-
-/**
- * The extracted `Receipt` behind a document, with both discrepancies the service computes.
- *
- * Both are the service's own figures. A non-null `itemsSubtotalDiscrepancy` means the items
- * and the printed subtotal disagree; a non-null `paymentDiscrepancy` means the total and the
- * linked payment do. Neither is recomputed here.
- */
-export function ReceiptFacts({ view }: { view: ReceiptView }) {
-  const { receipt, items } = view;
-  return (
-    <div className="flex flex-col gap-4">
-      <Facts>
-        <Fact label="Total" mono>
-          {receipt.total === null ? <UnknownValue /> : <Money paise={receipt.total} />}
-        </Fact>
-        <Fact label="Subtotal" mono>
-          {receipt.subtotal === null ? <UnknownValue /> : <Money paise={receipt.subtotal} />}
-        </Fact>
-        <Fact label="Tax" mono>
-          {receipt.tax === null ? <UnknownValue /> : <Money paise={receipt.tax} />}
-        </Fact>
-        <Fact label="Extraction confidence">
-          {receipt.extractionConfidence === null ? (
-            <UnknownValue />
-          ) : (
-            <Confidence level={receipt.extractionConfidence} />
-          )}
-        </Fact>
-        <Fact label="Confirmed by you">{receipt.confirmedByUser ? "Yes" : "Not yet"}</Fact>
-      </Facts>
-
-      <NoteList
-        items={[
-          ...(view.itemsSubtotalDiscrepancy !== null
-            ? [
-                {
-                  title: "The items and the printed subtotal disagree",
-                  detail: (
-                    <>
-                      By <Money paise={view.itemsSubtotalDiscrepancy} />. The extraction is kept as
-                      read; the disagreement is reported rather than corrected.
-                    </>
-                  ),
-                },
-              ]
-            : []),
-          ...(view.paymentDiscrepancy !== null
-            ? [
-                {
-                  title: "The receipt total and the linked payment disagree",
-                  detail: (
-                    <>
-                      By <Money paise={view.paymentDiscrepancy} />.
-                    </>
-                  ),
-                },
-              ]
-            : []),
-        ]}
-      />
-
-      {items.length > 0 && (
-        <Table className="min-w-[420px]">
-          <TableCaption>Items read off this receipt</TableCaption>
-          <TableHeader>
-            <TableRow>
-              <TableHead scope="col">Item</TableHead>
-              <TableHead scope="col" className="text-right">
-                Quantity
-              </TableHead>
-              <TableHead scope="col" className="text-right">
-                Line total
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell>{item.description}</TableCell>
-                <TableCell className="tabular text-right font-mono text-meta">
-                  {item.quantity}
-                </TableCell>
-                <TableCell className="text-right">
-                  <Money paise={item.lineTotal} />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
     </div>
   );
 }

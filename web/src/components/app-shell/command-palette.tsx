@@ -58,6 +58,20 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         href: "/payments?onlyUnexplained=true",
       },
       {
+        id: "go-evidence",
+        label: "Evidence library",
+        hint: "g d",
+        group: "Go to",
+        href: "/evidence",
+      },
+      {
+        id: "go-unlinked",
+        label: "Evidence attached to nothing",
+        hint: "Documents the ledger is not using",
+        group: "Go to",
+        href: "/evidence?linkage=unlinked",
+      },
+      {
         id: "go-import",
         label: "Import a statement",
         hint: "CSV",

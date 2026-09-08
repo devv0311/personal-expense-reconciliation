@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "./api";
 import type {
   AuditFindingFilter,
+  EvidenceLibraryFilter,
   ListExpensesFilter,
   ListPaymentsFilter,
   RecordAdjustmentInput,
@@ -25,6 +26,7 @@ export const queryKeys = {
   accountSnapshots: (id: string) => ["account-snapshots", id] as const,
   reviewQueue: (filter: ReviewQueueFilter) => ["review-queue", filter] as const,
   evidence: (id: string) => ["evidence", id] as const,
+  evidenceLibrary: (filter: EvidenceLibraryFilter) => ["evidence-library", filter] as const,
   evidenceMatches: (id: string) => ["evidence-matches", id] as const,
   evidenceObservation: (id: string) => ["evidence-observation", id] as const,
   receipt: (id: string) => ["receipt", id] as const,
@@ -272,8 +274,9 @@ export function useRecordAdjustment(expenseId: string) {
 export function useDistributeAdjustment(expenseId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { readonly reason?: string } = {}) =>
-      api.distributeAdjustment({ expenseId, ...input }),
+    mutationFn: (
+      input: { readonly reason?: string; readonly customWeights?: readonly string[] } = {},
+    ) => api.distributeAdjustment({ expenseId, ...input }),
     onSuccess: () => invalidateExpense(queryClient, expenseId),
   });
 }
@@ -651,4 +654,97 @@ export function useRecordSettlement() {
       invalidatePayments(queryClient);
     },
   });
+}
+
+/* ---------------------------------------------------- the evidence library and its writes */
+
+export function useEvidenceLibrary(filter: EvidenceLibraryFilter) {
+  return useQuery({
+    queryKey: queryKeys.evidenceLibrary(filter),
+    queryFn: () => api.listEvidence(filter),
+  });
+}
+
+export function useRecordEvidenceNote() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.recordEvidenceNote,
+    onSuccess: () => invalidateEvidence(queryClient),
+  });
+}
+
+export function useRecordEvidenceNotification() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.recordEvidenceNotification,
+    onSuccess: () => invalidateEvidence(queryClient),
+  });
+}
+
+export function useUploadEvidenceFile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.uploadEvidenceFile,
+    onSuccess: () => invalidateEvidence(queryClient),
+  });
+}
+
+export function useRecordEvidenceObservation(evidenceId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Omit<Parameters<typeof api.recordEvidenceObservation>[0], "evidenceId">) =>
+      api.recordEvidenceObservation({ evidenceId, ...input }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.evidenceObservation(evidenceId) });
+      // A corrected reading changes which payments the matcher would offer next.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.evidenceMatches(evidenceId) });
+      invalidateEvidence(queryClient);
+    },
+  });
+}
+
+export function useLinkEvidence(evidenceId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      readonly linkedPaymentId?: string;
+      readonly linkedExpenseId?: string;
+      readonly reason?: string;
+    }) => api.linkEvidence({ evidenceId, ...input }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.evidence(evidenceId) });
+      invalidateEvidence(queryClient);
+      invalidatePayments(queryClient);
+    },
+  });
+}
+
+export function useConfirmReceipt(receiptId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { readonly reason?: string } = {}) =>
+      api.confirmReceipt({ receiptId, ...input }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.receipt(receiptId) });
+      void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+    },
+  });
+}
+
+export function useCorrectReceipt(receiptId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Omit<Parameters<typeof api.correctReceipt>[0], "receiptId">) =>
+      api.correctReceipt({ receiptId, ...input }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.receipt(receiptId) });
+      void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+    },
+  });
+}
+
+/** A new or changed document changes the library and the queue that surfaces loose documents. */
+function invalidateEvidence(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: ["evidence-library"] });
+  void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
 }

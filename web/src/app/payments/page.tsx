@@ -68,21 +68,29 @@ function PaymentsWorkspace() {
   const requestedBatchId = searchParams.get("importBatchId");
   const requestedAccountId = searchParams.get("accountId");
   const requestedUnexplained = searchParams.get("onlyUnexplained") === "true";
+  const requestedDirection = searchParams.get("direction");
+  const requestedFrom = searchParams.get("from");
+  const requestedTo = searchParams.get("to");
 
   const [chosenAccountId, setChosenAccountId] = useState<string | null>(null);
-  const [direction, setDirection] = useState<PaymentDirection | "">("");
+  // `null` means "no explicit choice on this screen yet", `""` means "explicitly all". They
+  // are different states: a link's `?direction=` supplies the first, never overrides the second.
+  const [chosenDirection, setChosenDirection] = useState<PaymentDirection | "" | null>(null);
   const [cashFlowState, setCashFlowState] = useState<CashFlowState | "">("");
   const [cashFlowCategory, setCashFlowCategory] = useState<CashFlowCategory | "">("");
   const [state, setState] = useState<PaymentState | "">("");
   const [counterpartyType, setCounterpartyType] = useState<PaymentCounterpartyType | "">("");
   const [search, setSearch] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [chosenFrom, setChosenFrom] = useState<string | null>(null);
+  const [chosenTo, setChosenTo] = useState<string | null>(null);
   const [chosenUnexplained, setChosenUnexplained] = useState<boolean | null>(null);
   const [offset, setOffset] = useState(0);
 
   const accountId = chosenAccountId ?? requestedAccountId ?? "";
   const onlyUnexplained = chosenUnexplained ?? requestedUnexplained;
+  const direction = (chosenDirection ?? requestedDirection ?? "") as PaymentDirection | "";
+  const from = chosenFrom ?? requestedFrom ?? "";
+  const to = chosenTo ?? requestedTo ?? "";
 
   const accounts = useAccounts();
   const filter = {
@@ -179,7 +187,7 @@ function PaymentsWorkspace() {
               id="payments-direction"
               value={direction}
               onChange={(event) =>
-                onFilterChange(setDirection)(event.target.value as PaymentDirection | "")
+                onFilterChange(setChosenDirection)(event.target.value as PaymentDirection | "")
               }
               className="min-w-[140px]"
             >
@@ -287,7 +295,7 @@ function PaymentsWorkspace() {
                 id="payments-from"
                 type="date"
                 value={from}
-                onChange={(event) => onFilterChange(setFrom)(event.target.value)}
+                onChange={(event) => onFilterChange(setChosenFrom)(event.target.value)}
               />
             </div>
 
@@ -297,7 +305,7 @@ function PaymentsWorkspace() {
                 id="payments-to"
                 type="date"
                 value={to}
-                onChange={(event) => onFilterChange(setTo)(event.target.value)}
+                onChange={(event) => onFilterChange(setChosenTo)(event.target.value)}
               />
             </div>
           </div>
