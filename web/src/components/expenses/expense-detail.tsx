@@ -5,6 +5,7 @@ import { ExpenseStateTag } from "@/components/expense-state-tag";
 import { AllocationEditor } from "@/components/expenses/allocation-editor";
 import { FundingLinks } from "@/components/expenses/funding-links";
 import { ItemEditor } from "@/components/expenses/item-editor";
+import { SplitwiseSyncPanel } from "@/components/expenses/splitwise-sync";
 import {
   DistributionPanel,
   RecordRefundForm,
@@ -224,6 +225,8 @@ export function ExpenseDetail({ expenseId }: { expenseId: string }) {
         nameFor={nameFor}
         distribute={distribute}
       />
+
+      <SplitwiseSyncPanel expense={row} />
 
       <RecordRefundForm expenseId={expenseId} state={state} />
     </div>

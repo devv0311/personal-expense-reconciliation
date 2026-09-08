@@ -1139,3 +1139,44 @@ export interface EvidenceLibraryResult {
   readonly limit: number;
   readonly offset: number;
 }
+
+/* ---------------------------------------------------------------------------- session */
+
+export interface SessionIdentity {
+  readonly userId: string;
+  readonly personId: string | null;
+  readonly email: string;
+  readonly actor: string;
+  readonly expiresAt: string;
+}
+
+export interface SessionState {
+  /** `null` means nobody is signed in — an answer, not a failure to answer. */
+  readonly session: SessionIdentity | null;
+  /** Whether a password exists at all. False on a fresh installation. */
+  readonly authenticationConfigured: boolean;
+  /** Whether this API process is enforcing it. A local run may deliberately not be. */
+  readonly authenticationRequired: boolean;
+}
+
+/* --------------------------------------------------------------------- Splitwise sync */
+
+export interface ResyncCandidate {
+  readonly splitwiseExpenseId: string;
+  readonly expenseId: string;
+  readonly externalId: string;
+  readonly syncStatus: string;
+  readonly syncedAt: string;
+  /** What was pushed when it was last synced — the figure Splitwise still holds. */
+  readonly syncedSnapshot: unknown;
+  /** The expense's current net, which is what a re-sync would push. */
+  readonly currentNetAmount: string;
+  readonly description: string | null;
+}
+
+export interface ResyncResult {
+  readonly splitwiseExpenseId: string;
+  readonly syncStatus: "synced";
+  readonly previousSnapshot: unknown;
+  readonly pushedNetAmount: string;
+}

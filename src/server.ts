@@ -197,7 +197,14 @@ async function main(): Promise<void> {
       // `src/api` has no idea what origin is calling it, by design.
       res.setHeader('Access-Control-Allow-Origin', CORS_ORIGIN);
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'content-type');
+      res.setHeader('Access-Control-Allow-Headers', 'content-type, authorization');
+      // The session lives in an `HttpOnly` cookie, and a browser sends one cross-origin only
+      // when the response says credentials are allowed. Without this header a sign-in from
+      // `web/` would appear to succeed and every subsequent request would arrive anonymous —
+      // which, with `AUTH_REQUIRED` on, is a locked-out ledger and no way to tell why.
+      // Safe alongside a single named origin; it would not be with `*`, which is why
+      // `CORS_ORIGIN` has never been a wildcard.
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
 
       if (req.method === 'OPTIONS') {
         res.writeHead(204);

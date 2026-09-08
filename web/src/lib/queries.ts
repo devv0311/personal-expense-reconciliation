@@ -19,6 +19,7 @@ export const queryKeys = {
   expenseItems: (id: string) => ["expense-items", id] as const,
   refundAllocation: (id: string) => ["refund-allocation", id] as const,
   people: () => ["people"] as const,
+  session: () => ["session"] as const,
   accounts: () => ["accounts"] as const,
   balance: (a: string, b: string) => ["balance", a, b] as const,
   reconciliationRuns: (limit?: number) => ["reconciliation-runs", limit ?? null] as const,
@@ -32,6 +33,7 @@ export const queryKeys = {
   receipt: (id: string) => ["receipt", id] as const,
   paymentContext: (id: string) => ["payment-context", id] as const,
   splitwiseAuditRuns: (limit?: number) => ["splitwise-audit-runs", limit ?? null] as const,
+  resyncCandidates: () => ["resync-candidates"] as const,
   splitwiseAuditRun: (id: string) => ["splitwise-audit-run", id] as const,
   splitwiseAuditFindings: (filter: AuditFindingFilter) =>
     ["splitwise-audit-findings", filter] as const,
@@ -747,4 +749,96 @@ export function useCorrectReceipt(receiptId: string) {
 function invalidateEvidence(queryClient: ReturnType<typeof useQueryClient>): void {
   void queryClient.invalidateQueries({ queryKey: ["evidence-library"] });
   void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+}
+
+/* ---------------------------------------------------------------------------- session */
+
+export function useSession() {
+  return useQuery({ queryKey: queryKeys.session(), queryFn: api.getSession });
+}
+
+export function useSignIn() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.signIn,
+    // Everything read while signed out was read as nobody; none of it is this person's view.
+    onSuccess: () => void queryClient.invalidateQueries(),
+  });
+}
+
+export function useSignOut() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.signOut,
+    onSuccess: () => {
+      queryClient.clear();
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session() });
+    },
+  });
+}
+
+export function useSetPassword() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.setPassword,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.session() }),
+  });
+}
+
+/* --------------------------------------------------------------------- Splitwise sync */
+
+export function useResyncCandidates() {
+  return useQuery({
+    queryKey: queryKeys.resyncCandidates(),
+    queryFn: api.listResyncCandidates,
+  });
+}
+
+export function useConnectSplitwise() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.connectSplitwise,
+    // What an audit can read changes the moment an integration exists.
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["splitwise-audit-runs"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.resyncCandidates() });
+    },
+  });
+}
+
+export function useSyncExpenseToSplitwise(expenseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { readonly reason?: string } = {}) =>
+      api.syncExpenseToSplitwise({ expenseId, ...input }),
+    onSuccess: () => invalidateSplitwise(queryClient, expenseId),
+  });
+}
+
+export function useMarkExpenseReadyToSync(expenseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { readonly reason?: string } = {}) =>
+      api.markExpenseReadyToSync({ expenseId, ...input }),
+    onSuccess: () => invalidateSplitwise(queryClient, expenseId),
+  });
+}
+
+export function useResyncExpense() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.resyncExpenseToSplitwise,
+    onSuccess: (_result, input) => invalidateSplitwise(queryClient, input.expenseId),
+  });
+}
+
+/** A push changes the expense's state, what still needs one, and what an audit would find. */
+function invalidateSplitwise(
+  queryClient: ReturnType<typeof useQueryClient>,
+  expenseId: string,
+): void {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.expense(expenseId) });
+  void queryClient.invalidateQueries({ queryKey: ["expenses"] });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.resyncCandidates() });
+  void queryClient.invalidateQueries({ queryKey: ["splitwise-audit-findings"] });
 }

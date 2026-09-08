@@ -54,9 +54,13 @@ import type {
   ReceiptView,
   ReconciliationRun,
   RefundAllocationState,
+  ResyncCandidate,
+  ResyncResult,
   ReviewItemKind,
   ReviewQueueResult,
   RunReconciliationResult,
+  SessionIdentity,
+  SessionState,
   SettlementRegisterResult,
   RunSplitwiseAuditResult,
   SplitwiseAuditFinding,
@@ -91,6 +95,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
+      // The session is an `HttpOnly` cookie on the API's origin, which a browser only sends
+      // cross-origin when asked to. Keeping the token out of `localStorage` is the point: a
+      // person's whole financial history should not be readable by any script on the page.
+      credentials: "include",
       headers: { "content-type": "application/json", ...init?.headers },
     });
   } catch {
@@ -1165,7 +1173,11 @@ export async function correctReceipt(input: {
 async function requestMultipart<T>(path: string, form: FormData): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, { method: "POST", body: form });
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "POST",
+      body: form,
+      credentials: "include",
+    });
   } catch {
     throw new ApiError(0, {
       error: {
@@ -1184,4 +1196,101 @@ async function requestMultipart<T>(path: string, form: FormData): Promise<T> {
     throw new ApiError(response.status, body);
   }
   return (await response.json()) as T;
+}
+
+/* ---------------------------------------------------------------------------- session */
+
+/** Never 401s: "nobody is signed in" is the answer to this question. */
+export async function getSession(): Promise<SessionState> {
+  return request<SessionState>("/api/session");
+}
+
+export async function signIn(input: {
+  readonly email: string;
+  readonly password: string;
+}): Promise<{ readonly session: SessionIdentity }> {
+  return request("/api/session", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function signOut(): Promise<unknown> {
+  return request("/api/session/end", { method: "POST", body: JSON.stringify({}) });
+}
+
+/**
+ * Sets the ledger user's password.
+ *
+ * On a fresh installation this is the first-run step and needs no current password — there is
+ * nobody to authenticate as yet. Once one exists, changing it requires being signed in, and the
+ * session is the proof.
+ */
+export async function setPassword(input: { readonly password: string }): Promise<unknown> {
+  return request("/api/session/password", { method: "POST", body: JSON.stringify(input) });
+}
+
+/* --------------------------------------------------------------------- Splitwise sync */
+
+/**
+ * Connects the integration record Splitwise work reads its configuration from.
+ *
+ * No actor: an `ExternalIntegration` is configuration, not an approved financial decision, and
+ * carries no audit event of its own.
+ */
+export async function connectSplitwise(input: {
+  readonly externalAccountRef?: string;
+}): Promise<unknown> {
+  return request("/api/integrations/splitwise/connect", {
+    method: "POST",
+    body: JSON.stringify(compact(input)),
+  });
+}
+
+/** `allocated → ready_to_sync`. A lifecycle step, not a push. */
+export async function markExpenseReadyToSync(input: {
+  readonly expenseId: string;
+  readonly reason?: string;
+}): Promise<unknown> {
+  return request(`/api/expenses/${input.expenseId}/ready-to-sync`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+    }),
+  });
+}
+
+/** Pushes this ledger's split into Splitwise, once. */
+export async function syncExpenseToSplitwise(input: {
+  readonly expenseId: string;
+  readonly reason?: string;
+}): Promise<unknown> {
+  return request(`/api/expenses/${input.expenseId}/splitwise-sync`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+    }),
+  });
+}
+
+export async function listResyncCandidates(): Promise<readonly ResyncCandidate[]> {
+  const { candidates } = await request<{ candidates: ResyncCandidate[] }>(
+    "/api/splitwise/resync-candidates",
+  );
+  return candidates;
+}
+
+/**
+ * Corrects a stale row in Splitwise with this ledger's current figure.
+ *
+ * The reason is required by the API, not by this form: it changes a figure in somebody else's
+ * ledger, and they are entitled to an account of why.
+ */
+export async function resyncExpenseToSplitwise(input: {
+  readonly expenseId: string;
+  readonly reason: string;
+}): Promise<ResyncResult> {
+  return request<ResyncResult>(`/api/expenses/${input.expenseId}/splitwise-resync`, {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, reason: input.reason }),
+  });
 }

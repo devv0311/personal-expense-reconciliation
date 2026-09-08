@@ -5,12 +5,13 @@ import { AllocationEditor } from "@/components/expenses/allocation-editor";
 import { ExpenseForm } from "@/components/expenses/expense-form";
 import { FundingLinks } from "@/components/expenses/funding-links";
 import { ItemEditor } from "@/components/expenses/item-editor";
+import { SplitwiseSyncPanel } from "@/components/expenses/splitwise-sync";
 import { SettlementForm } from "@/components/settlements/settlement-form";
 import { mockApi, type ApiMock } from "@/test-support/api-mock";
 import { EXPENSE, GROUP, PEOPLE, UNEXPLAINED_PAYMENT, paymentPage } from "@/test-support/fixtures";
 import { resetNavigation } from "@/test-support/next-navigation";
 import { renderWithQuery } from "@/test-support/render-with-query";
-import type { ExpenseItemRecord } from "@/lib/types";
+import type { ExpenseItemRecord, ExpenseLedgerRow } from "@/lib/types";
 
 const originalFetch = global.fetch;
 
@@ -267,5 +268,47 @@ describe("recording a settlement", () => {
       counterpartyPersonId: "p-alex",
       amount: UNEXPLAINED_PAYMENT.amount,
     });
+  });
+});
+
+describe("sharing an expense to Splitwise", () => {
+  function renderPanel(state: ExpenseLedgerRow["state"]): ApiMock {
+    const api = mockApi({
+      [`/api/expenses/${EXPENSE.id}/ready-to-sync`]: { state: "ready_to_sync" },
+      [`/api/expenses/${EXPENSE.id}/splitwise-sync`]: { splitwiseExpenseId: "swe-1" },
+    });
+    renderWithQuery(<SplitwiseSyncPanel expense={{ ...EXPENSE, state }} />);
+    return api;
+  }
+
+  it("keeps marking an expense ready and pushing it as two separate acts", async () => {
+    const api = renderPanel("allocated");
+    const user = userEvent.setup();
+
+    expect(screen.queryByRole("button", { name: "Sync to Splitwise" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Mark ready to sync" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/sends nothing anywhere/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Mark it ready" }));
+
+    await waitFor(() => expect(api.callsTo("/ready-to-sync")).not.toHaveLength(0));
+    expect(api.callsTo("/splitwise-sync")).toHaveLength(0);
+  });
+
+  it("says who will see it before the push that writes into Splitwise", async () => {
+    renderPanel("ready_to_sync");
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Sync to Splitwise" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Everyone in that group will see it/)).toBeInTheDocument();
+  });
+
+  it("offers nothing to push while the expense has no approved allocation", () => {
+    renderPanel("approved");
+
+    expect(screen.queryByRole("button", { name: "Mark ready to sync" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sync to Splitwise" })).not.toBeInTheDocument();
   });
 });

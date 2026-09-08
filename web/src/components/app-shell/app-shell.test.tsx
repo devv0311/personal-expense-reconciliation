@@ -20,6 +20,12 @@ function renderShell() {
     "/api/people": { people: PEOPLE },
     "/api/reconciliation/runs": { runs: [RUN] },
     "/api/splitwise/audit-findings": { findings: [FINDING] },
+    // The ordinary local run: the API is not enforcing authentication, so the shell renders.
+    "/api/session": {
+      session: null,
+      authenticationConfigured: false,
+      authenticationRequired: false,
+    },
   });
   // `AppShell` provides its own QueryProvider, so this renders it directly rather than through
   // `renderWithQuery` — the shell under test is the one the real layout mounts.

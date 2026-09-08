@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useShortcuts } from "@/components/app-shell/shortcuts";
-import { useReviewQueue } from "@/lib/queries";
+import { Button } from "@/components/ui/button";
+import { useReviewQueue, useSession, useSignOut } from "@/lib/queries";
+import type { SessionState } from "@/lib/types";
 
 /**
  * One row, one entry per workflow, with evidence and receipts reached from the queue and the
@@ -36,6 +38,8 @@ export function Nav() {
   const pathname = usePathname();
   const { openCommandPalette } = useShortcuts();
   const queue = useReviewQueue({ limit: 1 });
+  const session = useSession();
+  const signOut = useSignOut();
 
   return (
     <header className="border-b border-rule bg-paper">
@@ -55,6 +59,11 @@ export function Nav() {
             </span>
             <span className="sr-only">Open the command palette</span>
           </button>
+          <SessionBadge
+            state={session.data}
+            signingOut={signOut.isPending}
+            onSignOut={() => signOut.mutate()}
+          />
         </div>
         <nav aria-label="Main" className="flex flex-wrap gap-x-6 gap-y-2 text-body">
           {SECTIONS.map((section) => {
@@ -95,5 +104,39 @@ export function Nav() {
         </nav>
       </div>
     </header>
+  );
+}
+
+/**
+ * Who this browser is, and the way out.
+ *
+ * When the API is not enforcing authentication it says so rather than showing nothing: an
+ * unlocked ledger that looks locked is the more dangerous of the two mistakes.
+ */
+function SessionBadge({
+  state,
+  signingOut,
+  onSignOut,
+}: {
+  state: SessionState | undefined;
+  signingOut: boolean;
+  onSignOut: () => void;
+}) {
+  if (state === undefined) return null;
+  if (!state.authenticationRequired) {
+    return (
+      <span className="text-micro text-ink-faint" title="AUTH_REQUIRED is off on this API">
+        Not password-protected
+      </span>
+    );
+  }
+  if (state.session === null) return null;
+  return (
+    <span className="flex items-center gap-2 text-micro text-ink-faint">
+      {state.session.email}
+      <Button variant="link" size="sm" disabled={signingOut} onClick={onSignOut}>
+        {signingOut ? "Signing out…" : "Sign out"}
+      </Button>
+    </span>
   );
 }
