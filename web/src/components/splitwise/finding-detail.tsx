@@ -118,7 +118,7 @@ export function AuditFindingDetail({ findingId }: { findingId: string }) {
             <Fact label="Expense">
               <Link
                 href={`/expenses/${finding.expenseId}`}
-                className="text-accent underline-offset-2 hover:underline"
+                className="text-accent underline underline-offset-2"
               >
                 Open the expense
               </Link>

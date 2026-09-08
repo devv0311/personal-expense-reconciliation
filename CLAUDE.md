@@ -1,7 +1,24 @@
 # CLAUDE.md — Engineering Context for This Repository
 
-> **Current decisions (2026-09-07).** **The numbered sequence is complete: phases 1–21 are all
-> done.** [Phase 21](docs/roadmap.md) shipped the **`web/` UI/UX overhaul**
+> **Current decisions (2026-09-08).** **The numbered sequence is complete: phases 1–22 are all
+> done.** [Phase 22](docs/roadmap.md) closed the 7 September capability audit's gaps
+> ([ADR-0050](docs/decisions/0050-closing-the-audit-gaps-a-workflow-is-not-shipped-until-it-is-reachable.md)).
+> That audit's verdict is worth keeping in mind, because it names a failure mode this repository
+> is prone to: every phase closed against its own scope, no phase's scope was "a person can do
+> this from a browser", and the gaps fell between them — an import service with no import
+> screen, an allocation engine reachable only over HTTP, a `ReceiptFacts` component with no
+> caller, six `ai-boundary.md` operations declared and never implemented. Phase 22 built the
+> surface rather than re-describing the scope: `/setup`, `/payments` (workspace, import,
+> normalization/classification runs, counterparty and cash-flow decisions, the exhaustive
+> unexplained list), `/evidence` (library and intake), the allocation editor and item
+> entry/correction, funding links, settlements, the session gate, Splitwise connection and
+> single-row re-sync, `/analytics`, `/automation` (rules and jobs), occasions, the audit-trail
+> screens, and ledger-wide search with real paging. **`web/` still performs no financial
+> arithmetic**: `receiptId` on `GET /api/evidence/:evidenceId` is the only read the whole phase
+> added. What remains unbuilt is now genuinely unbuilt rather than unreachable — a message
+> transport, live bank adapters, bidirectional Splitwise sync, and the natural-language
+> interface — and each needs its own ADR.
+> [Phase 21](docs/roadmap.md) shipped the **`web/` UI/UX overhaul**
 > ([ADR-0048](docs/decisions/0048-phase-21-ui-reads-the-ledger-and-never-recomputes-it.md),
 > [ADR-0049](docs/decisions/0049-keyboard-first-navigation-never-completes-a-decision.md)),
 > which makes all six pillars reachable through end-to-end flows across six sections — Review,
@@ -343,10 +360,15 @@ Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
   fixtures → import → normalization → classification → human review → receipt ingestion →
   item extraction → beneficiary allocation → expense ledger → Splitwise integration →
   reconciliation → schema/domain extensions → context re-attachment → item refund allocation
-  → Splitwise auditing → proof packs → UI overhaul). **All twenty-one are complete.**
-  Rules/learning, analytics, the natural-language interface, concrete external adapters and
-  stale Splitwise re-sync remain unnumbered later work; none is a prerequisite for anything
+  → Splitwise auditing → proof packs → UI overhaul → closing the audit's gaps). **All
+  twenty-two are complete.** A message transport for proof packs, live bank/card balance
+  adapters, bidirectional Splitwise sync beyond the single-row correction, and the
+  natural-language interface remain unnumbered later work; none is a prerequisite for anything
   already shipped, and each needs its own ADR before it starts.
+- **A capability is not shipped until a person can reach it** (ADR-0050). A service function and
+  an HTTP route are the middle of the work, not the end of it: the September 2026 audit found
+  eleven capabilities complete at those two layers and absent from the browser. When a phase
+  says it delivered something, check that a person can do it.
 - **Do not jump ahead of the current phase.** Building later-phase features before earlier
   ones are solid re-creates the exact "messy, unreconciled" problem this system exists to
   solve, just in code form.

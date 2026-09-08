@@ -24,6 +24,7 @@ export * from './receipt-service.js';
 export * from './review-action-service.js';
 export * from './expense-service.js';
 export * from './expense-item-service.js';
+export * from './expense-authoring-service.js';
 export * from './expense-ledger-service.js';
 export * from './allocation-service.js';
 export * from './settlement-service.js';
@@ -35,6 +36,15 @@ export * from './splitwise-service.js';
 export * from './splitwise-audit-service.js';
 export * from './people-service.js';
 export * from './account-service.js';
+export * from './master-data-service.js';
+export * from './payment-workspace-service.js';
+export * from './history-service.js';
+export * from './session-service.js';
+export * from './rule-service.js';
+export * from './analytics-service.js';
+export * from './occasion-service.js';
+export * from './splitwise-resync-service.js';
+export * from './job-service.js';
 
 /**
  * The two handles every service call needs, re-exported so a caller — `src/api`, a future

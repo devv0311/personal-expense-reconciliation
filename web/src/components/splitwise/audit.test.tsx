@@ -13,6 +13,7 @@ import {
 } from "@/test-support/fixtures";
 import { resetNavigation } from "@/test-support/next-navigation";
 import { renderWithQuery } from "@/test-support/render-with-query";
+import type { SplitwiseAuditRun } from "@/lib/types";
 import SplitwisePage from "@/app/splitwise/page";
 
 const originalFetch = global.fetch;
@@ -214,5 +215,69 @@ describe("one audit finding", () => {
       expect(screen.getByText("A later audit superseded this finding")).toBeInTheDocument(),
     );
     expect(screen.getByText(/kept as history rather than deleted/)).toBeInTheDocument();
+  });
+});
+
+describe("connecting Splitwise, and correcting what it holds", () => {
+  const CANDIDATE = {
+    splitwiseExpenseId: "swe-1",
+    expenseId: "exp-1",
+    externalId: "sw-99",
+    syncStatus: "stale",
+    syncedAt: "2026-08-10T10:00:00.000Z",
+    syncedSnapshot: { amount: "180000" },
+    currentNetAmount: "144000",
+    description: "Dinner at Toit",
+  };
+
+  function renderPage(runs: readonly SplitwiseAuditRun[]): ApiMock {
+    const api = mockApi({
+      "/api/splitwise/audit-findings": { findings: [] },
+      "/api/splitwise/resync-candidates": { candidates: [CANDIDATE] },
+      "/api/splitwise/audits": { runs },
+      "/api/expenses/exp-1/splitwise-resync": {
+        splitwiseExpenseId: "swe-1",
+        syncStatus: "synced",
+        previousSnapshot: { amount: "180000" },
+        pushedNetAmount: "144000",
+      },
+    });
+    renderWithQuery(<SplitwisePage />);
+    return api;
+  }
+
+  it("says an unread Splitwise is not an agreeing one, and offers to connect it", async () => {
+    renderPage([{ ...AUDIT_RUN_COMPLETE, externalReadStatus: "skipped" }]);
+
+    expect(await screen.findByText("Splitwise has not been read")).toBeInTheDocument();
+    // Awaited, not synchronous: before the run loads, the banner correctly says no audit has
+    // run at all, and only once it does can it say the read was skipped.
+    expect(await screen.findByText(/not the same as finding agreement/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect Splitwise" })).toBeInTheDocument();
+  });
+
+  it("requires a reason before pushing our figure into somebody else's ledger", async () => {
+    const api = renderPage([AUDIT_RUN_COMPLETE]);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Push ours" })).not.toHaveLength(0),
+    );
+    await user.click(screen.getAllByRole("button", { name: "Push ours" })[0]!);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(/the only action in this product that does/),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Push it" })).toBeDisabled();
+
+    await user.type(
+      within(dialog).getByLabelText(/Why this row is being corrected/),
+      "Refunded ₹360",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Push it" }));
+
+    await waitFor(() => expect(api.callsTo("/splitwise-resync")).not.toHaveLength(0));
+    expect(api.callsTo("/splitwise-resync")[0]!.body).toMatchObject({ reason: "Refunded ₹360" });
   });
 });

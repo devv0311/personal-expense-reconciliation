@@ -71,6 +71,27 @@
       "when": 1788690261422,
       "tag": "0009_phase19_splitwise_auditing",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788778113539,
+      "tag": "0010_phase22_master_data_rules_sessions_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788779040861,
+      "tag": "0011_phase22_expense_item_supersession",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788806634862,
+      "tag": "0012_phase22_job_terminal_check",
+      "breakpoints": true
     }
   ]
 }

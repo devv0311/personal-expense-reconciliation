@@ -20,10 +20,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { toDateInputValue, fromDateInputValue } from "@/lib/dates";
+import { formatDate, toDateInputValue, fromDateInputValue } from "@/lib/dates";
 import { adjustmentKindLabel } from "@/lib/labels";
 import { comparePaise, formatPaise, isZeroPaise, parseRupeeInput, sumPaise } from "@/lib/money";
-import { useRecordAdjustment } from "@/lib/queries";
+import { usePayments, useRecordAdjustment } from "@/lib/queries";
 import {
   EXPENSE_ADJUSTMENT_KINDS,
   type ExpenseAdjustmentKind,
@@ -67,8 +67,13 @@ export function RecordRefundForm({
   const [occurredAt, setOccurredAt] = useState(toDateInputValue(new Date()));
   const [attributed, setAttributed] = useState(true);
   const [itemAmounts, setItemAmounts] = useState<Record<string, string>>({});
+  const [adjustmentPaymentId, setAdjustmentPaymentId] = useState("");
   const [confirming, setConfirming] = useState(false);
   const mutation = useRecordAdjustment(expenseId);
+  // Only credits can carry a refund back in, so only credits are offered. Narrowing to the
+  // unexplained ones is what makes this control also close the cash side: the money arriving
+  // stops reading as an unexplained credit the moment it is named here (audit row 27).
+  const credits = usePayments({ direction: "credit", onlyUnexplained: true, limit: 50 });
 
   const amount = parseRupeeInput(amountText);
   const hasItems = state.items.length > 0;
@@ -159,6 +164,28 @@ export function RecordRefundForm({
               required
             />
           </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="refund-credit">The credit it arrived on</Label>
+          <Select
+            id="refund-credit"
+            value={adjustmentPaymentId}
+            onChange={(event) => setAdjustmentPaymentId(event.target.value)}
+            className="max-w-lg"
+          >
+            <option value="">Not recorded yet</option>
+            {(credits.data?.payments ?? []).map((payment) => (
+              <option key={payment.id} value={payment.id}>
+                {formatDate(payment.occurredAt)} · {payment.rawDescription}
+              </option>
+            ))}
+          </Select>
+          <p className="text-micro text-ink-faint">
+            Naming it is what connects the expense going down to the money coming in. Leave it unset
+            only if the credit has not landed: until it is named, the expense drops while that
+            credit stays unexplained on the account.
+          </p>
         </div>
 
         {hasItems && (
@@ -342,6 +369,7 @@ export function RecordRefundForm({
               amount: amount.paise,
               occurredAt: fromDateInputValue(occurredAt),
               ...(reason === undefined ? {} : { reason }),
+              ...(adjustmentPaymentId === "" ? {} : { adjustmentPaymentId }),
               ...(attributing ? { itemAttributions: attributions } : {}),
             },
             {
@@ -349,6 +377,7 @@ export function RecordRefundForm({
                 setConfirming(false);
                 setAmountText("");
                 setItemAmounts({});
+                setAdjustmentPaymentId("");
               },
             },
           );
@@ -403,6 +432,16 @@ export function DistributionPanel({
   distribute: DistributeMutation;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [weights, setWeights] = useState<Record<string, string>>({});
+  const [custom, setCustom] = useState(false);
+
+  // Positional, because that is what the API's `customWeights` is: one weight per line of the
+  // **current** allocation, in its order. They describe the unattributed whole-expense
+  // reduction only — where an item refund lands is decided by its attribution, and weights
+  // sent for an item-attributed reduction are refused rather than quietly ignored (ADR-0018).
+  const currentLines = state.currentAllocation?.lines ?? [];
+  const customWeights = currentLines.map((_line, index) => (weights[String(index)] ?? "1").trim());
+  const weightsValid = customWeights.every((weight) => /^\d+$/.test(weight));
 
   return (
     <Section
@@ -465,8 +504,61 @@ export function DistributionPanel({
               over the same facts is refused by the service (ADR-0045), and offering an action
               that is going to fail is worse than not offering it. */}
           {state.pendingDistribution ? (
-            <div className="mt-4">
-              <Button onClick={() => setConfirming(true)}>Approve this distribution</Button>
+            <div className="mt-4 flex flex-col gap-3">
+              {currentLines.length > 0 && state.basis !== "item_attributed" && (
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2 text-body text-ink">
+                    <input
+                      type="checkbox"
+                      checked={custom}
+                      onChange={(event) => setCustom(event.target.checked)}
+                      className="size-4 accent-accent"
+                    />
+                    Spread it unevenly instead
+                  </label>
+                  {custom && (
+                    <>
+                      <p className="text-meta text-ink-muted">
+                        A weight per current share, in the order above. The default spreads the
+                        reduction in proportion to what each person already owes; a weight of 0
+                        gives that person none of it. The ledger does the division.
+                      </p>
+                      <div className="flex flex-wrap gap-3">
+                        {currentLines.map((line, index) => (
+                          <div
+                            key={`${line.beneficiaryId}-${index}`}
+                            className="flex flex-col gap-1.5"
+                          >
+                            <Label htmlFor={`weight-${index}`}>{nameFor(line)}</Label>
+                            <Input
+                              id={`weight-${index}`}
+                              inputMode="numeric"
+                              value={weights[String(index)] ?? "1"}
+                              onChange={(event) =>
+                                setWeights((current) => ({
+                                  ...current,
+                                  [String(index)]: event.target.value,
+                                }))
+                              }
+                              className="w-20 font-mono"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      {!weightsValid && (
+                        <p className="text-meta text-attention">
+                          Each weight is a whole number, zero included.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+              <div>
+                <Button disabled={custom && !weightsValid} onClick={() => setConfirming(true)}>
+                  Approve this distribution
+                </Button>
+              </div>
             </div>
           ) : (
             <p className="mt-3 text-meta text-credit">
@@ -496,9 +588,15 @@ export function DistributionPanel({
         pending={distribute.isPending}
         error={distribute.error}
         onConfirm={(reason) => {
-          distribute.mutate(reason === undefined ? {} : { reason }, {
-            onSuccess: () => setConfirming(false),
-          });
+          distribute.mutate(
+            {
+              ...(reason === undefined ? {} : { reason }),
+              ...(custom && weightsValid ? { customWeights } : {}),
+            },
+            {
+              onSuccess: () => setConfirming(false),
+            },
+          );
         }}
       >
         <p className="text-meta text-ink-muted">
@@ -520,7 +618,7 @@ export interface DistributeMutation {
   readonly error: unknown;
   readonly reset: () => void;
   readonly mutate: (
-    input: { readonly reason?: string },
+    input: { readonly reason?: string; readonly customWeights?: readonly string[] },
     options?: { readonly onSuccess?: () => void },
   ) => void;
 }

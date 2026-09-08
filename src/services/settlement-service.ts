@@ -14,12 +14,14 @@
 import { assertPaymentTransition, validatePaymentExplanationBudget } from '../domain/index.js';
 import type { PaymentId, Paise, PersonId } from '../domain/index.js';
 import {
+  countSettlements,
   insertSettlement,
   listPaymentExpenseLinksByPayment,
+  listSettlementRegister,
   listSettlementsByPayment,
   updatePaymentState,
 } from '../db/index.js';
-import type { Database } from '../db/index.js';
+import type { Database, Executor, SettlementRegisterRow } from '../db/index.js';
 
 import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
 import { requirePayment } from './loaders.js';
@@ -115,4 +117,38 @@ export async function recordSettlementWithin(
   }
 
   return { settlementId, unexplainedRemainder: explanation.unexplained };
+}
+
+/* ==================================================================== the register */
+
+export interface SettlementRegisterResult {
+  readonly settlements: readonly SettlementRegisterRow[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+/**
+ * Every repayment on record, newest first (audit row 29).
+ *
+ * A read, and deliberately a plain one: it lists what was recorded and by which payment, and
+ * computes nothing. A pair's *balance* is `services.getBalance`, which nets these against the
+ * obligations they discharge — putting a running total here would be a second answer to the
+ * one question the balance service owns.
+ */
+export async function listSettlementRegisterEntries(
+  db: Executor,
+  options: {
+    readonly counterpartyPersonId?: PersonId;
+    readonly limit?: number;
+    readonly offset?: number;
+  } = {},
+): Promise<SettlementRegisterResult> {
+  const limit = options.limit ?? 100;
+  const offset = options.offset ?? 0;
+  const [settlements, total] = await Promise.all([
+    listSettlementRegister(db, { ...options, limit, offset }),
+    countSettlements(db, options.counterpartyPersonId),
+  ]);
+  return { settlements, total, limit, offset };
 }

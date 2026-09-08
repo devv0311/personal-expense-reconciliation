@@ -12,6 +12,11 @@ import { seedCast } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
 import { createMockSplitwisePort } from '../support/splitwise.js';
 
+/** The exact wording an unconnected integration reports (audit finding 8). */
+const NOT_CHECKED =
+  'Splitwise was not checked: no integration is connected, so no comparison ran. ' +
+  'This is not agreement — nothing was read.';
+
 const BASE = 'http://localhost';
 
 let database: TestDatabase;
@@ -69,7 +74,11 @@ describe('POST /api/reconciliation/runs', () => {
 
     expect(response.status).toBe(201);
     expect(body).toHaveProperty('reconciliationRunId');
-    expect(body).toMatchObject({ discrepancies: [] });
+    // Not an empty list: an unconnected integration is an unchecked one, and saying so is
+    // the difference between "the ledger matches" and "nothing was read" (audit finding 8).
+    expect(body).toMatchObject({
+      discrepancies: [{ kind: 'splitwise_not_connected', detail: NOT_CHECKED }],
+    });
     expect((body['totals'] as Record<string, unknown>)['ledgerUnexplainedTotal']).toBe('0');
   });
 

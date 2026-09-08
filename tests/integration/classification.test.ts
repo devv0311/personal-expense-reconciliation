@@ -346,7 +346,7 @@ describe('payment writes classification makes', () => {
       amount: paise(210_000n),
     });
 
-    expect(await listPaymentExpenseLinksByPayment(database.db, paymentId)).toEqual([
+    expect(await listPaymentExpenseLinksByPayment(database.db, paymentId)).toMatchObject([
       { amount: 210_000n },
     ]);
   });
@@ -988,7 +988,7 @@ describe('decideInference — accepting an expense proposal', () => {
     });
     expect(await expenseRow(proposal.expenseId!)).toMatchObject({ state: 'approved' });
     expect(await paymentState(proposal.paymentId)).toMatchObject({ state: 'linked' });
-    expect(await listPaymentExpenseLinksByPayment(database.db, proposal.paymentId)).toEqual([
+    expect(await listPaymentExpenseLinksByPayment(database.db, proposal.paymentId)).toMatchObject([
       { amount: 210_000n },
     ]);
     expect(await getAiInferenceById(database.db, proposal.inferenceId)).toMatchObject({

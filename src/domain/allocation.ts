@@ -68,7 +68,22 @@ export interface PercentageAllocationInput {
   }>;
 }
 
-/** Lines drawn from `ExpenseItem`s. No total is divided, so no rounding is invoked. */
+/**
+ * Lines drawn from `ExpenseItem`s.
+ *
+ * `item_based` divides nothing: each line's amount is an already-exact stored figure, copied.
+ *
+ * `quantity_based` is the one item-sourced shape that *does* divide, and only when an item is
+ * itself shared: "three thalis, two of them mine" is a claim about units, and the money follows
+ * from them. `units` supplies that claim, and the item's cost is split across the lines
+ * referencing it by the Largest Remainder Method — the same single algorithm every other split
+ * in this system uses (`invariants.md` #12), never a per-unit price rounded per line, which
+ * would lose or invent paise on any cost that does not divide evenly.
+ *
+ * A line may still state an explicit `amount` instead; `units` and `amount` on the same line
+ * are refused, because two answers to "how much is this line" is exactly the ambiguity this
+ * layer exists to prevent.
+ */
 export interface ItemBasedAllocationInput {
   readonly method: 'item_based' | 'quantity_based';
   readonly lines: ReadonlyArray<{
@@ -76,6 +91,13 @@ export interface ItemBasedAllocationInput {
     readonly expenseItemId: ExpenseItemId;
     /** Defaults to the referenced item's full amount when one line covers one item. */
     readonly amount?: Paise;
+    /**
+     * How many of the item's units this beneficiary took. `quantity_based` only.
+     *
+     * A weight, in the Largest Remainder Method's sense: what matters is this line's share of
+     * the units claimed against the item, so `2` of `1 + 2` is two thirds of the item's cost.
+     */
+    readonly units?: bigint;
   }>;
   readonly items: readonly AllocatableItem[];
 }
@@ -202,6 +224,7 @@ function buildItemBasedLines(input: ItemBasedAllocationInput): readonly DraftAll
     );
   }
   const itemsById = new Map(input.items.map((item) => [item.id, item]));
+  const unitShares = resolveUnitShares(input);
 
   const lines: DraftAllocationLine[] = input.lines.map((line, index) => {
     const item = itemsById.get(line.expenseItemId);
@@ -213,8 +236,25 @@ function buildItemBasedLines(input: ItemBasedAllocationInput): readonly DraftAll
         { index: String(index), expenseItemId: line.expenseItemId },
       );
     }
-    // No division happens here: the amount is an already-exact stored figure, copied.
-    const amount = line.amount ?? item.amount;
+    if (line.units !== undefined && line.amount !== undefined) {
+      throw new DomainError(
+        'ALLOCATION_SHAPE_INVALID',
+        `Line ${index} states both a unit count and an amount. One line has one amount: ` +
+          'either the units decide it, or you state it outright.',
+        { index: String(index) },
+      );
+    }
+    if (line.units !== undefined && input.method !== 'quantity_based') {
+      throw new DomainError(
+        'ALLOCATION_SHAPE_INVALID',
+        `Line ${index} states a unit count, but the method is "${input.method}". Units divide ` +
+          'a shared item, which is what quantity_based means.',
+        { index: String(index), method: input.method },
+      );
+    }
+    // Either an already-exact stored figure, copied, or this line's Largest-Remainder share
+    // of a shared item's cost — never a per-unit price multiplied out.
+    const amount = unitShares.get(index) ?? line.amount ?? item.amount;
     assertNonNegative(amount, `allocationLines[${index}].amount`);
     return {
       beneficiary: line.beneficiary,
@@ -238,6 +278,78 @@ function buildItemBasedLines(input: ItemBasedAllocationInput): readonly DraftAll
   }
   validateItemBasedLineSums(lines, input.items);
   return lines;
+}
+
+/**
+ * Resolves each unit-stated line's amount, by line index.
+ *
+ * Grouped per item and split once per item, so the remainder distribution is a property of
+ * that item's cost rather than of the order lines happen to appear in. Items with no
+ * unit-stated line are absent from the result and keep their existing behaviour.
+ */
+function resolveUnitShares(input: ItemBasedAllocationInput): Map<number, Paise> {
+  const byItem = new Map<ExpenseItemId, Array<{ index: number; units: bigint }>>();
+  for (const [index, line] of input.lines.entries()) {
+    if (line.units === undefined) continue;
+    if (line.units <= 0n) {
+      throw new DomainError(
+        'ALLOCATION_SHAPE_INVALID',
+        `Line ${index} claims ${line.units} units. A beneficiary who took none of an item ` +
+          'has no line for it — a zero-unit claim is an empty statement, not a zero share.',
+        { index: String(index), units: line.units.toString() },
+      );
+    }
+    const group = byItem.get(line.expenseItemId) ?? [];
+    group.push({ index, units: line.units });
+    byItem.set(line.expenseItemId, group);
+  }
+
+  const resolved = new Map<number, Paise>();
+  if (byItem.size === 0) return resolved;
+
+  const itemsById = new Map(input.items.map((item) => [item.id, item]));
+  for (const [expenseItemId, group] of byItem) {
+    const item = itemsById.get(expenseItemId);
+    if (item === undefined) {
+      throw new DomainError(
+        'UNKNOWN_REFERENCE',
+        `Unit-based lines reference expense item ${expenseItemId}, which is not part of this ` +
+          'expense.',
+        { expenseItemId },
+      );
+    }
+    // A line for the same item that states an amount instead of units would leave the item
+    // over-allocated: the unit split already spends the item's whole cost.
+    const mixed = input.lines.some(
+      (line) =>
+        line.expenseItemId === expenseItemId &&
+        line.units === undefined &&
+        line.amount !== undefined,
+    );
+    if (mixed) {
+      throw new DomainError(
+        'ALLOCATION_SHAPE_INVALID',
+        `Expense item ${expenseItemId} has both unit-stated and amount-stated lines. The unit ` +
+          "split already divides the item's whole cost, so a stated amount beside it would " +
+          'allocate the item twice.',
+        { expenseItemId },
+      );
+    }
+
+    const shares = splitByLargestRemainder(
+      item.amount,
+      group.map((entry) => ({
+        // Tie-break by beneficiary, exactly as every other split does (`invariants.md` #12,
+        // step 4) — the line's position in the request must not decide who absorbs a paisa.
+        key: beneficiarySortKey(input.lines[entry.index]!.beneficiary),
+        weight: entry.units,
+      })),
+    );
+    group.forEach((entry, position) => {
+      resolved.set(entry.index, shareAt(shares, position));
+    });
+  }
+  return resolved;
 }
 
 /**

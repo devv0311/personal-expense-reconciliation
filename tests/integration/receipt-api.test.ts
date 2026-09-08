@@ -229,3 +229,27 @@ describe('GET /api/receipts/:receiptId', () => {
     expect(response.status).toBe(404);
   });
 });
+
+describe('GET /api/evidence/:evidenceId', () => {
+  it('names the Receipt extracted from a document, so an inspector can open it', async () => {
+    const evidenceId = await ingestEvidence();
+    const extracted = await json(
+      await api.handle(post(`/api/evidence/${evidenceId}/receipt`, { actor: 'user' })),
+    );
+    const receiptId = (extracted['receipt'] as Record<string, unknown>)['id'] as string;
+
+    const body = await json(await api.handle(new Request(`${BASE}/api/evidence/${evidenceId}`)));
+
+    expect(body).toMatchObject({ id: evidenceId, receiptId });
+  });
+
+  it('reports null rather than omitting the field when nothing has been extracted', async () => {
+    const evidenceId = await ingestEvidence();
+
+    const body = await json(await api.handle(new Request(`${BASE}/api/evidence/${evidenceId}`)));
+
+    // Present-and-null, not absent: "nothing was extracted" is an answer, and a surface that
+    // had to tell an absent key from a null one would be guessing.
+    expect(body).toHaveProperty('receiptId', null);
+  });
+});

@@ -16,6 +16,7 @@
  * does have is written down at `API_ROUTES`.
  */
 
+import { resolveSession } from '../services/index.js';
 import type { AiService, Database, EvidenceStore, SplitwisePort } from '../services/index.js';
 
 import { getAccountsRoute } from './account-routes.js';
@@ -42,7 +43,48 @@ import {
   postEvidenceLink,
   postEvidenceNote,
 } from './evidence-routes.js';
+import {
+  getExpenseFundingRoute,
+  postExpense,
+  postExpenseFunding,
+  postExpenseItemsCorrection,
+} from './expense-authoring-routes.js';
 import { getExpenseItemsRoute, postExpenseItems } from './expense-item-routes.js';
+import {
+  getAuditTrailRoute,
+  getEvidenceLibraryRoute,
+  getExpenseHistoryRoute,
+  getPaymentHistoryRoute,
+} from './history-routes.js';
+import {
+  getCounterpartyOptionsRoute,
+  getImportBatchRoute,
+  getImportsRoute,
+  getPaymentRoute,
+  getPaymentsRoute,
+  postBankCsvImport,
+  postCashFlowDecision,
+  postClassifyPayments,
+  postManualPayment,
+  postNormalizePayments,
+  postPaymentCounterparty,
+} from './payment-routes.js';
+import {
+  getGroupsRoute,
+  getMerchantsRoute,
+  getPeopleManagementRoute,
+  postAccount,
+  postAccountUpdate,
+  postGroup,
+  postGroupMember,
+  postGroupMembershipEnd,
+  postGroupUpdate,
+  postMerchant,
+  postMerchantAlias,
+  postMerchantUpdate,
+  postPerson,
+  postPersonUpdate,
+} from './master-data-routes.js';
 import { getExpenseRoute, getExpensesRoute } from './expense-ledger-routes.js';
 import { jsonResponse, toErrorResponse } from './http.js';
 import { getPeopleRoute } from './people-routes.js';
@@ -65,7 +107,35 @@ import {
   postPaymentDuplicateDecision,
   postPaymentReclassification,
 } from './review-routes.js';
-import { postSettlement } from './settlement-routes.js';
+import {
+  getSessionRoute,
+  postSetPassword,
+  postSignIn,
+  postSignOut,
+  readSessionToken,
+} from './session-routes.js';
+import { getSettlementsRoute, postSettlement } from './settlement-routes.js';
+import {
+  getJobRoute,
+  getJobsRoute,
+  getMonthlySpendRoute,
+  getOccasionsRoute,
+  getOutstandingRoute,
+  getOwnSpendRoute,
+  getResyncCandidatesRoute,
+  getRulesRoute,
+  getSpendingRoute,
+  getUnsettledRoute,
+  postApplyRules,
+  postExpenseOccasion,
+  postJob,
+  postJobCancel,
+  postJobRetry,
+  postOccasion,
+  postRule,
+  postRuleUpdate,
+  postSplitwiseResync,
+} from './workflow-routes.js';
 import {
   getSplitwiseAuditFindingRoute,
   getSplitwiseAuditFindingsRoute,
@@ -84,12 +154,23 @@ import {
 /** What the handlers need. Injected, so nothing in `src/api` reaches for a connection. */
 export interface ApiDependencies {
   readonly db: Database;
-  /** Used by re-classification only; every other route is a read or a decision. */
+  /** Used by classification and receipt extraction; every other route is a read or a decision. */
   readonly ai: AiService;
   /** Where documents live, which is deliberately not the database (`security-model.md`). */
   readonly evidenceStore: EvidenceStore;
-  /** No concrete adapter is wired yet (ADR-0025's precedent) — a test injects a mock. */
+  /** A real adapter when one is configured; a rejecting stub otherwise (ADR-0040). */
   readonly splitwise: SplitwisePort;
+  /**
+   * Whether this process refuses unauthenticated requests (audit row 50).
+   *
+   * Optional here, and **off** when omitted — deliberately. `src/api` is a route table; it has
+   * no idea whether it is behind a loopback socket, a reverse proxy, or nothing at all, so it
+   * has no business holding an opinion about when a lock is needed. The process that binds the
+   * socket does: `src/server.ts` sets this, and defaults it to **on** for any bind that is not
+   * loopback. A test that constructs `createApi` directly is exercising the routes, not the
+   * door, and gets the door open.
+   */
+  readonly authRequired?: boolean;
 }
 
 export type RouteParams = Readonly<Record<string, string>>;
@@ -106,6 +187,19 @@ export interface ApiRoute {
   readonly path: string;
   readonly handler: RouteHandler;
 }
+
+/**
+ * Establishing and ending a session (audit row 50).
+ *
+ * The only routes {@link requiresSession} exempts, for the obvious reason: a sign-in that
+ * required a session could never be reached.
+ */
+export const SESSION_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/session', handler: getSessionRoute },
+  { method: 'POST', path: '/api/session', handler: postSignIn },
+  { method: 'POST', path: '/api/session/end', handler: postSignOut },
+  { method: 'POST', path: '/api/session/password', handler: postSetPassword },
+];
 
 export const REVIEW_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/review', handler: getReviewQueue },
@@ -135,6 +229,7 @@ export const REVIEW_ROUTES: readonly ApiRoute[] = [
  * and its children, which would otherwise read the literal segments as ids.
  */
 export const EVIDENCE_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/evidence', handler: getEvidenceLibraryRoute },
   { method: 'POST', path: '/api/evidence/files', handler: postEvidenceFile },
   { method: 'POST', path: '/api/evidence/notes', handler: postEvidenceNote },
   { method: 'POST', path: '/api/evidence/notifications', handler: postEvidenceNotification },
@@ -173,8 +268,23 @@ export const RECEIPT_ROUTES: readonly ApiRoute[] = [
  * how much (`docs/roadmap.md` phase 12).
  */
 export const ALLOCATION_ROUTES: readonly ApiRoute[] = [
+  // `/items/correct` before `/items`: they differ in length, so no capture swallows either,
+  // but keeping the more specific path first matches the table's stated ordering rule.
+  {
+    method: 'POST',
+    path: '/api/expenses/:expenseId/items/correct',
+    handler: postExpenseItemsCorrection,
+  },
   { method: 'POST', path: '/api/expenses/:expenseId/items', handler: postExpenseItems },
+  {
+    method: 'GET',
+    path: '/api/expenses/:expenseId/payment-links',
+    handler: getExpenseFundingRoute,
+  },
+  { method: 'POST', path: '/api/expenses/:expenseId/payment-links', handler: postExpenseFunding },
   { method: 'GET', path: '/api/expenses/:expenseId/items', handler: getExpenseItemsRoute },
+  { method: 'GET', path: '/api/expenses/:expenseId/history', handler: getExpenseHistoryRoute },
+  { method: 'POST', path: '/api/expenses/:expenseId/occasion', handler: postExpenseOccasion },
   { method: 'POST', path: '/api/expenses/:expenseId/allocation', handler: postAllocation },
   {
     method: 'POST',
@@ -196,6 +306,7 @@ export const ALLOCATION_ROUTES: readonly ApiRoute[] = [
 /** A manual settlement over a payment, independent of classification (phase 12). */
 export const SETTLEMENT_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/payments/:paymentId/settlements', handler: postSettlement },
+  { method: 'GET', path: '/api/settlements', handler: getSettlementsRoute },
 ];
 
 /**
@@ -206,12 +317,97 @@ export const PAYMENT_CONTEXT_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/payments/:paymentId/context', handler: getPaymentContextRoute },
 ];
 
+/** Statement import and its history (`docs/roadmap.md` phase 6; audit rows 01–02). */
+export const IMPORT_ROUTES: readonly ApiRoute[] = [
+  { method: 'POST', path: '/api/imports/bank-csv', handler: postBankCsvImport },
+  { method: 'GET', path: '/api/imports', handler: getImportsRoute },
+  { method: 'GET', path: '/api/imports/:importBatchId', handler: getImportBatchRoute },
+];
+
+/**
+ * The payment workspace: every posted movement, what explains it, and the decisions a person
+ * makes about one (audit rows 02, 04–07, 36).
+ *
+ * The three literal third segments — `counterparty-options`, `normalize`, `classify` — are
+ * listed before `/api/payments/:paymentId`, which would otherwise read them as ids.
+ */
+export const PAYMENT_WORKSPACE_ROUTES: readonly ApiRoute[] = [
+  {
+    method: 'GET',
+    path: '/api/payments/counterparty-options',
+    handler: getCounterpartyOptionsRoute,
+  },
+  { method: 'POST', path: '/api/payments/normalize', handler: postNormalizePayments },
+  { method: 'POST', path: '/api/payments/classify', handler: postClassifyPayments },
+  { method: 'GET', path: '/api/payments', handler: getPaymentsRoute },
+  { method: 'POST', path: '/api/payments', handler: postManualPayment },
+  {
+    method: 'POST',
+    path: '/api/payments/:paymentId/counterparty',
+    handler: postPaymentCounterparty,
+  },
+  {
+    method: 'POST',
+    path: '/api/payments/:paymentId/cash-flow/:step',
+    handler: postCashFlowDecision,
+  },
+  { method: 'GET', path: '/api/payments/:paymentId/history', handler: getPaymentHistoryRoute },
+  { method: 'GET', path: '/api/payments/:paymentId', handler: getPaymentRoute },
+];
+
+/**
+ * The append-only audit log, over any record that has one (audit row 33).
+ *
+ * A read of `audit_events`, which has no update or delete path anywhere in this repository.
+ */
+export const AUDIT_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/audit/:entityType/:entityId', handler: getAuditTrailRoute },
+];
+
+/**
+ * Standing rules (audit row 43).
+ *
+ * `/api/rules/apply` is listed before `/api/rules/:ruleId`, which would otherwise read
+ * "apply" as an id — the one precedence rule this table has.
+ */
+export const RULE_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/rules', handler: getRulesRoute },
+  { method: 'POST', path: '/api/rules', handler: postRule },
+  { method: 'POST', path: '/api/rules/apply', handler: postApplyRules },
+  { method: 'POST', path: '/api/rules/:ruleId', handler: postRuleUpdate },
+];
+
+/** Aggregate reads over the ledger's own figures (audit rows 30 and 44). All reads. */
+export const ANALYTICS_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/analytics/spending', handler: getSpendingRoute },
+  { method: 'GET', path: '/api/analytics/monthly', handler: getMonthlySpendRoute },
+  { method: 'GET', path: '/api/analytics/own-spend', handler: getOwnSpendRoute },
+  { method: 'GET', path: '/api/analytics/outstanding', handler: getOutstandingRoute },
+  { method: 'GET', path: '/api/analytics/unsettled', handler: getUnsettledRoute },
+];
+
+/** Expense occasions — a label over a group of expenses, carrying no money (audit row 47). */
+export const OCCASION_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/occasions', handler: getOccasionsRoute },
+  { method: 'POST', path: '/api/occasions', handler: postOccasion },
+];
+
+/** The background job queue (audit row 51). A job orchestrates; it never approves. */
+export const JOB_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/jobs', handler: getJobsRoute },
+  { method: 'POST', path: '/api/jobs', handler: postJob },
+  { method: 'POST', path: '/api/jobs/:jobId/retry', handler: postJobRetry },
+  { method: 'POST', path: '/api/jobs/:jobId/cancel', handler: postJobCancel },
+  { method: 'GET', path: '/api/jobs/:jobId', handler: getJobRoute },
+];
+
 /**
  * The expense ledger, queryable — `services.listExpenses` (`docs/roadmap.md` phase 13) — and
  * one row of it, which the phase 21 expense detail screen reads.
  */
 export const EXPENSE_LEDGER_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/expenses', handler: getExpensesRoute },
+  { method: 'POST', path: '/api/expenses', handler: postExpense },
   { method: 'GET', path: '/api/expenses/:expenseId', handler: getExpenseRoute },
 ];
 
@@ -220,9 +416,40 @@ export const BALANCE_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/balances/:personAId/:personBId', handler: getBalanceRoute },
 ];
 
-/** The people roster `web/` renders names from — `services.listPeople` (phase 15). */
+/**
+ * The people roster `web/` renders names from — `services.listPeople` (phase 15) — and the
+ * management surface that lets a fresh installation build one (audit row 48).
+ *
+ * `/api/people/manage` is listed before nothing in particular: it is a literal path under a
+ * collection with no `:personId` GET, so no capture can swallow it. `POST /api/people/:personId`
+ * is the edit; a second POST verb on the collection would have been ambiguous.
+ */
 export const PEOPLE_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/people/manage', handler: getPeopleManagementRoute },
   { method: 'GET', path: '/api/people', handler: getPeopleRoute },
+  { method: 'POST', path: '/api/people', handler: postPerson },
+  { method: 'POST', path: '/api/people/:personId', handler: postPersonUpdate },
+];
+
+/** The merchant catalog and its aliases — what makes an unknown narration fixable by hand. */
+export const MERCHANT_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/merchants', handler: getMerchantsRoute },
+  { method: 'POST', path: '/api/merchants', handler: postMerchant },
+  { method: 'POST', path: '/api/merchants/:merchantId/aliases', handler: postMerchantAlias },
+  { method: 'POST', path: '/api/merchants/:merchantId', handler: postMerchantUpdate },
+];
+
+/** Groups and their membership stints (ADR-0009). A stint ends; it is never deleted. */
+export const GROUP_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/groups', handler: getGroupsRoute },
+  { method: 'POST', path: '/api/groups', handler: postGroup },
+  { method: 'POST', path: '/api/groups/:groupId/members', handler: postGroupMember },
+  { method: 'POST', path: '/api/groups/:groupId', handler: postGroupUpdate },
+  {
+    method: 'POST',
+    path: '/api/group-memberships/:membershipId/end',
+    handler: postGroupMembershipEnd,
+  },
 ];
 
 /**
@@ -231,6 +458,8 @@ export const PEOPLE_ROUTES: readonly ApiRoute[] = [
  */
 export const ACCOUNT_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/accounts', handler: getAccountsRoute },
+  { method: 'POST', path: '/api/accounts', handler: postAccount },
+  { method: 'POST', path: '/api/accounts/:accountId', handler: postAccountUpdate },
 ];
 
 /**
@@ -266,6 +495,12 @@ export const SPLITWISE_ROUTES: readonly ApiRoute[] = [
   },
   { method: 'POST', path: '/api/expenses/:expenseId/ready-to-sync', handler: postReadyToSync },
   { method: 'POST', path: '/api/expenses/:expenseId/splitwise-sync', handler: postSyncExpense },
+  {
+    method: 'POST',
+    path: '/api/expenses/:expenseId/splitwise-resync',
+    handler: postSplitwiseResync,
+  },
+  { method: 'GET', path: '/api/splitwise/resync-candidates', handler: getResyncCandidatesRoute },
   {
     method: 'POST',
     path: '/api/settlements/:settlementId/splitwise-sync',
@@ -309,21 +544,41 @@ export const SPLITWISE_AUDIT_ROUTES: readonly ApiRoute[] = [
  * every verb rather than only for the ones that happen to be registered first.
  */
 export const API_ROUTES: readonly ApiRoute[] = [
+  ...SESSION_ROUTES,
   ...REVIEW_ROUTES,
   ...EVIDENCE_ROUTES,
   ...RECEIPT_ROUTES,
   ...ALLOCATION_ROUTES,
   ...SETTLEMENT_ROUTES,
   ...PAYMENT_CONTEXT_ROUTES,
+  ...IMPORT_ROUTES,
+  ...PAYMENT_WORKSPACE_ROUTES,
+  ...AUDIT_ROUTES,
+  ...RULE_ROUTES,
+  ...ANALYTICS_ROUTES,
+  ...OCCASION_ROUTES,
+  ...JOB_ROUTES,
   ...EXPENSE_LEDGER_ROUTES,
   ...BALANCE_ROUTES,
   ...PEOPLE_ROUTES,
   ...ACCOUNT_ROUTES,
+  ...MERCHANT_ROUTES,
+  ...GROUP_ROUTES,
   ...PROOF_PACK_ROUTES,
   ...SPLITWISE_ROUTES,
   ...SPLITWISE_AUDIT_ROUTES,
   ...RECONCILIATION_ROUTES,
 ];
+
+/**
+ * The paths reachable without a session.
+ *
+ * A closed set, listed rather than pattern-matched: every other route in the table is
+ * protected, and adding one is protected by default. That is the direction a mistake here
+ * should fail in — a new route accidentally left public is a leak of somebody's financial
+ * history, while a new route accidentally protected is a 401 somebody notices in a minute.
+ */
+const PUBLIC_PATHS: ReadonlySet<string> = new Set(SESSION_ROUTES.map((route) => route.path));
 
 export interface Api {
   readonly routes: readonly ApiRoute[];
@@ -362,6 +617,22 @@ export function createApi(deps: ApiDependencies): Api {
             candidate.route.path === owner && candidate.route.method === request.method,
         );
         if (match !== undefined) {
+          // The door, before the route (audit row 50). Deliberately here rather than in each
+          // handler: a check every handler has to remember is a check one of them eventually
+          // will not, and what is behind these routes is a person's entire financial history.
+          if (deps.authRequired === true && !PUBLIC_PATHS.has(match.route.path)) {
+            const identity = await resolveSession(deps.db, readSessionToken(request));
+            if (identity === null) {
+              return jsonResponse(401, {
+                error: {
+                  code: 'NOT_AUTHENTICATED',
+                  message:
+                    'This ledger requires a session. Sign in at POST /api/session, or set a ' +
+                    'password first at POST /api/session/password.',
+                },
+              });
+            }
+          }
           return await match.route.handler(deps, request, match.params);
         }
 

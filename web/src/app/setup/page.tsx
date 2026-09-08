@@ -1,0 +1,28 @@
+import { PageHeader } from "@/components/page-header";
+import { AccountsAdmin } from "@/components/setup/accounts-admin";
+import { GroupsAdmin } from "@/components/setup/groups-admin";
+import { MerchantsAdmin } from "@/components/setup/merchants-admin";
+import { PeopleAdmin } from "@/components/setup/people-admin";
+
+/**
+ * The roster a fresh installation has to build before any financial screen means anything:
+ * who money moves between, which accounts it moves through, who a narration resolves to, and
+ * which groups exist.
+ *
+ * None of it is financial. Nothing on this page creates an expense, an obligation or a payment
+ * — which is exactly why it is one page and not four scattered dialogs.
+ */
+export default function SetupPage() {
+  return (
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        title="Setup"
+        description="People, accounts, merchants and groups. Everything here is master data: it changes what the ledger can say, never what it already says."
+      />
+      <PeopleAdmin />
+      <AccountsAdmin />
+      <MerchantsAdmin />
+      <GroupsAdmin />
+    </div>
+  );
+}

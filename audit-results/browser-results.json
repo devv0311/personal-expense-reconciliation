@@ -1,0 +1,911 @@
+{
+  "result": [
+    {
+      "name": "review",
+      "path": "/review",
+      "url": "http://localhost:3000/review",
+      "title": "Ledger — reconciliation",
+      "main": "Review\n\nResolve proposals, possible duplicates and unmatched evidence. Every decision stays yours to review.\n\nEverything 4\nClassification 1\nPossible duplicate 0\nUnexplained payment 0\nUnmatched evidence 3\nWaiting for a decision\n4 of 4\nClassification\n₹1,240.00\nUPI-ZOMATO4471-SAMPLE RESTAURANT PVT LTD\n19 Aug 2026\n\nLow confidence\n\nUnmatched evidence\n₹3,200.00\nPEPPERMILL RESTAURANT\n5 Aug 2026\n\nAttached to nothing\n\nUnmatched evidence\n₹640.00\nPEPPERMILL CAFE\n8 Aug 2026\n\nAttached to nothing\n\nUnmatched evidence\nNot evidenced\nA document attached to nothing\n1 Sept 2026\n\nAttached to nothing\n\nj / k to move · Enter to inspect\n\nA closer look, before you decide\n\nChoose an item to see everything the ledger knows about it. Review the source, the interpretation and the proposed decision together.\n\nNothing changes until you confirm a decision.",
+      "controls": [
+        {
+          "tag": "SELECT",
+          "text": "Everything (4)Classification (1)Possible duplicate (0)Unexplained payment (0)Unmatched evidence (3)",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Everything 4",
+          "type": "button",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Classification 1",
+          "type": "button",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Possible duplicate 0",
+          "type": "button",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Unexplained payment 0",
+          "type": "button",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Unmatched evidence 3",
+          "type": "button",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Classification\n₹1,240.00\nUPI-ZOMATO4471-SAMPLE RESTAURANT PVT LTD\n19 Aug 2026\n\nLow confidence",
+          "type": "button",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Unmatched evidence\n₹3,200.00\nPEPPERMILL RESTAURANT\n5 Aug 2026\n\nAttached to nothing",
+          "type": "button",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Unmatched evidence\n₹640.00\nPEPPERMILL CAFE\n8 Aug 2026\n\nAttached to nothing",
+          "type": "button",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Unmatched evidence\nNot evidenced\nA document attached to nothing\n1 Sept 2026\n\nAttached to nothing",
+          "type": "button",
+          "href": null,
+          "name": null
+        }
+      ],
+      "errors": [],
+      "apiCalls": [
+        {
+          "url": "http://localhost:4000/api/review?limit=1",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/review?limit=50",
+          "status": 200
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "expenses",
+      "path": "/expenses",
+      "url": "http://localhost:3000/expenses",
+      "title": "Ledger — reconciliation",
+      "main": "Expenses\n\nTrace each expense from its original cost to its current net amount. Open a row for items, beneficiaries and refunds.\n\nSearch expenses\nState\nAll states\nProposed\nClassified\nReview required\nApproved\nAllocated\nReady to sync\nSynced\nReconciled\nRejected\nPaid by\nAnyone\nDev (you)\nAlex\nSam\n\n5 expenses in the ledger · Newest first\n\nExpense ledger\nDescription\tPaid by\tState\tNet\nUPI-ZOMATO4471-SAMPLE RESTAURANT PVT LTD\n19 Aug 2026\n\tDev\tReview required\t₹1,240.00\nBlinkit — weekly groceries\n11 Aug 2026\n\tDev\tAllocated\t₹1,500.00\nof ₹2,150.00\n\nAmazon — desk lamp\n7 Aug 2026\n\tDev\tApproved\t₹1,800.00\nDinner at Peppermill\n5 Aug 2026\n\tDev\tAllocated\t₹3,200.00\nElectricity bill\n2 Aug 2026\n\tDev\tAllocated\t₹2,400.00",
+      "controls": [
+        {
+          "tag": "INPUT",
+          "text": "Find a description…",
+          "type": "search",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "SELECT",
+          "text": "All states\nProposed\nClassified\nReview required\nApproved\nAllocated\nReady to sync\nSynced\nReconciled\nRejected",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "SELECT",
+          "text": "Anyone\nDev (you)\nAlex\nSam",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "UPI-ZOMATO4471-SAMPLE RESTAURANT PVT LTD",
+          "type": null,
+          "href": "/expenses/a43b1a24-88e8-42b7-b508-d3af80b5a9f2",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Blinkit — weekly groceries",
+          "type": null,
+          "href": "/expenses/6b569814-e032-4994-8bc7-d4bcec518bcb",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Amazon — desk lamp",
+          "type": null,
+          "href": "/expenses/c2452a10-a5d5-4ae2-b810-e4bb79e393c7",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Dinner at Peppermill",
+          "type": null,
+          "href": "/expenses/021adf1d-c757-4cd4-95b1-664ab4df46ba",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Electricity bill",
+          "type": null,
+          "href": "/expenses/eeb03194-5568-4c5e-953e-2d955104efe6",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "UPI-ZOMATO4471-SAMPLE RESTAURANT PVT LTD",
+          "type": null,
+          "href": "/expenses/a43b1a24-88e8-42b7-b508-d3af80b5a9f2",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Blinkit — weekly groceries",
+          "type": null,
+          "href": "/expenses/6b569814-e032-4994-8bc7-d4bcec518bcb",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Amazon — desk lamp",
+          "type": null,
+          "href": "/expenses/c2452a10-a5d5-4ae2-b810-e4bb79e393c7",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Dinner at Peppermill",
+          "type": null,
+          "href": "/expenses/021adf1d-c757-4cd4-95b1-664ab4df46ba",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Electricity bill",
+          "type": null,
+          "href": "/expenses/eeb03194-5568-4c5e-953e-2d955104efe6",
+          "name": null
+        }
+      ],
+      "errors": [],
+      "apiCalls": [
+        {
+          "url": "http://localhost:4000/api/review?limit=1",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/people",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/expenses",
+          "status": 200
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "reconciliation",
+      "path": "/reconciliation",
+      "url": "http://localhost:3000/reconciliation",
+      "title": "Ledger — reconciliation",
+      "main": "Reconciliation\n\nTwo independent checks over one period: how much of what left your accounts the ledger has explained, and whether each account's statement actually closes. Neither is derived from the other.\n\nRun a reconciliation\nFrom\nTo (exclusive)\nRun reconciliation\nAdd statement balances\nHistory\nPast reconciliation runs, newest first\nPeriod\tNot yet explained\tDiscrepancies\n1 Aug 2026 – 31 Aug 2026\t₹2,530.00\t1",
+      "controls": [
+        {
+          "tag": "INPUT",
+          "text": "",
+          "type": "date",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "type": "date",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Run reconciliation",
+          "type": "submit",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Add statement balances",
+          "type": "button",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "Leave blank if not confirmed",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "Evidence id",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "Leave blank if not confirmed",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "Evidence id",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "1 Aug 2026 – 31 Aug 2026",
+          "type": null,
+          "href": "/reconciliation/dbc82a37-ff23-4f98-bb26-8d2e34d9a744",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "1 Aug 2026 – 31 Aug 2026",
+          "type": null,
+          "href": "/reconciliation/dbc82a37-ff23-4f98-bb26-8d2e34d9a744",
+          "name": null
+        }
+      ],
+      "errors": [],
+      "apiCalls": [
+        {
+          "url": "http://localhost:4000/api/review?limit=1",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/accounts",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/reconciliation/runs?limit=20",
+          "status": 200
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "balances",
+      "path": "/balances?with=15c98992-c491-4d36-9705-5dcaa9df8d53",
+      "url": "http://localhost:3000/balances?with=15c98992-c491-4d36-9705-5dcaa9df8d53",
+      "title": "Ledger — reconciliation",
+      "main": "Balances\n\nWho owes whom, computed from every shared expense — in either direction, since the payer isn't always you.\n\nPreview a proof pack for this person\nPerson A\nChoose a person\nDev (you)\nAlex\nSam\n↔\nPerson B\nChoose a person\nDev (you)\nAlex\nSam\n\n₹900.00\nAlex owes Dev\n\n○\nOpen\nFrom these expenses\n\nEvery obligation behind the figure above. Open one to see its items, what came back, and how the share was decided.\n\nExpenses contributing to this balance\nDebtor\tCreditor\tAmount\nAlex\tDev\t₹1,600.00\nAlex\tDev\t₹900.00",
+      "controls": [
+        {
+          "tag": "A",
+          "text": "Preview a proof pack for this person",
+          "type": null,
+          "href": "/proof-packs?recipient=15c98992-c491-4d36-9705-5dcaa9df8d53",
+          "name": null
+        },
+        {
+          "tag": "SELECT",
+          "text": "Choose a person\nDev (you)\nAlex\nSam",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "SELECT",
+          "text": "Choose a person\nDev (you)\nAlex\nSam",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "₹1,600.00",
+          "type": null,
+          "href": "/expenses/021adf1d-c757-4cd4-95b1-664ab4df46ba",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "₹900.00",
+          "type": null,
+          "href": "/expenses/6b569814-e032-4994-8bc7-d4bcec518bcb",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "₹1,600.00",
+          "type": null,
+          "href": "/expenses/021adf1d-c757-4cd4-95b1-664ab4df46ba",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "₹900.00",
+          "type": null,
+          "href": "/expenses/6b569814-e032-4994-8bc7-d4bcec518bcb",
+          "name": null
+        }
+      ],
+      "errors": [],
+      "apiCalls": [
+        {
+          "url": "http://localhost:4000/api/review?limit=1",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/people",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/balances/afc0f0ec-1b56-489c-ad85-f8d69420bd71/15c98992-c491-4d36-9705-5dcaa9df8d53",
+          "status": 200
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "splitwise",
+      "path": "/splitwise",
+      "url": "http://localhost:3000/splitwise",
+      "title": "Ledger — reconciliation",
+      "main": "Splitwise audit\n\nWhere this ledger and Splitwise disagree, what each disagreement is actually evidence of, and what could not be checked at all. Nothing here writes to Splitwise.\n\nRun an audit\n\nSplitwise read: failed — this was an incomplete check, not agreement\n\nThe read was attempted and errored.\nSplitwise.fetchBalances is not configured in this environment (ADR-0040). No real adapter is wired anywhere in this repository — CLAUDE.md forbids connecting one during development.\n0 pairs compared, 0 unchecked. No finding is retired by a read that could not be made.\n\nFindings\n\nEach one carries both compared snapshots, its evidence, the part of the gap it accounts for, and its confidence.\n\nReview state\nAny state\nOpen\nAcknowledged\nResolved\nDismissed\nKind of finding\nAny kind\nDisagreement\nObservability limit\nIncomplete check\nSplitwise read failed\nSplitwisePort.fetchBalances() failed, so no pair was compared this run: Splitwise.fetchBalances is not configured in this environment (ADR-0040). No real adapter is wired anywhere in this repository — CLAUDE.md forbids connecting one during development.. This is an incomplete audit, not a clean one — nothing here says the two ledgers agree.\nIncomplete check\nConfidence unknown\nOpen\nlast seen 7 Sept 2026, 3:06 am\nUnattributed mismatch\n₹500.00\nThis ledger computes -90000 paise for the pair and Splitwise reports -200000. Attribution accounted for -160000 paise of the -110000 paise gap; 50000 paise is left over that no record in evidence explains. It is reported as an unattributed aggregate mismatch rather than assigned to whichever expense or settlement would have balanced the totals.\nDisagreement\nConfidence unknown\nOpen\nlast seen 7 Sept 2026, 2:57 am\nSettlement missing from Splitwise\n₹1,600.00\nThis ledger records Settlement 9ab48f73-23e4-4d72-9cac-b9cd86ab83b1 for 160000 paise (the friend paid the user), which was never synced to Splitwise and which no external payment entry matches. Splitwise therefore still shows a debt this ledger has evidence was discharged. The settlement stays exactly as recorded; no Payment or Settlement is invented here.\nDisagreement\nMedium confidence\nOpen\nlast seen 7 Sept 2026, 2:57 am\nSplitwise read not supported\nThe configured Splitwise port does not implement the per-entry read (SplitwisePort.fetchLedgerEntries), so this pair could only be compared at the aggregate balance level. No finding below names a specific external record, because none could be seen.\nIncomplete check\nConfidence unknown\nOpen\nlast seen 7 Sept 2026, 2:57 am\nAudit history\n\nNewest first. A rerun re-observes what is already on record rather than duplicating it.\n\n7 Sept 2026, 3:06 am\nread failed · 1 new · 0 re-observed · 0 superseded\n7 Sept 2026, 2:57 am\nread not supported · 3 new · 0 re-observed · 0 superseded",
+      "controls": [
+        {
+          "tag": "BUTTON",
+          "text": "Run an audit",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "SELECT",
+          "text": "Any state\nOpen\nAcknowledged\nResolved\nDismissed",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "SELECT",
+          "text": "Any kind\nDisagreement\nObservability limit\nIncomplete check",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Splitwise read failed\nSplitwisePort.fetchBalances() failed, so no pair was compared this run: Splitwise.fetchBalances is not configured in this environment (ADR-0040). No real adapter is wired anywhere in this repository — CLAUDE.md forbids connecting one during development.. This is an incomplete audit, not a clean one — nothing here says the two ledgers agree.\nIncomplete check\nConfidence unknown\nOpen\nlast seen 7 Sept 2026, 3:06 am",
+          "type": null,
+          "href": "/splitwise/findings/f9a845e6-5ab5-4242-9c2d-d63d9d035d22",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Unattributed mismatch\n₹500.00\nThis ledger computes -90000 paise for the pair and Splitwise reports -200000. Attribution accounted for -160000 paise of the -110000 paise gap; 50000 paise is left over that no record in evidence explains. It is reported as an unattributed aggregate mismatch rather than assigned to whichever expense or settlement would have balanced the totals.\nDisagreement\nConfidence unknown\nOpen\nlast seen 7 Sept 2026, 2:57 am",
+          "type": null,
+          "href": "/splitwise/findings/3e34fb78-db02-49af-9a17-e3e273cbb2cd",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Settlement missing from Splitwise\n₹1,600.00\nThis ledger records Settlement 9ab48f73-23e4-4d72-9cac-b9cd86ab83b1 for 160000 paise (the friend paid the user), which was never synced to Splitwise and which no external payment entry matches. Splitwise therefore still shows a debt this ledger has evidence was discharged. The settlement stays exactly as recorded; no Payment or Settlement is invented here.\nDisagreement\nMedium confidence\nOpen\nlast seen 7 Sept 2026, 2:57 am",
+          "type": null,
+          "href": "/splitwise/findings/f7af2f4f-14dc-4a82-9d1a-b5b30e50175c",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Splitwise read not supported\nThe configured Splitwise port does not implement the per-entry read (SplitwisePort.fetchLedgerEntries), so this pair could only be compared at the aggregate balance level. No finding below names a specific external record, because none could be seen.\nIncomplete check\nConfidence unknown\nOpen\nlast seen 7 Sept 2026, 2:57 am",
+          "type": null,
+          "href": "/splitwise/findings/fa8f4e00-f201-40fa-8a43-68d08dc7dd90",
+          "name": null
+        }
+      ],
+      "errors": [],
+      "apiCalls": [
+        {
+          "url": "http://localhost:4000/api/review?limit=1",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/splitwise/audit-findings?reviewStatus=open&limit=50",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/splitwise/audits?limit=10",
+          "status": 200
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "proof-packs",
+      "path": "/proof-packs?recipient=15c98992-c491-4d36-9705-5dcaa9df8d53",
+      "url": "http://localhost:3000/proof-packs?recipient=15c98992-c491-4d36-9705-5dcaa9df8d53",
+      "title": "Ledger — reconciliation",
+      "main": "Proof packs\n\nPrepare a private summary for one person: expenses, refunds, settlements and what remains. Review the exact content before copying; nothing is sent automatically.\n\nRecipient\nChoose a person\nAlex\nSam\n\nAlex owes you\n\n₹900.00\n○\nOpen\nAs of 7 Sept 2026, 8:59 am — a snapshot label, not a historical filter\nBefore you send this\n\nEverything about this pair that is not settled fact. None of it is smoothed away in the text below.\n\nUnresolved Splitwise findings\n\n3 Splitwise audit findings are still open for this balance, so the figures above may change once they are resolved.\n\nA refund has not reached the allocation yet\n\nA refund has been recorded against one of these expenses but not yet applied to the shares, so the amount owed does not reflect it yet.\n\nNo supporting evidence\n\nOne or more of these expenses has no supporting evidence attached yet.\n\nWhat it says\n\nEach contributing expense, with the original amount, what came back, and the recipient's share of the rest.\n\nExpenses this pack quotes\nExpense\tPaid\tCame back\tNet\tTheir share\nDinner at Peppermill\n5 Aug 2026 · you paid · no adjustment recorded\n\t₹3,200.00\t₹0.00\t₹3,200.00\t₹1,600.00\nBlinkit — weekly groceries\n11 Aug 2026 · you paid · attributed to items\nA refund on this expense has not reached the allocation yet.\n\t₹2,150.00\t₹650.00\t₹1,500.00\t₹900.00\nAlready settled between you\n\nRecorded settlements stay recorded, even when a later refund leaves the balance running the other way.\n\nAlex paid you6 Aug 2026\n₹1,600.00\nOpen Splitwise findings touching this pair\n\nAn unresolved finding means these facts are not settled. The pack says so rather than quoting a confident balance over it.\n\nThis ledger computes -90000 paise for the pair and Splitwise reports -200000. Attribution accounted for -160000 paise of the -110000 paise gap; 50000 paise is left over that no record in evidence explains. It is reported as an unattributed aggregate mismatch rather than assigned to whichever expense or settlement would have balanced the totals.\nThis ledger records Settlement 9ab48f73-23e4-4d72-9cac-b9cd86ab83b1 for 160000 paise (the friend paid the user), which was never synced to Splitwise and which no external payment entry matches. Splitwise therefore still shows a debt this ledger has evidence was discharged. The settlement stays exactly as recorded; no Payment or Settlement is invented here.\nThe configured Splitwise port does not implement the per-entry read (SplitwisePort.fetchLedgerEntries), so this pair could only be compared at the aggregate balance level. No finding below names a specific external record, because none could be seen.\nSupporting evidence it cites\n\nLabels only, already redacted. The documents themselves never leave this machine.\n\nThis pack cites no supporting evidence.\n\nExactly what would be sent\n\nThe message, verbatim. Free text in it has already been through the redaction boundary; an unredacted pack is refused rather than returned.\n\nExpense summary for Alex\nAs of 7 Sep 2026. Derived from my records — not yet confirmed by you.\n\nWHERE THIS STANDS\nAlex owes me ₹900.00.\n\nEXPENSES\n1. Dinner at Peppermill — 5 Aug 2026\n   I paid ₹3,200.00\n   Alex’s share: ₹1,600.00\n2. Blinkit — weekly groceries — 11 Aug 2026\n   I paid ₹2,150.00\n   Item refund: ₹650.00  →  net ₹1,500.00\n   Alex’s share: ₹900.00\n   (a recorded refund on this expense is not yet reflected in the share above)\n\nSETTLEMENTS ALREADY RECORDED\n- Alex paid me ₹1,600.00 on 6 Aug 2026\n\nPLEASE NOTE\n- 3 Splitwise audit findings are still open for this balance, so the figures above may change once they are resolved.\n- A refund has been recorded against one of these expenses but not yet applied to the shares, so the amount owed does not reflect it yet.\n- One or more of these expenses has no supporting evidence attached yet.\nReview before copying\n\nNothing is sent from this app. Copying puts the text on your clipboard so you can send it yourself — which is the moment it stops being private.\n\nIntended recipient\nAlex15c98992\nNobody else is named\nOnly you and Alex appear in this pack.\nConfirm you have read each part\nThe recipient is Alex.\nI have read the message above, including the 3 things it flags as not settled.\nI have checked which evidence it cites.\nCopy the message\nConfirm all three before copying.",
+      "controls": [
+        {
+          "tag": "SELECT",
+          "text": "Choose a person\nAlex\nSam",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Dinner at Peppermill",
+          "type": null,
+          "href": "/expenses/021adf1d-c757-4cd4-95b1-664ab4df46ba",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Blinkit — weekly groceries",
+          "type": null,
+          "href": "/expenses/6b569814-e032-4994-8bc7-d4bcec518bcb",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Dinner at Peppermill",
+          "type": null,
+          "href": "/expenses/021adf1d-c757-4cd4-95b1-664ab4df46ba",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Blinkit — weekly groceries",
+          "type": null,
+          "href": "/expenses/6b569814-e032-4994-8bc7-d4bcec518bcb",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "This ledger computes -90000 paise for the pair and Splitwise reports -200000. Attribution accounted for -160000 paise of the -110000 paise gap; 50000 paise is left over that no record in evidence explains. It is reported as an unattributed aggregate mismatch rather than assigned to whichever expense or settlement would have balanced the totals.",
+          "type": null,
+          "href": "/splitwise/findings/3e34fb78-db02-49af-9a17-e3e273cbb2cd",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "This ledger records Settlement 9ab48f73-23e4-4d72-9cac-b9cd86ab83b1 for 160000 paise (the friend paid the user), which was never synced to Splitwise and which no external payment entry matches. Splitwise therefore still shows a debt this ledger has evidence was discharged. The settlement stays exactly as recorded; no Payment or Settlement is invented here.",
+          "type": null,
+          "href": "/splitwise/findings/f7af2f4f-14dc-4a82-9d1a-b5b30e50175c",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "The configured Splitwise port does not implement the per-entry read (SplitwisePort.fetchLedgerEntries), so this pair could only be compared at the aggregate balance level. No finding below names a specific external record, because none could be seen.",
+          "type": null,
+          "href": "/splitwise/findings/fa8f4e00-f201-40fa-8a43-68d08dc7dd90",
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "type": "checkbox",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "type": "checkbox",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "type": "checkbox",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Copy the message",
+          "type": null,
+          "href": null,
+          "name": null
+        }
+      ],
+      "errors": [],
+      "apiCalls": [
+        {
+          "url": "http://localhost:4000/api/review?limit=1",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/people",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/proof-packs/15c98992-c491-4d36-9705-5dcaa9df8d53",
+          "status": 200
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "expense",
+      "path": "/expenses/6b569814-e032-4994-8bc7-d4bcec518bcb",
+      "url": "http://localhost:3000/expenses/6b569814-e032-4994-8bc7-d4bcec518bcb",
+      "title": "Ledger — reconciliation",
+      "main": "← Expenses\nBlinkit — weekly groceries\n\n11 Aug 2026 · Shared · paid by Dev (you)\n\nNet cost\n\n₹1,500.00\n\nof ₹2,150.00 originally paid — the gross never changes\n\nAllocated\n\nThe obligations below are out of date\n\nA refund has been recorded but not yet folded into the allocation, so what each person owes has not moved yet. These shares are not current or verified.\n\nWhat came back\n\nRefunds and reimbursements recorded against this expense, split by whether they name the items they were for.\n\nBasis\nAttributed to items\nAttributed to items\n₹650.00\nAgainst the whole expense\n₹0.00\nNot yet in the allocation\nWhat a distribution would still have to absorb\n₹650.00\nItems\n\nEach item's own paid cost, what has come back against it, and what it nets to.\n\nItem breakdown with refunds applied\nItem\tQuantity\tPaid\tRefunded\tNet\nHousehold staples\t1.000\t₹520.00\t₹0.00\t₹520.00\nCoffee beans, 1kg\t1.000\t₹900.00\t₹0.00\t₹900.00\nCold-pressed olive oil (returned)\t1.000\t₹650.00\t₹650.00\t₹0.00\nDelivery and handling\t1.000\t₹80.00\t₹0.00\t₹80.00\nWho benefited\n\nThe current allocation version — item-based.\n\nCurrent allocation lines\nBeneficiary\tFor\tShare\nAlex\tCoffee beans, 1kg\t₹900.00\nDev (you)\tHousehold staples\t₹520.00\nDev (you)\tCold-pressed olive oil (returned)\t₹650.00\nDev (you)\tDelivery and handling\t₹80.00\nWhat a distribution would write\n\nThe lines the domain engine would produce, rebuilt from the recorded facts — shown before anyone approves them.\n\nAllocation lines a distribution would write\nBeneficiary\tFor\tAmount\nAlex\tCoffee beans, 1kg\t₹900.00\nDev (you)\tHousehold staples\t₹520.00\nDev (you)\tCold-pressed olive oil (returned)\t₹0.00\nDev (you)\tDelivery and handling\t₹80.00\n\nA fully refunded share stays as a zero-amount line rather than disappearing — the history of who benefited survives the refund.\n\nApprove this distribution\nRecord money coming back\n\nRecording a refund is one act; folding it into the allocation is another. This is the first.\n\nKind\nMerchant refund\nThird-party reimbursement\nAmount (₹)\nOccurred\nSay which items this refund gave money back for\nRefund attributed to each item\nItem\tPaid\tAlready back\tNet now\tThis refund (₹)\nHousehold staples\t₹520.00\t₹0.00\t₹520.00\t\nCoffee beans, 1kg\t₹900.00\t₹0.00\t₹900.00\t\nCold-pressed olive oil (returned)\t₹650.00\t₹650.00\t₹0.00\t\nDelivery and handling\t₹80.00\t₹0.00\t₹80.00\t\n\nYou have entered ₹0.00 across 0 items.\n\nRecord this refund",
+      "controls": [
+        {
+          "tag": "A",
+          "text": "← Expenses",
+          "type": null,
+          "href": "/expenses",
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Approve this distribution",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "SELECT",
+          "text": "Merchant refund\nThird-party reimbursement",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "0.00",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "type": "date",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "type": "checkbox",
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "0.00",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "0.00",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "0.00",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "0.00",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "0.00",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "0.00",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "0.00",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "INPUT",
+          "text": "0.00",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Record this refund",
+          "type": "submit",
+          "href": null,
+          "name": null
+        }
+      ],
+      "errors": [],
+      "apiCalls": [
+        {
+          "url": "http://localhost:4000/api/review?limit=1",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/expenses/6b569814-e032-4994-8bc7-d4bcec518bcb/refund-allocation",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/expenses/6b569814-e032-4994-8bc7-d4bcec518bcb",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/people",
+          "status": 200
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "run",
+      "path": "/reconciliation/dbc82a37-ff23-4f98-bb26-8d2e34d9a744",
+      "url": "http://localhost:3000/reconciliation/dbc82a37-ff23-4f98-bb26-8d2e34d9a744",
+      "title": "Ledger — reconciliation",
+      "main": "← History\n1 Aug 2026 – 31 Aug 2026\n\nRun 7 Sept 2026, 3:06 am\n\nTotals\nReconciliation totals for this period\nOutflow\t₹26,430.00\nTransfers\t− ₹15,000.00\nInvestments\t− ₹0.00\nSettlements\t− ₹0.00\nExplained\t− ₹8,900.00\n\nNot yet explained\n\n₹2,530.00\n\nEvery payment this period that isn't a transfer, an investment, a settlement, or an explained expense.\n\nDrill through: payments with no explanation · the expense ledger\n\nDoes each account close?\n\nA second, independent identity: the statement's opening balance, every movement on it gross and counted once, and the closing balance it should have reached.\n\nThis period is not verified — 1 of 1 accounts could not be checked\n\nA statement balance is missing, so there is nothing to check those movements against. That is unknown, not zero, and no amount of arithmetic below closes it.\n\nHDFC Savings\n\nBank · ends 4821\n\nIncomplete\n\nNot checked. A statement balance is missing, so there is no closing figure to check the movements against — unknown, not zero.\n\nCash waterfall from the opening balance to the unaccounted delta\nOpening balance\t\tNot evidenced\nCredits\t\n\t+ ₹2,250.00\nDebits\t\n\t− ₹26,430.00\nExpected closing\t\tCannot be computed\nActual closing, per the statement\t\tNot evidenced\n\nUnaccounted delta\n\nUnknown — a statement balance is missing, so this cannot be zero or anything else.\n\nExplained debits\n₹24,550.00\nUnexplained debits\n₹1,880.00\nInternal transfers out\nA subset of debits, not a new term\n₹15,000.00\nExplained credits\n₹2,250.00\nUnexplained credits\n₹0.00\nInternal transfers in\nA subset of credits, not a new term\n₹0.00\n\nNo evidenced opening balance\n\nNo evidenced opening balance for this account and period, so the cash identity cannot be computed. Unknown is not zero (ADR-0017 (cash balance), 17.5).\n\nNo evidenced closing balance\n\nNo evidenced closing balance for this account and period. The actual ending balance must come from statement evidence, never from the movements it is meant to check (ADR-0017 (cash balance), 17.5).\n\nDebits this account cannot explain\n\n188000 paise of debits on this account are not covered by an approved expense link, settlement or cash-flow category.\n\nA transfer leg with no counter-leg in this run\n\nThis internal-transfer leg has no counter-leg in scope. It may post in another period or through an account outside this run; the leg stays visible rather than having a balancing leg invented for it (ADR-0017 (cash balance), 17.3).\n\nSplitwise\n\nWhat the external ledger reported when this run happened, and where it disagreed with this one.\n\nAudit findings\n\nCouldn't check Splitwise\n\nfetchBalances() failed, so no drift comparison ran this time: Splitwise.fetchBalances is not configured in this environment (ADR-0040). No real adapter is wired anywhere in this repository — CLAUDE.md forbids connecting one during development.",
+      "controls": [
+        {
+          "tag": "A",
+          "text": "← History",
+          "type": null,
+          "href": "/reconciliation",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "payments with no explanation",
+          "type": null,
+          "href": "/review",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "the expense ledger",
+          "type": null,
+          "href": "/expenses",
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Audit findings",
+          "type": null,
+          "href": "/splitwise",
+          "name": null
+        }
+      ],
+      "errors": [],
+      "apiCalls": [
+        {
+          "url": "http://localhost:4000/api/review?limit=1",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/people",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/reconciliation/runs/dbc82a37-ff23-4f98-bb26-8d2e34d9a744",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/accounts",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/reconciliation/runs/dbc82a37-ff23-4f98-bb26-8d2e34d9a744/account-snapshots",
+          "status": 200
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "evidence",
+      "path": "/evidence/4ad0c79c-e06d-4e7a-ac7b-2baf332c677f",
+      "url": "http://localhost:3000/evidence/4ad0c79c-e06d-4e7a-ac7b-2baf332c677f",
+      "title": "Ledger — reconciliation",
+      "main": "← Review queue\nBank statement line\n\nAttached to nothing yet. Accepting one of the offers below is the only way to attach it.\n\nThe record\nId\n4ad0c79c-e06d-4e7a-ac7b-2baf332c677f\nCaptured\n5 Aug 2026, 8:16 pm\nIngested\n7 Sept 2026, 2:57 am\nNote kind\nNot a note\nAttached to\nNothing\nThe source, verbatim\n\nStored exactly as it arrived and never rewritten. This stays local — it is not what a proof pack exports.\n\nRs.3200.00 debited from A/c XX4821 on 05-Aug-26 to PEPPERMILL RESTAURANT. Ref 771204885512.\nWhat was read off it\n\nA structured reading, derived deterministically — never by a model.\n\nAmount\n₹3,200.00\nDirection\nDebit\nReference\n771204885512BANK_REFERENCE\nAccount hint\nA masked tail only\n4821\nMerchant text\nPEPPERMILL RESTAURANT\nInstant\nNot stated\nDerived by\nParsed from the text, deterministically\nPayments this could be about\n\nEvery offer with the six signals behind it. Accepting one is a permanent, explicit act.\n\nFind candidates\nPayment e0e8534a\nProbable\nMedium confidence\n\nLinking evidence is an explicit decision\n\nSignal-by-signal comparison for this candidate\nSignal\tVerdict\tEvidence says\tPayment says\nReference\t\n○\nNot stated\nOne side carries no reference identifier, so there is nothing to compare. A missing UTR is silence, not disagreement.\n\t771204885512\t—\nAmount\t\n✓\nAgrees\nExact match, to the paise. No tolerance is applied: money is compared exactly.\n\t320000\t320000\nDirection\t\n✓\nAgrees\nBoth describe money moving the same way.\n\tdebit\tdebit\nAccount\t\n✓\nAgrees\nThe masked tails agree.\n\t4821\t4821\nTime\t\n✓\nAgrees\nWithin the window (0.0h apart, compared against the evidence's capture time).\n\t2026-08-05T20:16:00.000Z\t2026-08-05T20:15:00.000Z\nMerchant\t\n✓\nAgrees\nThe evidence’s merchant name appears in the payment’s own narration.\n\tPEPPERMILL RESTAURANT\tUPI-PEPPERMILL-RESTAURANT\nAttach to this payment\nNot this one",
+      "controls": [
+        {
+          "tag": "A",
+          "text": "← Review queue",
+          "type": null,
+          "href": "/review",
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Find candidates",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "A",
+          "text": "Payment e0e8534a",
+          "type": null,
+          "href": "/payments/e0e8534a-7fce-4790-abea-696c892609fe",
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Attach to this payment",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Not this one",
+          "type": null,
+          "href": null,
+          "name": null
+        }
+      ],
+      "errors": [],
+      "apiCalls": [
+        {
+          "url": "http://localhost:4000/api/evidence/4ad0c79c-e06d-4e7a-ac7b-2baf332c677f",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/review?limit=1",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/evidence/4ad0c79c-e06d-4e7a-ac7b-2baf332c677f/observation",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/evidence/4ad0c79c-e06d-4e7a-ac7b-2baf332c677f/matches",
+          "status": 200
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "payment",
+      "path": "/payments/b2175418-d64c-429f-a0f3-4c2198f82eae",
+      "url": "http://localhost:3000/payments/b2175418-d64c-429f-a0f3-4c2198f82eae",
+      "title": "Ledger — reconciliation",
+      "main": "← Review queue\nPayment context\n\nWhat the bank wrote, and what the evidence attached to it adds. Nothing here rewrites the narration.\n\nNarration, as the bank wrote it\n\nImmutable source. Never replaced by an interpretation of it.\n\nUPI-ZOMATO4471-SAMPLE RESTAURANT PVT LTD\n\nWhat the evidence adds\n\nMerchant names, references and instants a statement line does not carry, most-corroborated first.\n\nMerchant candidates\nNothing stated\nReferences\nNothing stated\nInstants stated\nNothing stated\nSources read\n0 of 0\nContributing evidence\n\nEvery attached record, oldest capture first. Several records enrich one movement — they are not several movements.\n\nNo evidence is attached to this payment. Its narration is all the ledger has.",
+      "controls": [
+        {
+          "tag": "A",
+          "text": "← Review queue",
+          "type": null,
+          "href": "/review",
+          "name": null
+        }
+      ],
+      "errors": [],
+      "apiCalls": [
+        {
+          "url": "http://localhost:4000/api/review?limit=1",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/payments/b2175418-d64c-429f-a0f3-4c2198f82eae/context",
+          "status": 200
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "finding",
+      "path": "/splitwise/findings/f9a845e6-5ab5-4242-9c2d-d63d9d035d22",
+      "url": "http://localhost:3000/splitwise/findings/f9a845e6-5ab5-4242-9c2d-d63d9d035d22",
+      "title": "Ledger — reconciliation",
+      "main": "← Splitwise audit\nSplitwise read failed\n\nSplitwisePort.fetchBalances() failed, so no pair was compared this run: Splitwise.fetchBalances is not configured in this environment (ADR-0040). No real adapter is wired anywhere in this repository — CLAUDE.md forbids connecting one during development.. This is an incomplete audit, not a clean one — nothing here says the two ledgers agree.\n\nIncomplete check\nConfidence unknown\nOpen\nIntegration\n\nThe check could not be completed. Absence proves nothing here.\n\nWhat it is about\nBetween\nNot a pair-level finding\nAmount\nNo single amount\nAccounts for\nAttribution is earned, never assumed\n₹0.00 of the pair's gap\nExternal reference\nNone\nFirst seen\n7 Sept 2026, 3:06 am\nLast seen\n7 Sept 2026, 3:06 am\nThe two snapshots it compared\n\nBoth sides are kept, exactly as they were read, so the comparison stays checkable after either ledger moves on.\n\nThis ledger\n{\n  \"comparisonsRun\": 0\n}\nSplitwise\n{\n  \"error\": \"Splitwise.fetchBalances is not configured in this environment (ADR-0040). No real adapter is wired anywhere in this repository — CLAUDE.md forbids connecting one during development.\",\n  \"readStatus\": \"failed\"\n}\nEvidence the audit used\n[]\nRecord what you concluded\n\nA review records a person's conclusion with actor, time and reason. It authorizes no write to Splitwise — re-syncing a stale row is separate work, and is not reachable from here.\n\nAcknowledge\nMark resolved\nDismiss\nHistory\n\nAppend-only. Reviewing supersedes rather than rewrites, so nothing here can be edited away.\n\ncreate\nuser · 7 Sept 2026, 3:06 am",
+      "controls": [
+        {
+          "tag": "A",
+          "text": "← Splitwise audit",
+          "type": null,
+          "href": "/splitwise",
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Acknowledge",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Mark resolved",
+          "type": null,
+          "href": null,
+          "name": null
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Dismiss",
+          "type": null,
+          "href": null,
+          "name": null
+        }
+      ],
+      "errors": [],
+      "apiCalls": [
+        {
+          "url": "http://localhost:4000/api/review?limit=1",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/splitwise/audit-findings/f9a845e6-5ab5-4242-9c2d-d63d9d035d22",
+          "status": 200
+        },
+        {
+          "url": "http://localhost:4000/api/people",
+          "status": 200
+        }
+      ],
+      "overflow": false
+    }
+  ],
+  "interaction": {
+    "search": {
+      "value": "Blinkit",
+      "text": "Expenses\n\nTrace each expense from its original cost to its current net amount. Open a row for items, beneficiaries and refunds.\n\nSearch expenses\nState\nAll states\nProposed\nClassified\nReview required\nApproved\nAllocated\nReady to sync\nSynced\nReconciled\nRejected\nPaid by\nAnyone\nDev (you)\nAlex\nSam\nClear filters\n\n1 expense matching your filters · Newest first\n\nExpense ledger\nDescription\tPaid by\tState\tNet\nBlinkit — weekly groceries\n11 Aug 2026\n\tDev\tAllocated\t₹1,500.00\nof ₹2,150.00"
+    },
+    "paletteVisible": true,
+    "mobileOverflow": false
+  }
+}

@@ -64,6 +64,13 @@ export type AllocationDecision =
         readonly beneficiary: BeneficiaryRef;
         readonly expenseItemId: ExpenseItemId;
         readonly amount?: Paise;
+        /**
+         * How many of a shared item's units this beneficiary took — `quantity_based` only.
+         *
+         * `domain.buildAllocationLines` splits the item's cost across its unit-stated lines
+         * by the Largest Remainder Method; nothing multiplies out a per-unit price.
+         */
+        readonly units?: bigint;
       }>;
     };
 

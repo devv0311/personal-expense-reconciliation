@@ -119,7 +119,7 @@ export function PaymentContext({ paymentId }: { paymentId: string }) {
                 <div className="flex flex-wrap items-baseline justify-between gap-3">
                   <Link
                     href={`/evidence/${source.evidenceId}`}
-                    className="text-body text-accent underline-offset-2 hover:underline"
+                    className="text-body text-accent underline underline-offset-2"
                   >
                     {evidenceTypeLabel(source.evidenceType)}
                   </Link>

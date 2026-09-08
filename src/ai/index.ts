@@ -15,3 +15,4 @@ export * from './contract.js';
 export * from './errors.js';
 export * from './receipt-extraction.js';
 export * from './redaction.js';
+export * from './suggestions.js';

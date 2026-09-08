@@ -37,7 +37,17 @@ describe("listExpenses", () => {
     expect(parsed.searchParams.get("limit")).toBe("10");
   });
 
-  it("returns the expenses array from the response", async () => {
+  it("passes search, category and offset through to the API rather than filtering here", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(200, { expenses: [], total: 0 }));
+    await listExpenses({ search: "Blinkit", category: "groceries", offset: 50 });
+    const [url] = vi.mocked(fetch).mock.calls[0]!;
+    const parsed = new URL(url as string);
+    expect(parsed.searchParams.get("search")).toBe("Blinkit");
+    expect(parsed.searchParams.get("category")).toBe("groceries");
+    expect(parsed.searchParams.get("offset")).toBe("50");
+  });
+
+  it("keeps the ledger-wide total beside the page, not just the rows", async () => {
     const expense = {
       id: "e1",
       description: "Coffee",
@@ -50,9 +60,13 @@ describe("listExpenses", () => {
       paidByPersonId: "p1",
       state: "approved",
     };
-    vi.mocked(fetch).mockResolvedValue(jsonResponse(200, { expenses: [expense] }));
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse(200, { expenses: [expense], total: 217, limit: 50, offset: 0 }),
+    );
     const result = await listExpenses();
-    expect(result).toEqual([expense]);
+    // The total is what makes a result count mean anything: it is how many match across the
+    // whole ledger, not how many came back (audit row 32).
+    expect(result).toEqual({ expenses: [expense], total: 217, limit: 50, offset: 0 });
   });
 });
 

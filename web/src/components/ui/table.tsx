@@ -41,7 +41,13 @@ export function Table({ className, ...props }: ComponentProps<"table">) {
   return (
     <div
       ref={containerRef}
-      className="overflow-x-auto"
+      // `relative` is load-bearing, not cosmetic. `overflow` does not make an element the
+      // containing block for an absolutely positioned descendant, so an `sr-only` caption or
+      // header label inside a table wider than the viewport resolves against the *viewport*
+      // and lands outside it — widening the document and making the whole page pan sideways,
+      // which is the one thing `Design.md`'s responsive rule forbids. Positioning the
+      // container contains them, once, for every table.
+      className="relative overflow-x-auto"
       // `group`, not `region`: a landmark would need a unique name against every other
       // landmark on the page, and a scroll container is not a landmark — it is a thing you
       // can put focus in and pan with the arrow keys.

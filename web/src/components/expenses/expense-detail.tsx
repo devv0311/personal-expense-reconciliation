@@ -1,7 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { NoteList } from "@/components/annotations";
 import { ExpenseStateTag } from "@/components/expense-state-tag";
+import { AllocationEditor } from "@/components/expenses/allocation-editor";
+import { FundingLinks } from "@/components/expenses/funding-links";
+import { ItemEditor } from "@/components/expenses/item-editor";
+import { OccasionPicker } from "@/components/expenses/occasions";
+import { SplitwiseSyncPanel } from "@/components/expenses/splitwise-sync";
 import {
   DistributionPanel,
   RecordRefundForm,
@@ -15,7 +21,13 @@ import { EmptyBlock, ErrorBlock, LoadingStatus, TableSkeleton } from "@/componen
 import { formatDate } from "@/lib/dates";
 import { allocationMethodLabel, refundBasisLabel, sentenceCase } from "@/lib/labels";
 import { isZeroPaise } from "@/lib/money";
-import { useDistributeAdjustment, useExpense, usePeople, useRefundAllocation } from "@/lib/queries";
+import {
+  useDistributeAdjustment,
+  useExpense,
+  useExpenseItems,
+  usePeople,
+  useRefundAllocation,
+} from "@/lib/queries";
 import type { PersonSummary, RefundAllocationState } from "@/lib/types";
 
 /**
@@ -34,6 +46,7 @@ export function ExpenseDetail({ expenseId }: { expenseId: string }) {
   const expense = useExpense(expenseId);
   const refund = useRefundAllocation(expenseId);
   const people = usePeople();
+  const items = useExpenseItems(expenseId);
   const distribute = useDistributeAdjustment(expenseId);
 
   if (expense.isPending || refund.isPending) {
@@ -64,6 +77,14 @@ export function ExpenseDetail({ expenseId }: { expenseId: string }) {
             {formatDate(row.occurredAt)} · {sentenceCase(row.relationshipType)} · paid by{" "}
             {personName(people.data ?? [], row.paidByPersonId)}
           </>
+        }
+        actions={
+          <Link
+            href={`/expenses/${expenseId}/history`}
+            className="text-meta text-accent underline underline-offset-2"
+          >
+            Every split it has had
+          </Link>
         }
       />
 
@@ -109,12 +130,18 @@ export function ExpenseDetail({ expenseId }: { expenseId: string }) {
         </Facts>
       </Section>
 
-      {state.items.length > 0 && (
-        <Section
-          title="Items"
-          headingId="expense-items"
-          description="Each item's own paid cost, what has come back against it, and what it nets to."
-        >
+      <Section
+        title="Items"
+        headingId="expense-items"
+        description="Each item's own paid cost, what has come back against it, and what it nets to."
+        actions={<ItemEditor expense={row} items={items.data ?? []} />}
+      >
+        {state.items.length === 0 ? (
+          <EmptyBlock>
+            No breakdown has been recorded. Without one, a refund can only be recorded against the
+            whole expense — never against the item it was actually for.
+          </EmptyBlock>
+        ) : (
           <ResponsiveTable
             caption="Item breakdown with refunds applied"
             minWidth="520px"
@@ -153,12 +180,17 @@ export function ExpenseDetail({ expenseId }: { expenseId: string }) {
               },
             ]}
           />
-        </Section>
-      )}
+        )}
+      </Section>
+
+      <FundingLinks expense={row} />
 
       <Section
         title="Who benefited"
         headingId="expense-allocation"
+        actions={
+          <AllocationEditor expense={row} hasCurrentAllocation={state.currentAllocation !== null} />
+        }
         description={
           state.currentAllocation === null
             ? "No allocation has been approved for this expense yet."
@@ -203,6 +235,16 @@ export function ExpenseDetail({ expenseId }: { expenseId: string }) {
         nameFor={nameFor}
         distribute={distribute}
       />
+
+      <Section
+        title="What it was part of"
+        headingId="expense-occasion"
+        description="A dinner, a trip. Filing this under an occasion groups it with the others — it moves no money and changes no share."
+      >
+        <OccasionPicker expenseId={expenseId} />
+      </Section>
+
+      <SplitwiseSyncPanel expense={row} />
 
       <RecordRefundForm expenseId={expenseId} state={state} />
     </div>

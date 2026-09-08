@@ -439,3 +439,215 @@ function remember(
 function escapeForRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/* ======================================== the six operations phase 22 added (audit row 46) */
+
+/** What `ai.normalizeMerchant` is shown: one narration, redacted, and nothing that names it. */
+export interface RedactedMerchantNarration {
+  readonly description: string;
+  readonly channel: PaymentChannel;
+  /** Merchant names already in the catalogue, so a proposal can reuse one rather than coin it. */
+  readonly knownMerchants: readonly string[];
+}
+
+export function redactMerchantNarrationForInference(
+  input: {
+    readonly rawDescription: string;
+    readonly channel: PaymentChannel;
+    readonly knownMerchants: readonly string[];
+  },
+  options: { readonly redactionMap?: LocalRedactionMap } = {},
+): RedactedMerchantNarration {
+  const redacted: RedactedMerchantNarration = {
+    description: redactDescription(input.rawDescription, options.redactionMap),
+    channel: input.channel,
+    // Catalogue names are the user's own labels for shops, not identifiers — but they go
+    // through the same assertion below, so a merchant somebody named after their account
+    // number cannot slip out.
+    knownMerchants: [...input.knownMerchants],
+  };
+  assertPayloadSanitized(redacted, 'normalizeMerchant');
+  return redacted;
+}
+
+/**
+ * What `ai.suggestBeneficiaries` and `ai.suggestAllocation` are shown.
+ *
+ * Deliberately identical for both, because they are two questions about one situation: who was
+ * involved, and how it should be divided. Display names are included — they are how a person
+ * refers to their own flatmates, and a proposal naming `person_a` would be unreviewable — and
+ * are checked by `assertPayloadSanitized` like everything else.
+ */
+export interface RedactedExpenseContext {
+  readonly description: string;
+  readonly amountMinorUnits: string;
+  readonly currency: string;
+  readonly occurredAt: string;
+  readonly relationshipType: string;
+  readonly category: string | null;
+  readonly merchantName: string | null;
+  /** Every person a proposal may name. A proposal naming anyone else is rejected downstream. */
+  readonly candidatePeople: readonly { readonly id: string; readonly displayName: string }[];
+  /** Groups the user belongs to, so "the flat" is a sayable answer. */
+  readonly candidateGroups: readonly { readonly id: string; readonly name: string }[];
+  /** The item lines, when the expense has them — what a per-item division would rest on. */
+  readonly items: readonly {
+    readonly description: string;
+    readonly amountMinorUnits: string;
+  }[];
+  /** Free text a person attached, redacted exactly as a narration is. */
+  readonly notes: readonly string[];
+}
+
+export function redactExpenseContextForInference(
+  input: {
+    readonly description: string | null;
+    readonly amount: Paise;
+    readonly currency: string;
+    readonly occurredAt: Date;
+    readonly relationshipType: string;
+    readonly category: string | null;
+    readonly merchantName: string | null;
+    readonly candidatePeople: readonly { readonly id: string; readonly displayName: string }[];
+    readonly candidateGroups: readonly { readonly id: string; readonly name: string }[];
+    readonly items: readonly { readonly description: string; readonly amount: Paise }[];
+    readonly notes: readonly string[];
+  },
+  operation: 'suggestBeneficiaries' | 'suggestAllocation',
+  options: { readonly redactionMap?: LocalRedactionMap } = {},
+): RedactedExpenseContext {
+  const map = options.redactionMap;
+  const redacted: RedactedExpenseContext = {
+    description: redactDescription(input.description ?? '', map),
+    amountMinorUnits: input.amount.toString(),
+    currency: input.currency,
+    occurredAt: input.occurredAt.toISOString(),
+    relationshipType: input.relationshipType,
+    category: input.category,
+    merchantName: input.merchantName,
+    candidatePeople: input.candidatePeople.map((person) => ({
+      id: person.id,
+      displayName: person.displayName,
+    })),
+    candidateGroups: input.candidateGroups.map((group) => ({ id: group.id, name: group.name })),
+    items: input.items.map((item) => ({
+      description: redactDescription(item.description, map),
+      amountMinorUnits: item.amount.toString(),
+    })),
+    notes: input.notes.map((note) => redactDescription(note, map)),
+  };
+  assertPayloadSanitized(redacted, operation);
+  return redacted;
+}
+
+/** What `ai.groupIntoOccasion` is shown: a window of expenses, each stripped of identifiers. */
+export interface RedactedOccasionCandidates {
+  readonly expenses: readonly {
+    readonly id: string;
+    readonly description: string;
+    readonly amountMinorUnits: string;
+    readonly occurredAt: string;
+    readonly category: string | null;
+  }[];
+}
+
+export function redactOccasionCandidatesForInference(
+  expenses: readonly {
+    readonly id: string;
+    readonly description: string | null;
+    readonly amount: Paise;
+    readonly occurredAt: Date;
+    readonly category: string | null;
+  }[],
+  options: { readonly redactionMap?: LocalRedactionMap } = {},
+): RedactedOccasionCandidates {
+  const redacted: RedactedOccasionCandidates = {
+    expenses: expenses.map((expense) => ({
+      id: expense.id,
+      description: redactDescription(expense.description ?? '', options.redactionMap),
+      amountMinorUnits: expense.amount.toString(),
+      occurredAt: expense.occurredAt.toISOString(),
+      category: expense.category,
+    })),
+  };
+  assertPayloadSanitized(redacted, 'groupIntoOccasion');
+  return redacted;
+}
+
+/**
+ * What `ai.explainAnomaly` is shown: one figure the ledger cannot account for, and its context.
+ *
+ * The narrowest payload on the boundary, on purpose. An explanation is prose, so the temptation
+ * is to send everything and let the model find the story; that would be sending a person's
+ * whole ledger to a third party to answer one question about ₹4,000.
+ */
+export interface RedactedAnomaly {
+  readonly kind: string;
+  readonly amountMinorUnits: string;
+  readonly currency: string;
+  readonly direction: string | null;
+  readonly occurredAt: string | null;
+  readonly description: string | null;
+  /** What the ledger already knows explains part of it, so a guess does not repeat it. */
+  readonly knownExplanations: readonly string[];
+}
+
+export function redactAnomalyForInference(
+  input: {
+    readonly kind: string;
+    readonly amount: Paise;
+    readonly currency: string;
+    readonly direction?: string | null;
+    readonly occurredAt?: Date | null;
+    readonly description?: string | null;
+    readonly knownExplanations?: readonly string[];
+  },
+  options: { readonly redactionMap?: LocalRedactionMap } = {},
+): RedactedAnomaly {
+  const redacted: RedactedAnomaly = {
+    kind: input.kind,
+    amountMinorUnits: input.amount.toString(),
+    currency: input.currency,
+    direction: input.direction ?? null,
+    occurredAt: input.occurredAt?.toISOString() ?? null,
+    description:
+      input.description == null ? null : redactDescription(input.description, options.redactionMap),
+    knownExplanations: (input.knownExplanations ?? []).map((entry) =>
+      redactDescription(entry, options.redactionMap),
+    ),
+  };
+  assertPayloadSanitized(redacted, 'explainAnomaly');
+  return redacted;
+}
+
+/** What `ai.proposeRule` is shown: several decisions a person already made, and their narrations. */
+export interface RedactedRuleEvidence {
+  readonly decisions: readonly {
+    readonly description: string;
+    readonly channel: PaymentChannel;
+    readonly direction: string;
+    /** The fact a person recorded — the thing a rule would restate. */
+    readonly decided: string;
+  }[];
+}
+
+export function redactRuleEvidenceForInference(
+  decisions: readonly {
+    readonly rawDescription: string;
+    readonly channel: PaymentChannel;
+    readonly direction: string;
+    readonly decided: string;
+  }[],
+  options: { readonly redactionMap?: LocalRedactionMap } = {},
+): RedactedRuleEvidence {
+  const redacted: RedactedRuleEvidence = {
+    decisions: decisions.map((decision) => ({
+      description: redactDescription(decision.rawDescription, options.redactionMap),
+      channel: decision.channel,
+      direction: decision.direction,
+      decided: decision.decided,
+    })),
+  };
+  assertPayloadSanitized(redacted, 'proposeRule');
+  return redacted;
+}

@@ -20,6 +20,12 @@ function renderShell() {
     "/api/people": { people: PEOPLE },
     "/api/reconciliation/runs": { runs: [RUN] },
     "/api/splitwise/audit-findings": { findings: [FINDING] },
+    // The ordinary local run: the API is not enforcing authentication, so the shell renders.
+    "/api/session": {
+      session: null,
+      authenticationConfigured: false,
+      authenticationRequired: false,
+    },
   });
   // `AppShell` provides its own QueryProvider, so this renders it directly rather than through
   // `renderWithQuery` — the shell under test is the one the real layout mounts.
@@ -50,11 +56,16 @@ describe("the application shell", () => {
     const links = within(nav).getAllByRole("link");
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
       "/review",
+      "/payments",
+      "/evidence",
       "/reconciliation",
       "/expenses",
       "/balances",
       "/splitwise",
       "/proof-packs",
+      "/analytics",
+      "/automation",
+      "/setup",
     ]);
     expect(within(nav).getByRole("link", { name: "Expenses" })).toHaveAttribute(
       "aria-current",
@@ -107,7 +118,7 @@ describe("the command palette", () => {
     await screen.findByRole("listbox");
     await user.keyboard("{ArrowDown}{Enter}");
 
-    await waitFor(() => expect(pushedRoutes).toEqual(["/reconciliation"]));
+    await waitFor(() => expect(pushedRoutes).toEqual(["/payments"]));
     // Nothing the palette does is a POST.
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(
       0,

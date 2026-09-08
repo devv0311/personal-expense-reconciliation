@@ -1,0 +1,1154 @@
+[
+  {
+    "feature": "01. Bank CSV import and import history",
+    "backend_status": "Implemented service: batch hash, row provenance, all-or-nothing validation, duplicate handling.",
+    "api_status": "Absent: no import or import-batch endpoint in the route table.",
+    "ui_status": "Absent: no upload/import screen or import history.",
+    "gaps_limitations": "Only the synthetic five-column CSV shape date,description,amount_inr,type,reference is parsed. Import and normalization/classification require separate service calls; there is no browser ingestion pipeline. Original file storage is caller-supplied through optional fileReference, not automatic archival by this importer.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/import-service.ts#export async function importBankStatementCsv",
+      "src/integrations/bank-csv/parse.ts#BANK_STATEMENT_CSV_HEADER",
+      "src/api/router.ts#export const API_ROUTES"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/services/import-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/import-service.ts:131)",
+      "[src/integrations/bank-csv/parse.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/integrations/bank-csv/parse.ts:29)",
+      "[src/api/router.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/router.ts:311)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "02. Real bank/card/UPI formats; XLSX/PDF statements; manual cash transactions",
+    "backend_status": "Partial: generic Payment model and one CSV parser. No additional transaction-source adapters or manual payment service.",
+    "api_status": "Absent for transaction import. Evidence file upload is a different operation.",
+    "ui_status": "Absent.",
+    "gaps_limitations": "Storing a PDF/screenshot as Evidence does not parse its transactions into Payments. Bank-specific CSV mapping, UPI exports, XLSX/PDF transaction extraction, cash/manual movement entry and email forwarding are unbuilt.",
+    "priority": "P1",
+    "evidence": [
+      "src/integrations/bank-csv/parse.ts#Adapter for one synthetic",
+      "src/api/evidence-routes.ts#export async function postEvidenceFile",
+      "src/db/schema.ts#export const payments"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/integrations/bank-csv/parse.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/integrations/bank-csv/parse.ts:2)",
+      "[src/api/evidence-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/evidence-routes.ts:76)",
+      "[src/db/schema.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/db/schema.ts:232)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "03. Deterministic and possible-duplicate handling",
+    "backend_status": "Implemented: conclusive reference/amount/time/direction matching; ignored copies remain traceable; ambiguous pairs need a decision.",
+    "api_status": "Present: GET /api/review; POST /api/review/payments/:paymentId/duplicate. Import dedup itself is service-only.",
+    "ui_status": "Present in Review: compare, confirm duplicate, dismiss, reason dialog.",
+    "gaps_limitations": "A functioning review surface for existing payments. There is still no website import flow to populate the queue from new statements.",
+    "priority": "\u2014",
+    "evidence": [
+      "src/domain/payment.ts#export function isDeterministicDuplicate",
+      "src/services/review-action-service.ts#export async function confirmPossibleDuplicate",
+      "web/src/components/review/inspectors.tsx#function DuplicateInspector"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/domain/payment.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/payment.ts:136)",
+      "[src/services/review-action-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/review-action-service.ts:160)",
+      "[web/src/components/review/inspectors.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/review/inspectors.tsx:178)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "04. Transaction normalization and merchant resolution",
+    "backend_status": "Implemented deterministic channel refinement and exact merchant-alias matching, only on imported payments.",
+    "api_status": "Absent: no normalize endpoint.",
+    "ui_status": "Absent.",
+    "gaps_limitations": "No AI normalizeMerchant implementation, fuzzy alias review, merchant-management UI, or automatic normalization after a browser import. Unknown merchants stay unknown.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/normalization-service.ts#export async function normalizePayments",
+      "src/domain/normalization.ts#export function refineChannel",
+      "src/ai/classify-transaction.ts#export interface AiService"
+    ],
+    "planned_in": "docs/decisions/0022-phase-7-deterministic-only-scope.md",
+    "evidence_links": [
+      "[src/services/normalization-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/normalization-service.ts:64)",
+      "[src/domain/normalization.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/normalization.ts:36)",
+      "[src/ai/classify-transaction.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/ai/classify-transaction.ts:87)"
+    ],
+    "planned_in_link": "[docs/decisions/0022-phase-7-deterministic-only-scope.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0022-phase-7-deterministic-only-scope.md:1)"
+  },
+  {
+    "feature": "05. Expense-versus-settlement AI classification and purpose/category",
+    "backend_status": "Implemented proposal/validation/approval pipeline; classification service can recognize matched self-transfers without AI.",
+    "api_status": "Partial: review decision and reclassify endpoints; no initial classify/batch-classify endpoint.",
+    "ui_status": "Partial: inspect and accept/reject an existing seeded/stored proposal. No initial classify control.",
+    "gaps_limitations": "The server ModelTransport always rejects. Live AI proposals cannot be generated in this checkout. The AI contract covers expense or settlement, not an automatic investment/refund/income classifier.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/classification-service.ts#export async function classifyPayment",
+      "src/services/inference-decision-service.ts#export async function decideInference",
+      "src/server.ts#const UNCONFIGURED_MODEL_TRANSPORT",
+      "web/src/components/review/inspectors.tsx#function ClassificationInspector"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/services/classification-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/classification-service.ts:155)",
+      "[src/services/inference-decision-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/inference-decision-service.ts:131)",
+      "[src/server.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/server.ts:63)",
+      "[web/src/components/review/inspectors.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/review/inspectors.tsx:49)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "06. Transfers and investment exclusion",
+    "backend_status": "Implemented accounting semantics and deterministic self-transfer detection; investment-tagged movements are excluded from spending.",
+    "api_status": "No dedicated classification/editor endpoint for these meanings.",
+    "ui_status": "Totals are visible; no transfer-pairing or investment-classification control.",
+    "gaps_limitations": "Investment support means recognizing an already-tagged payment during calculations. No service was found that classifies an ordinary imported payment as investment_instrument. Investment performance/valuation is explicitly outside scope.",
+    "priority": "P1",
+    "evidence": [
+      "src/domain/reconciliation.ts#investment_instrument",
+      "src/services/classification-service.ts#findSelfTransferLeg",
+      "src/domain/cash-balance.ts#investment_instrument"
+    ],
+    "planned_in": "docs/decisions/0011-investments-in-scope-as-non-expense-payments.md",
+    "evidence_links": [
+      "[src/domain/reconciliation.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/reconciliation.ts:97)",
+      "[src/services/classification-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/classification-service.ts:212)",
+      "[src/domain/cash-balance.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/cash-balance.ts:153)"
+    ],
+    "planned_in_link": "[docs/decisions/0011-investments-in-scope-as-non-expense-payments.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0011-investments-in-scope-as-non-expense-payments.md:1)"
+  },
+  {
+    "feature": "07. Cash-flow category lifecycle: refund, peer settlement, internal transfer, external inflow",
+    "backend_status": "Implemented separate normalize/classify/approve/reject lifecycle with direction and ledger-evidence gates.",
+    "api_status": "Absent: cash-flow service functions are not mounted as routes.",
+    "ui_status": "Absent: no credit-review queue or cash-category decision controls.",
+    "gaps_limitations": "This is a major completion gap for the cash waterfall: users can see unexplained credits/debits but cannot approve their cash meaning through the website. Refund and settlement facts do not themselves expose this lifecycle.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/cash-flow-service.ts#export async function classifyPaymentCashFlow",
+      "src/services/cash-flow-service.ts#export async function approvePaymentCashFlow",
+      "src/api/router.ts#export const API_ROUTES",
+      "src/services/review-service.ts#export interface ClassificationDecisionItem"
+    ],
+    "planned_in": "docs/decisions/0017-pragmatic-cash-balance-reconciliation.md",
+    "evidence_links": [
+      "[src/services/cash-flow-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/cash-flow-service.ts:111)",
+      "[src/services/cash-flow-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/cash-flow-service.ts:177)",
+      "[src/api/router.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/router.ts:311)",
+      "[src/services/review-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/review-service.ts:111)"
+    ],
+    "planned_in_link": "[docs/decisions/0017-pragmatic-cash-balance-reconciliation.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0017-pragmatic-cash-balance-reconciliation.md:1)"
+  },
+  {
+    "feature": "08. Human review: accept/reject, explanation and provenance",
+    "backend_status": "Implemented attributable decisions, validation and audit events; derived expenses become approved only after acceptance.",
+    "api_status": "Present: review queue and inference decision routes.",
+    "ui_status": "Present: filters, ranked queue, inspector, model/proposal provenance, explicit dialogs and Show more.",
+    "gaps_limitations": "The workflow still stops after approving an expense if an initial allocation is needed: there is no allocation-authoring UI. Review is over supported queue kinds, not every unexplained movement or unapproved cash category.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/review-service.ts#export async function listReviewQueue",
+      "src/api/review-routes.ts#export async function postInferenceDecision",
+      "web/src/components/review/review-queue.tsx",
+      "web/src/components/review/inspectors.tsx#function ClassificationInspector"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/services/review-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/review-service.ts:247)",
+      "[src/api/review-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/review-routes.ts:88)",
+      "[web/src/components/review/review-queue.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/review/review-queue.tsx:1)",
+      "[web/src/components/review/inspectors.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/review/inspectors.tsx:49)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "09. Correct a proposal or retry a rejected classification",
+    "backend_status": "Implemented modify with modifiedOutput and explicit reclassify service.",
+    "api_status": "Present: POST /api/review/inferences/:inferenceId/decision (modify); POST /api/review/payments/:paymentId/reclassify.",
+    "ui_status": "Absent: accept/reject only; rejected inspector has navigation but no correction/retry action.",
+    "gaps_limitations": "The promised quick correction flow is not available. Reclassification also needs a real AI transport. Rejecting a proposal does not provide a website path to manually repair its classification.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/inference-decision-service.ts#export async function decideInference",
+      "src/services/review-action-service.ts#export async function reclassifyPayment",
+      "web/src/lib/api.ts#export async function decideInference",
+      "web/src/components/review/inspectors.tsx#function RejectedInspector"
+    ],
+    "planned_in": "docs/decisions/0030-reclassification-is-an-explicit-review-action.md",
+    "evidence_links": [
+      "[src/services/inference-decision-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/inference-decision-service.ts:131)",
+      "[src/services/review-action-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/review-action-service.ts:74)",
+      "[web/src/lib/api.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/lib/api.ts:209)",
+      "[web/src/components/review/inspectors.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/review/inspectors.tsx:263)"
+    ],
+    "planned_in_link": "[docs/decisions/0030-reclassification-is-an-explicit-review-action.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0030-reclassification-is-an-explicit-review-action.md:1)"
+  },
+  {
+    "feature": "10. Receipt/image/PDF/screenshot evidence ingestion and retrieval",
+    "backend_status": "Implemented document validation, content-addressed filesystem storage, metadata and immutable source retrieval.",
+    "api_status": "Present: POST /api/evidence/files; GET metadata and /content.",
+    "ui_status": "Partial: existing files can be opened from Evidence Inspector; no upload form.",
+    "gaps_limitations": "A browser user cannot add a new receipt, statement image or screenshot. There is no evidence library/list endpoint and screen for browsing all stored documents.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/evidence-service.ts#export async function ingestEvidenceDocument",
+      "src/integrations/evidence-store/filesystem.ts",
+      "src/api/evidence-routes.ts#export async function postEvidenceFile",
+      "web/src/components/evidence/evidence-inspector.tsx#Stored document"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/services/evidence-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/evidence-service.ts:110)",
+      "[src/integrations/evidence-store/filesystem.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/integrations/evidence-store/filesystem.ts:1)",
+      "[src/api/evidence-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/evidence-routes.ts:76)",
+      "[web/src/components/evidence/evidence-inspector.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/evidence/evidence-inspector.tsx:105)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "11. Manual explanations, externally-paid evidence and settlement claims",
+    "backend_status": "Implemented manual notes with distinct note kinds and optional payment/expense links.",
+    "api_status": "Present: POST /api/evidence/notes.",
+    "ui_status": "Absent for authoring; existing raw text is readable.",
+    "gaps_limitations": "Cannot type an explanation or record a non-user settlement claim from the website. A settlement_claim is evidence of belief, not a fabricated bank movement or authoritative settlement.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/evidence-service.ts#export async function recordManualNote",
+      "src/domain/evidence.ts",
+      "src/api/evidence-routes.ts#export async function postEvidenceNote",
+      "web/src/components/evidence/evidence-inspector.tsx#The source, verbatim"
+    ],
+    "planned_in": "docs/decisions/0018-manual-note-signal-ambiguity.md",
+    "evidence_links": [
+      "[src/services/evidence-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/evidence-service.ts:200)",
+      "[src/domain/evidence.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/evidence.ts:1)",
+      "[src/api/evidence-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/evidence-routes.ts:120)",
+      "[web/src/components/evidence/evidence-inspector.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/evidence/evidence-inspector.tsx:124)"
+    ],
+    "planned_in_link": "[docs/decisions/0018-manual-note-signal-ambiguity.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0018-manual-note-signal-ambiguity.md:1)"
+  },
+  {
+    "feature": "12. Bank SMS/UPI push ingestion and structured observation corrections",
+    "backend_status": "Implemented immutable notifications, deterministic text parsing and explicit observation recording/correction.",
+    "api_status": "Present: POST /api/evidence/notifications; POST /api/evidence/:evidenceId/observation.",
+    "ui_status": "Partial: displays existing observations and Find candidates; no ingest or observation-edit form.",
+    "gaps_limitations": "No phone capture, notification forwarding adapter or user correction screen. Parser support is bounded, not a general understanding of every bank/app notification.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/evidence-enrichment-service.ts#export async function recordEvidenceNotification",
+      "src/services/evidence-enrichment-service.ts#export async function recordEvidenceObservation",
+      "src/domain/evidence-observation.ts",
+      "web/src/components/evidence/observation.tsx"
+    ],
+    "planned_in": "docs/decisions/0044-evidence-observations-and-match-candidates.md",
+    "evidence_links": [
+      "[src/services/evidence-enrichment-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/evidence-enrichment-service.ts:204)",
+      "[src/services/evidence-enrichment-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/evidence-enrichment-service.ts:300)",
+      "[src/domain/evidence-observation.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/evidence-observation.ts:1)",
+      "[web/src/components/evidence/observation.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/evidence/observation.tsx:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0044-evidence-observations-and-match-candidates.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0044-evidence-observations-and-match-candidates.md:1)"
+  },
+  {
+    "feature": "13. Evidence matching and context reattachment",
+    "backend_status": "Implemented six-signal candidates, confidence/reasons, deterministic observations, explicit accept/dismiss and write-once linking.",
+    "api_status": "Present: enrich, matches, match decision, evidence observation and payment context routes.",
+    "ui_status": "Present: Review \u2192 Evidence Inspector \u2192 Payment context, with compared values and permanent-link confirmation.",
+    "gaps_limitations": "Works for evidence already ingested. No direct manual attach-to-expense UI; no UI replacement/superseding-evidence creation when an old write-once link was wrong. The generic /link API exists.",
+    "priority": "P1",
+    "evidence": [
+      "src/domain/evidence-matching.ts#export function assessEvidencePaymentMatch",
+      "src/services/evidence-enrichment-service.ts#export async function decideEvidenceMatch",
+      "web/src/components/evidence/match-candidates.tsx",
+      "web/src/components/evidence/payment-context.tsx"
+    ],
+    "planned_in": "docs/decisions/0044-evidence-observations-and-match-candidates.md",
+    "evidence_links": [
+      "[src/domain/evidence-matching.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/evidence-matching.ts:182)",
+      "[src/services/evidence-enrichment-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/evidence-enrichment-service.ts:581)",
+      "[web/src/components/evidence/match-candidates.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/evidence/match-candidates.tsx:1)",
+      "[web/src/components/evidence/payment-context.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/evidence/payment-context.tsx:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0044-evidence-observations-and-match-candidates.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0044-evidence-observations-and-match-candidates.md:1)"
+  },
+  {
+    "feature": "14. Receipt total/item extraction; image OCR",
+    "backend_status": "Partial runtime: parseReceipt/extractReceiptItems contracts, validation, derived rows and matching are implemented with injected AI.",
+    "api_status": "Present: POST /api/evidence/:evidenceId/receipt.",
+    "ui_status": "Absent: no Extract receipt action.",
+    "gaps_limitations": "No configured AI provider and no OCR/image-to-text adapter. extractReceipt passes evidence type, media type, rawText and capturedAt; it does not read document bytes from EvidenceStore. Uploading an image alone is not a working receipt-extraction pipeline.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/receipt-service.ts#export async function extractReceipt",
+      "src/ai/receipt-extraction.ts#export async function parseReceipt",
+      "src/server.ts#const UNCONFIGURED_MODEL_TRANSPORT",
+      "src/api/receipt-routes.ts#export async function postReceiptExtraction"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/services/receipt-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/receipt-service.ts:123)",
+      "[src/ai/receipt-extraction.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/ai/receipt-extraction.ts:40)",
+      "[src/server.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/server.ts:63)",
+      "[src/api/receipt-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/receipt-routes.ts:43)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "15. Read, confirm and correct extracted receipt totals/items",
+    "backend_status": "Implemented getReceipt, confirmReceipt and correctReceipt with inference/audit updates.",
+    "api_status": "Present: GET /api/receipts/:receiptId; POST /confirm and /correct.",
+    "ui_status": "Mostly absent: review shows receiptTotal; full ReceiptFacts component and useReceipt hook exist but have no callers.",
+    "gaps_limitations": "Full extracted receipt item/tax/subtotal/discrepancy review is not mounted on any page. No confirmation or correction controls. File/component existence must not be counted as a shipped website feature.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/receipt-service.ts#export async function correctReceipt",
+      "src/api/receipt-routes.ts#export async function getReceiptRoute",
+      "web/src/components/evidence/evidence-inspector.tsx#export function ReceiptFacts",
+      "web/src/lib/queries.ts#export function useReceipt"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/services/receipt-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/receipt-service.ts:354)",
+      "[src/api/receipt-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/receipt-routes.ts:131)",
+      "[web/src/components/evidence/evidence-inspector.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/evidence/evidence-inspector.tsx:224)",
+      "[web/src/lib/queries.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/lib/queries.ts:129)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "16. Expense item creation and receipt-item linkage",
+    "backend_status": "Implemented complete item-set recording, exact gross-total validation and optional receiptItemId links.",
+    "api_status": "Present: POST/GET /api/expenses/:expenseId/items.",
+    "ui_status": "Partial: item gross/refunded/net amounts visible on expense detail; no item-entry or receipt-to-expense item mapping UI.",
+    "gaps_limitations": "Existing items support refunds, but the website cannot itemize a new expense. Taxes/fees/discount effects must already be represented in the recorded paid-cost basis; there is no dedicated basis editor.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/expense-item-service.ts#export async function recordExpenseItems",
+      "src/domain/expense.ts#export function validateExpenseItemsSum",
+      "src/api/expense-item-routes.ts",
+      "web/src/components/expenses/expense-detail.tsx#title=\"Items\""
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/services/expense-item-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/expense-item-service.ts:58)",
+      "[src/domain/expense.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/expense.ts:91)",
+      "[src/api/expense-item-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/expense-item-routes.ts:1)",
+      "[web/src/components/expenses/expense-detail.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/expenses/expense-detail.tsx:114)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "17. Correct an already-recorded expense item breakdown",
+    "backend_status": "Not implemented: recordExpenseItems rejects any expense that already has items.",
+    "api_status": "Absent for correction/versioning.",
+    "ui_status": "Absent.",
+    "gaps_limitations": "Receipt correction is a separate operation and does not repair ExpenseItems. A wrong initial item breakdown has no supported correction workflow, which also blocks reliable item ownership/refund repair.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/expense-item-service.ts#There is no correction",
+      "src/services/receipt-service.ts#export async function correctReceipt"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/services/expense-item-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/expense-item-service.ts:77)",
+      "[src/services/receipt-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/receipt-service.ts:354)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "18. Create manual expenses, including someone else paying",
+    "backend_status": "Partial: schema, insert repository function, expense approval/lifecycle and bidirectional calculations support externally-funded expenses. No general manual expense-creation service flow.",
+    "api_status": "Absent: no POST /api/expenses or evidence-to-expense creation route.",
+    "ui_status": "Absent for entry; pre-existing externally-paid expenses are readable and affect balances.",
+    "gaps_limitations": "The flatmate-paid electrician use case is modeled and tested but cannot be entered on the website. Payment classification explicitly rejects a different payer and cannot substitute for an evidence-only creation flow.",
+    "priority": "P1",
+    "evidence": [
+      "src/db/schema.ts#export const expenses",
+      "src/db/repositories.ts#export async function insertExpense",
+      "src/services/expense-service.ts#export async function approveExpense",
+      "src/services/classification-service.ts#An externally-funded expense has no"
+    ],
+    "planned_in": "docs/decisions/0006-bidirectional-payer-model.md",
+    "evidence_links": [
+      "[src/db/schema.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/db/schema.ts:710)",
+      "[src/db/repositories.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/db/repositories.ts:273)",
+      "[src/services/expense-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/expense-service.ts:66)",
+      "[src/services/classification-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/classification-service.ts:357)"
+    ],
+    "planned_in_link": "[docs/decisions/0006-bidirectional-payer-model.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0006-bidirectional-payer-model.md:1)"
+  },
+  {
+    "feature": "19. One payment \u2192 multiple expenses; multiple payments \u2192 one expense",
+    "backend_status": "Partial: PaymentExpenseLink many-to-many persistence, budget validation and calculations exist.",
+    "api_status": "No public authoring endpoint for splitting/linking funding. Classification decision links its one derived expense.",
+    "ui_status": "Absent.",
+    "gaps_limitations": "The model supports the required shapes, but no website split-order, deposit-plus-balance, or partial-funding editor exists. Do not confuse item allocation within one expense with splitting one payment into multiple conceptual expenses.",
+    "priority": "P1",
+    "evidence": [
+      "src/db/repositories.ts#export async function insertPaymentExpenseLink",
+      "src/domain/payment.ts#export function validatePaymentExplanationBudget",
+      "src/services/inference-decision-service.ts#async function linkPaymentToExpense"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/db/repositories.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/db/repositories.ts:682)",
+      "[src/domain/payment.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/payment.ts:35)",
+      "[src/services/inference-decision-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/inference-decision-service.ts:421)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "20. Initial beneficiary allocation and reallocation: equal/exact/percentage/item/custom",
+    "backend_status": "Implemented deterministic allocation, validation, version supersession, group expansion and obligation derivation.",
+    "api_status": "Present: POST /api/expenses/:expenseId/allocation.",
+    "ui_status": "Absent for creating/editing allocations. Current lines and refund distribution preview are read-only displays.",
+    "gaps_limitations": "This is a core website blocker: after accepting a shared expense, the user cannot choose beneficiaries, method or shares. Refund distribution cannot create missing initial item ownership.",
+    "priority": "P1",
+    "evidence": [
+      "src/domain/allocation.ts#export function buildAllocationLines",
+      "src/services/allocation-service.ts#export async function approveAllocation",
+      "src/api/allocation-routes.ts#export async function postAllocation",
+      "web/src/components/expenses/expense-detail.tsx#title=\"Who benefited\""
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/domain/allocation.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/allocation.ts:100)",
+      "[src/services/allocation-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/allocation-service.ts:111)",
+      "[src/api/allocation-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/allocation-routes.ts:55)",
+      "[web/src/components/expenses/expense-detail.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/expenses/expense-detail.tsx:160)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "21. Quantity-based allocation",
+    "backend_status": "Partial semantics: quantity_based is accepted but uses the same item-line amount builder as item_based.",
+    "api_status": "Present through allocation decision; caller supplies explicit item amounts.",
+    "ui_status": "Absent.",
+    "gaps_limitations": "No quantity-per-beneficiary/unit-price calculator: quantity is not an input to the allocation math. If quantity-based means assign 2 of 3 units and derive the share, that authoring/calculation workflow is not implemented.",
+    "priority": "P2",
+    "evidence": [
+      "src/domain/allocation.ts#export interface ItemBasedAllocationInput",
+      "src/domain/allocation.ts#case 'quantity_based'",
+      "src/services/allocation-service.ts#case 'quantity_based'"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/domain/allocation.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/allocation.ts:72)",
+      "[src/domain/allocation.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/allocation.ts:110)",
+      "[src/services/allocation-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/allocation-service.ts:251)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "22. Groups and membership snapshots",
+    "backend_status": "Implemented group schema, as-of-expense membership expansion, per-person amounts and overrides.",
+    "api_status": "Partial: allocation API accepts groups/overrides; no group/membership management endpoints.",
+    "ui_status": "Absent for group management, group allocation and expansion inspection.",
+    "gaps_limitations": "Group beneficiaries are supported by calculations, but users cannot create groups, edit membership dates or inspect the saved expansion from a dedicated web flow.",
+    "priority": "P1",
+    "evidence": [
+      "src/domain/group-expansion.ts",
+      "src/services/allocation-service.ts#async function toDraft",
+      "src/db/schema.ts#export const groupMemberships",
+      "src/api/allocation-routes.ts"
+    ],
+    "planned_in": "docs/decisions/0009-group-allocation-expansion-snapshot.md",
+    "evidence_links": [
+      "[src/domain/group-expansion.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/group-expansion.ts:1)",
+      "[src/services/allocation-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/allocation-service.ts:268)",
+      "[src/db/schema.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/db/schema.ts:172)",
+      "[src/api/allocation-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/allocation-routes.ts:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0009-group-allocation-expansion-snapshot.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0009-group-allocation-expansion-snapshot.md:1)"
+  },
+  {
+    "feature": "23. Whole-expense refunds and third-party reimbursements",
+    "backend_status": "Implemented immutable gross, adjustment ceiling, net cost, pending distribution and superseding allocations.",
+    "api_status": "Present: POST adjustments and /adjustments/distribute; GET refund-allocation.",
+    "ui_status": "Present: expense detail form, kind/amount/date, confirmation, preview and distribution approval.",
+    "gaps_limitations": "Website flow is real over existing expenses/allocations. It cannot edit/remove a recorded adjustment, choose custom distribution weights, or bind the refund to a credit payment. See rows 27\u201328.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/adjustment-service.ts#export async function recordExpenseAdjustment",
+      "src/services/adjustment-service.ts#export async function distributeAdjustment",
+      "web/src/components/expenses/refund-workflow.tsx#export function RecordRefundForm"
+    ],
+    "planned_in": "docs/decisions/0008-refunds-and-reimbursements-as-adjustments.md",
+    "evidence_links": [
+      "[src/services/adjustment-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/adjustment-service.ts:148)",
+      "[src/services/adjustment-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/adjustment-service.ts:421)",
+      "[web/src/components/expenses/refund-workflow.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/expenses/refund-workflow.tsx:58)"
+    ],
+    "planned_in_link": "[docs/decisions/0008-refunds-and-reimbursements-as-adjustments.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0008-refunds-and-reimbursements-as-adjustments.md:1)"
+  },
+  {
+    "feature": "24. Item-level partial refund attribution and allocation engine",
+    "backend_status": "Implemented same-expense checks, complete attribution sum, cumulative ceilings, expense lock, net-item rebuild and prior-settlement preservation.",
+    "api_status": "Present through adjustments with itemAttributions and refund-allocation read.",
+    "ui_status": "Present: per-item inputs, paid/refunded/net columns, server-derived projected shares, explicit record/distribute decisions.",
+    "gaps_limitations": "Not just an ADR or schema: the engine and UI both exist. Requires already-recorded items and item ownership; missing preparation cannot be completed through the website.",
+    "priority": "P1",
+    "evidence": [
+      "src/domain/refund-attribution.ts#export function validateRefundAttribution",
+      "src/domain/refund-allocation.ts#export function buildItemAwareAllocationLines",
+      "src/services/adjustment-service.ts#await lockExpenseForAdjustment",
+      "web/src/components/expenses/refund-workflow.tsx"
+    ],
+    "planned_in": "docs/decisions/0018-item-level-refund-attribution.md",
+    "evidence_links": [
+      "[src/domain/refund-attribution.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/refund-attribution.ts:92)",
+      "[src/domain/refund-allocation.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/refund-allocation.ts:136)",
+      "[src/services/adjustment-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/adjustment-service.ts:155)",
+      "[web/src/components/expenses/refund-workflow.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/expenses/refund-workflow.tsx:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0018-item-level-refund-attribution.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0018-item-level-refund-attribution.md:1)"
+  },
+  {
+    "feature": "25. Blocked refund ownership and pending distribution",
+    "backend_status": "Implemented blocked/projected state; refuses ambiguous ownership instead of guessing.",
+    "api_status": "Present: GET refund-allocation returns reviewRequired/projectedLines/pending reduction.",
+    "ui_status": "Present warnings and disabled/refused distribution; missing-ownership repair UI is absent.",
+    "gaps_limitations": "REFUND_ITEM_OWNERSHIP_REQUIRED is an honest stop, but users cannot resolve it without the allocation API. Pending state is shown on expense detail/proof packs, not carried as a pending-refund warning on the Balances page.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/adjustment-service.ts#export async function getRefundAllocationState",
+      "src/domain/refund-allocation.ts#REFUND_ITEM_OWNERSHIP_REQUIRED",
+      "web/src/components/expenses/refund-workflow.tsx#This refund cannot be allocated yet",
+      "web/src/components/balance-view.tsx"
+    ],
+    "planned_in": "docs/decisions/0045-item-refund-allocation-is-rebuilt-not-decremented.md",
+    "evidence_links": [
+      "[src/services/adjustment-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/adjustment-service.ts:613)",
+      "[src/domain/refund-allocation.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/refund-allocation.ts:26)",
+      "[web/src/components/expenses/refund-workflow.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/expenses/refund-workflow.tsx:417)",
+      "[web/src/components/balance-view.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/balance-view.tsx:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0045-item-refund-allocation-is-rebuilt-not-decremented.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0045-item-refund-allocation-is-rebuilt-not-decremented.md:1)"
+  },
+  {
+    "feature": "26. Full refunds, zero shares, reverse balances and refund history",
+    "backend_status": "Implemented zero-valued beneficiary lines, preserved historical allocations, unchanged settlements and signed balances.",
+    "api_status": "Present through refund state, balances and proof packs; no full allocation/adjustment history endpoint.",
+    "ui_status": "Partial: zero lines/reverse direction and warnings present; no chronological adjustment log or old allocation viewer.",
+    "gaps_limitations": "Financial facts survive, but complete purchase\u2192refund-event\u2192allocation-version\u2192settlement history is not inspectable on one website screen.",
+    "priority": "P2",
+    "evidence": [
+      "src/domain/refund-allocation.ts",
+      "src/domain/balance.ts#export function computeNetBalance",
+      "src/services/adjustment-service.ts#export async function distributeAdjustment",
+      "web/src/components/expenses/refund-workflow.tsx#A fully refunded share"
+    ],
+    "planned_in": "docs/decisions/0013-full-refund-preserves-allocation-shape.md",
+    "evidence_links": [
+      "[src/domain/refund-allocation.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/refund-allocation.ts:1)",
+      "[src/domain/balance.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/balance.ts:177)",
+      "[src/services/adjustment-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/adjustment-service.ts:421)",
+      "[web/src/components/expenses/refund-workflow.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/expenses/refund-workflow.tsx:461)"
+    ],
+    "planned_in_link": "[docs/decisions/0013-full-refund-preserves-allocation-shape.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0013-full-refund-preserves-allocation-shape.md:1)"
+  },
+  {
+    "feature": "27. Link a refund to its actual bank credit",
+    "backend_status": "Implemented optional adjustmentPaymentId and credit validation, with item-refund credit-budget checks.",
+    "api_status": "Present: POST adjustments accepts adjustmentPaymentId.",
+    "ui_status": "Absent: RecordAdjustmentInput and refund form omit this field.",
+    "gaps_limitations": "Website-created refunds are recorded without bank-credit linkage. The refund can lower an expense while the incoming cash still lacks the evidence/classification needed to be explained in cash reconciliation.",
+    "priority": "P1",
+    "evidence": [
+      "src/api/adjustment-routes.ts#const adjustmentPaymentIdRaw",
+      "src/services/adjustment-service.ts#const adjustmentPaymentId",
+      "web/src/lib/api.ts#export interface RecordAdjustmentInput",
+      "web/src/components/expenses/refund-workflow.tsx#export function RecordRefundForm"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/api/adjustment-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/adjustment-routes.ts:66)",
+      "[src/services/adjustment-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/adjustment-service.ts:171)",
+      "[web/src/lib/api.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/lib/api.ts:310)",
+      "[web/src/components/expenses/refund-workflow.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/expenses/refund-workflow.tsx:58)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "28. Custom distribution of whole-expense reductions",
+    "backend_status": "Implemented customWeights for the unattributed whole-expense portion.",
+    "api_status": "Present: POST adjustments/distribute accepts customWeights.",
+    "ui_status": "Absent: browser submits reason only; default server projection is shown.",
+    "gaps_limitations": "Users cannot choose a non-proportional refund/reimbursement distribution through the website. Item-attributed refunds correctly retain item-specific ownership rules.",
+    "priority": "P2",
+    "evidence": [
+      "src/api/adjustment-routes.ts#const customWeights",
+      "src/services/adjustment-service.ts#export async function distributeAdjustment",
+      "web/src/lib/api.ts#export async function distributeAdjustment"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/api/adjustment-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/adjustment-routes.ts:114)",
+      "[src/services/adjustment-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/adjustment-service.ts:421)",
+      "[web/src/lib/api.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/lib/api.ts:343)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "29. Manual settlements and peer repayments",
+    "backend_status": "Implemented settlement events tied to payments, shared explanation budget, debit/credit direction and balance discharge.",
+    "api_status": "Present: POST /api/payments/:paymentId/settlements.",
+    "ui_status": "Absent for manual entry. An existing settlement AI proposal can be accepted in Review; recorded settlements appear in proof packs.",
+    "gaps_limitations": "No payment selector, counterparty/amount form or standalone settlement register. You cannot record a newly received repayment from the website without a pre-existing supported proposal.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/settlement-service.ts#export async function recordSettlement",
+      "src/api/settlement-routes.ts#export async function postSettlement",
+      "web/src/components/review/inspectors.tsx#function ClassificationInspector",
+      "web/src/components/proof-packs/proof-pack-preview.tsx#pack.settlements"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/services/settlement-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/settlement-service.ts:50)",
+      "[src/api/settlement-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/settlement-routes.ts:40)",
+      "[web/src/components/review/inspectors.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/review/inspectors.tsx:49)",
+      "[web/src/components/proof-packs/proof-pack-preview.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/proof-packs/proof-pack-preview.tsx:175)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "30. Pairwise balances, either payer/direction",
+    "backend_status": "Implemented current approved allocation obligations minus settlement movements between any two people.",
+    "api_status": "Present: GET /api/balances/:personAId/:personBId.",
+    "ui_status": "Present: two-person selectors, owed direction, expense-contribution links and proof-pack navigation.",
+    "gaps_limitations": "No all-counterparties debt dashboard. Balance response/UI omit settlement line items, so displayed gross contributions do not by themselves explain the net. Pending-refund caveat is not displayed here.",
+    "priority": "P2",
+    "evidence": [
+      "src/services/balance-service.ts#export async function getBalance",
+      "src/domain/balance.ts#export function computeNetBalance",
+      "web/src/components/balance-view.tsx",
+      "web/src/app/balances/page.tsx"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/services/balance-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/balance-service.ts:99)",
+      "[src/domain/balance.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/balance.ts:177)",
+      "[web/src/components/balance-view.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/balance-view.tsx:1)",
+      "[web/src/app/balances/page.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/app/balances/page.tsx:1)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "31. Confirmed versus believed-settled non-user obligations",
+    "backend_status": "Implemented derived evidence status from settlements, explicit settlement-claim notes and reconciliation data.",
+    "api_status": "Present in pairwise balance and proof-pack reads.",
+    "ui_status": "Present through EvidenceStatus labels/tooltips. Claim entry is absent.",
+    "gaps_limitations": "Third-party-to-third-party discharge remains intentionally unobservable through the user's bank Payments; do not count absence of fabricated third-party settlements as a bug. Users need note-authoring to record a belief.",
+    "priority": "P2",
+    "evidence": [
+      "src/domain/balance.ts#export function obligationEvidenceStatus",
+      "src/services/balance-service.ts#const evidenceStatus",
+      "web/src/components/evidence-status.tsx"
+    ],
+    "planned_in": "docs/decisions/0014-obligation-evidence-status.md",
+    "evidence_links": [
+      "[src/domain/balance.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/balance.ts:232)",
+      "[src/services/balance-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/balance-service.ts:117)",
+      "[web/src/components/evidence-status.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/evidence-status.tsx:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0014-obligation-evidence-status.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0014-obligation-evidence-status.md:1)"
+  },
+  {
+    "feature": "32. Expense ledger, filtering and search",
+    "backend_status": "Implemented gross/net ledger read, state/payer filters and bounded newest-first listing.",
+    "api_status": "Present: GET /api/expenses and /:expenseId. Default list limit is 200; no cursor/offset.",
+    "ui_status": "Present description search, state/payer filters and detail links.",
+    "gaps_limitations": "Search runs only over the returned 200 rows. No Show more/pagination, server-side description search, date/category/beneficiary/unsettled filters, or ledger export. The displayed count is the loaded subset, not a guaranteed full-ledger count.",
+    "priority": "P1",
+    "evidence": [
+      "src/db/repositories.ts#const DEFAULT_EXPENSE_LEDGER_LIMIT",
+      "src/api/expense-ledger-routes.ts",
+      "web/src/app/expenses/page.tsx#const visibleExpenses"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/db/repositories.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/db/repositories.ts:342)",
+      "[src/api/expense-ledger-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/expense-ledger-routes.ts:1)",
+      "[web/src/app/expenses/page.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/app/expenses/page.tsx:51)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "33. Immutable evidence, financial audit events and decision history",
+    "backend_status": "Implemented source protections, audited services, old/new values, actor/reason/time and superseded records.",
+    "api_status": "Partial: specific finding-review history and contextual reads; no general AuditEvent or allocation-version history API.",
+    "ui_status": "Partial: proposal provenance and finding-review history; no general financial audit timeline.",
+    "gaps_limitations": "The backend audit trail is substantially broader than the website. Expense detail lacks direct funding-payment/evidence/history panels; evidence must be reached through other contexts/IDs.",
+    "priority": "P2",
+    "evidence": [
+      "src/services/audit.ts#export async function runAudited",
+      "src/domain/immutability.ts",
+      "src/services/splitwise-audit-service.ts#export async function getAuditFinding",
+      "web/src/components/splitwise/finding-detail.tsx",
+      "web/src/components/expenses/expense-detail.tsx"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/services/audit.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/audit.ts:62)",
+      "[src/domain/immutability.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/immutability.ts:1)",
+      "[src/services/splitwise-audit-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/splitwise-audit-service.ts:324)",
+      "[web/src/components/splitwise/finding-detail.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/splitwise/finding-detail.tsx:1)",
+      "[web/src/components/expenses/expense-detail.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/expenses/expense-detail.tsx:1)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "34. Period reconciliation: legacy outflow identity",
+    "backend_status": "Implemented outflow minus transfers/investments/debit settlements/net explained self-funded expenses; signed unexplained retained.",
+    "api_status": "Present: POST/GET /api/reconciliation/runs; GET /:id.",
+    "ui_status": "Present: period form, history, totals, unexplained amount and discrepancies.",
+    "gaps_limitations": "Working scope follows ADR-0016. It is independent of cash closing and includes only the defined outflow basis; not a budget/income statement or historical balance replay.",
+    "priority": "\u2014",
+    "evidence": [
+      "src/domain/reconciliation.ts#export function computeUnexplained",
+      "src/services/balance-service.ts#export async function runReconciliation",
+      "web/src/components/reconciliation-totals.tsx",
+      "web/src/components/run-reconciliation-form.tsx"
+    ],
+    "planned_in": "docs/decisions/0016-reconciliation-outflow-scoping.md",
+    "evidence_links": [
+      "[src/domain/reconciliation.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/reconciliation.ts:85)",
+      "[src/services/balance-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/balance-service.ts:193)",
+      "[web/src/components/reconciliation-totals.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/reconciliation-totals.tsx:1)",
+      "[web/src/components/run-reconciliation-form.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/run-reconciliation-form.tsx:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0016-reconciliation-outflow-scoping.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0016-reconciliation-outflow-scoping.md:1)"
+  },
+  {
+    "feature": "35. Account cash snapshots and visual waterfall",
+    "backend_status": "Implemented per-account gross debit/credit identity, evidenced boundaries, signed delta, explained subsets, transfer handling and verification checks.",
+    "api_status": "Present: account roster, accountBoundaries on run creation, GET run account-snapshots.",
+    "ui_status": "Present: opening\u2192credits\u2192debits\u2192expected/actual closing, delta, completeness and statement-evidence links.",
+    "gaps_limitations": "Real implementation and screen, not roadmap-only. Boundary amounts and evidence UUIDs must be entered manually; no statement balance extraction or evidence picker. Cash-category approval and new evidence ingestion remain outside the website.",
+    "priority": "P1",
+    "evidence": [
+      "src/domain/cash-balance.ts",
+      "src/services/balance-service.ts#const accountSnapshots",
+      "src/db/schema.ts#export const reconciliationAccountSnapshots",
+      "web/src/components/reconciliation/account-waterfall.tsx",
+      "web/src/components/run-reconciliation-form.tsx"
+    ],
+    "planned_in": "docs/decisions/0017-pragmatic-cash-balance-reconciliation.md",
+    "evidence_links": [
+      "[src/domain/cash-balance.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/cash-balance.ts:1)",
+      "[src/services/balance-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/balance-service.ts:233)",
+      "[src/db/schema.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/db/schema.ts:1202)",
+      "[web/src/components/reconciliation/account-waterfall.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/reconciliation/account-waterfall.tsx:1)",
+      "[web/src/components/run-reconciliation-form.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/run-reconciliation-form.tsx:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0017-pragmatic-cash-balance-reconciliation.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0017-pragmatic-cash-balance-reconciliation.md:1)"
+  },
+  {
+    "feature": "36. Drill from cash/unexplained totals to contributing movements",
+    "backend_status": "Partial: snapshot inputs retain payment facts and cash discrepancies; no general payments listing API.",
+    "api_status": "Partial: account snapshots expose source inputs, but no per-term movement-list/query route.",
+    "ui_status": "Partial: boundary evidence links and generic Review/Expenses links. Waterfall terms are not clickable movement lists.",
+    "gaps_limitations": "The promised drill-through to contributing records is incomplete. The run's Review link is not filtered to that account/period/term and Review omits many unexplained movements.",
+    "priority": "P1",
+    "evidence": [
+      "src/db/schema.ts#The inputs this run actually read",
+      "web/src/components/reconciliation/account-waterfall.tsx#<WaterfallRow label=\"Credits\"",
+      "web/src/components/reconciliation-run-detail.tsx#Drill through:",
+      "src/api/router.ts#export const PAYMENT_CONTEXT_ROUTES"
+    ],
+    "planned_in": "CLAUDE.md",
+    "evidence_links": [
+      "[src/db/schema.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/db/schema.ts:1243)",
+      "[web/src/components/reconciliation/account-waterfall.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/reconciliation/account-waterfall.tsx:193)",
+      "[web/src/components/reconciliation-run-detail.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/reconciliation-run-detail.tsx:66)",
+      "[src/api/router.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/router.ts:205)"
+    ],
+    "planned_in_link": "[CLAUDE.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/CLAUDE.md:1)"
+  },
+  {
+    "feature": "37. Live bank/card closing balances",
+    "backend_status": "Absent external account/balance adapters. Manual boundary support is implemented.",
+    "api_status": "No live bank balance route.",
+    "ui_status": "Absent.",
+    "gaps_limitations": "The waterfall compares user-supplied evidenced statement boundaries; it does not fetch current bank balances. Live connections remain deferred.",
+    "priority": "P2",
+    "evidence": [
+      "src/integrations/bank-csv/parse.ts",
+      "src/services/balance-service.ts#nothing in the ledger ingests",
+      "src/server.ts#const deps: ApiDependencies"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/integrations/bank-csv/parse.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/integrations/bank-csv/parse.ts:1)",
+      "[src/services/balance-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/balance-service.ts:133)",
+      "[src/server.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/server.ts:105)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "38. First Splitwise expense/settlement sync and connection setup",
+    "backend_status": "Implemented first-sync services, resolved person shares, external IDs/responses and ready-to-sync gate. Adapter absent.",
+    "api_status": "Present: connect, ready-to-sync, expense splitwise-sync, settlement splitwise-sync.",
+    "ui_status": "Absent: no connect/OAuth, person-ID mapping, preview/confirm sync or first-sync buttons.",
+    "gaps_limitations": "The Splitwise tab is an audit screen. connect only writes integration metadata; it does not authenticate to Splitwise. The running port rejects every remote operation.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/splitwise-service.ts#export async function connectSplitwiseIntegration",
+      "src/services/splitwise-service.ts#export async function syncExpenseToSplitwise",
+      "src/api/splitwise-routes.ts",
+      "src/server.ts#function createUnconfiguredSplitwisePort",
+      "web/src/app/splitwise/page.tsx"
+    ],
+    "planned_in": "docs/decisions/0040-phase-14-scope-is-first-sync-not-full-lifecycle.md",
+    "evidence_links": [
+      "[src/services/splitwise-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/splitwise-service.ts:68)",
+      "[src/services/splitwise-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/splitwise-service.ts:105)",
+      "[src/api/splitwise-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/splitwise-routes.ts:1)",
+      "[src/server.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/server.ts:76)",
+      "[web/src/app/splitwise/page.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/app/splitwise/page.tsx:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0040-phase-14-scope-is-first-sync-not-full-lifecycle.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0040-phase-14-scope-is-first-sync-not-full-lifecycle.md:1)"
+  },
+  {
+    "feature": "39. Splitwise drift, ghost debt and findings review",
+    "backend_status": "Implemented aggregate/per-record comparisons: missing/duplicate expenses and settlements, stale/full/item refunds, amount differences, unsupported debt and unattributed residuals.",
+    "api_status": "Present: run/read audits, list/detail findings and review decisions.",
+    "ui_status": "Present: external-read status, findings, compared snapshots, explanations and review history/actions.",
+    "gaps_limitations": "Real audit engine and UI, but live comparisons are blocked by the missing adapter. Current local screen explicitly reports read failure; seeded historical findings are not evidence of a working live connection. Reviews never repair Splitwise.",
+    "priority": "P1",
+    "evidence": [
+      "src/domain/splitwise-audit.ts#export function auditSplitwisePair",
+      "src/domain/enums.ts#export const SPLITWISE_AUDIT_FINDING_KINDS",
+      "src/services/splitwise-audit-service.ts#export async function runSplitwiseAudit",
+      "web/src/components/splitwise/finding-detail.tsx"
+    ],
+    "planned_in": "docs/decisions/0046-splitwise-audit-findings-and-external-read-completeness.md",
+    "evidence_links": [
+      "[src/domain/splitwise-audit.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/splitwise-audit.ts:197)",
+      "[src/domain/enums.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/enums.ts:483)",
+      "[src/services/splitwise-audit-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/splitwise-audit-service.ts:128)",
+      "[web/src/components/splitwise/finding-detail.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/splitwise/finding-detail.tsx:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0046-splitwise-audit-findings-and-external-read-completeness.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0046-splitwise-audit-findings-and-external-read-completeness.md:1)"
+  },
+  {
+    "feature": "40. Stale re-sync, update/delete repair and bidirectional sync",
+    "backend_status": "Absent lifecycle beyond first sync and auditing. Existing sync rejects any already-created SplitwiseExpense.",
+    "api_status": "Absent for re-sync/update/delete/pull-and-apply.",
+    "ui_status": "Absent.",
+    "gaps_limitations": "stale and drifted are meaningful states/findings, not implemented repair actions. Resolving a finding records a conclusion; it neither changes remote data nor applies remote edits locally.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/splitwise-service.ts#There is no re-sync path",
+      "src/integrations/splitwise/port.ts#export interface SplitwisePort",
+      "web/src/lib/api.ts#export async function reviewSplitwiseAuditFinding"
+    ],
+    "planned_in": "docs/roadmap.md",
+    "evidence_links": [
+      "[src/services/splitwise-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/splitwise-service.ts:124)",
+      "[src/integrations/splitwise/port.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/integrations/splitwise/port.ts:125)",
+      "[web/src/lib/api.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/lib/api.ts:414)"
+    ],
+    "planned_in_link": "[docs/roadmap.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/roadmap.md:1)"
+  },
+  {
+    "feature": "41. Proof-pack preview, redaction and copy/export",
+    "backend_status": "Implemented recipient-isolated derived pack: spend/items/refunds/net shares, settlements, balance, evidence refs and uncertainty warnings.",
+    "api_status": "Present: GET /api/proof-packs/:recipientPersonId, optional asOf label.",
+    "ui_status": "Present: recipient selection, warning-first exact text preview, three review checks and clipboard copy.",
+    "gaps_limitations": "Text export is implemented. asOf labels the current read; it does not reconstruct the ledger at a historical date. No saved-pack record, PDF/ZIP attachment bundle or evidence-selection editor. Those are not required by the accepted derived-read design.",
+    "priority": "\u2014",
+    "evidence": [
+      "src/services/proof-pack-service.ts#export async function buildProofPackPreview",
+      "src/domain/proof-pack.ts#export function buildProofPack",
+      "src/api/proof-pack-routes.ts",
+      "web/src/components/proof-packs/proof-pack-preview.tsx"
+    ],
+    "planned_in": "docs/decisions/0047-proof-packs-are-a-derived-read-not-a-second-ledger.md",
+    "evidence_links": [
+      "[src/services/proof-pack-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/proof-pack-service.ts:104)",
+      "[src/domain/proof-pack.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/proof-pack.ts:232)",
+      "[src/api/proof-pack-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/proof-pack-routes.ts:1)",
+      "[web/src/components/proof-packs/proof-pack-preview.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/proof-packs/proof-pack-preview.tsx:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0047-proof-packs-are-a-derived-read-not-a-second-ledger.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0047-proof-packs-are-a-derived-read-not-a-second-ledger.md:1)"
+  },
+  {
+    "feature": "42. One-click WhatsApp/recipient-facing sending",
+    "backend_status": "Absent message transport.",
+    "api_status": "Absent send endpoint.",
+    "ui_status": "Absent sending/share-to-WhatsApp action; copy only.",
+    "gaps_limitations": "The pillar name overstates present delivery capability. Copying prepares text for manual use elsewhere; it does not send a message, package recipient-accessible attachments or record a settlement.",
+    "priority": "P2",
+    "evidence": [
+      "CLAUDE.md#One-Click WhatsApp Proof Packs",
+      "web/src/components/proof-packs/proof-pack-preview.tsx#clipboard",
+      "src/api/router.ts#export const PROOF_PACK_ROUTES"
+    ],
+    "planned_in": "docs/roadmap.md",
+    "evidence_links": [
+      "[CLAUDE.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/CLAUDE.md:166)",
+      "[web/src/components/proof-packs/proof-pack-preview.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/proof-packs/proof-pack-preview.tsx:268)",
+      "[src/api/router.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/router.ts:241)"
+    ],
+    "planned_in_link": "[docs/roadmap.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/roadmap.md:1)"
+  },
+  {
+    "feature": "43. Rules, learning and high-confidence automatic approval",
+    "backend_status": "Schema only for Rules and permitted rule actor labels; no rule CRUD/evaluator/learner or application engine.",
+    "api_status": "Absent.",
+    "ui_status": "Absent.",
+    "gaps_limitations": "Every pending AI proposal still needs a decision. High confidence affects review routing, not authority. No standing-rule workflow, learning from corrections, automatic shared-expense reminders or recurring rule execution.",
+    "priority": "P2",
+    "evidence": [
+      "src/db/schema.ts#export const rules",
+      "src/domain/classification.ts#export function routeClassificationForReview",
+      "src/ai/classify-transaction.ts#export interface AiService"
+    ],
+    "planned_in": "docs/roadmap.md",
+    "evidence_links": [
+      "[src/db/schema.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/db/schema.ts:998)",
+      "[src/domain/classification.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/classification.ts:206)",
+      "[src/ai/classify-transaction.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/ai/classify-transaction.ts:87)"
+    ],
+    "planned_in_link": "[docs/roadmap.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/roadmap.md:1)"
+  },
+  {
+    "feature": "44. Analytics: own spending by category/person/time, trends and outstanding lists",
+    "backend_status": "No analytics service beyond existing reconciliation, balances and expense listing.",
+    "api_status": "Absent analytics queries.",
+    "ui_status": "Absent analytics dashboard/charts/reports.",
+    "gaps_limitations": "Questions such as own spend last month or every unreimbursed paid-on-behalf expense are not directly answered by the existing payer/state filters. No period/category/beneficiary aggregation or unsettled-expense view.",
+    "priority": "P2",
+    "evidence": [
+      "docs/product/overview.md#Core use cases",
+      "src/api/expense-ledger-routes.ts",
+      "src/api/router.ts#export const API_ROUTES",
+      "web/src/app/expenses/page.tsx"
+    ],
+    "planned_in": "docs/roadmap.md",
+    "evidence_links": [
+      "[docs/product/overview.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/overview.md:65)",
+      "[src/api/expense-ledger-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/expense-ledger-routes.ts:1)",
+      "[src/api/router.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/router.ts:311)",
+      "[web/src/app/expenses/page.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/app/expenses/page.tsx:1)"
+    ],
+    "planned_in_link": "[docs/roadmap.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/roadmap.md:1)"
+  },
+  {
+    "feature": "45. Natural-language interface",
+    "backend_status": "Absent conversational ledger/query/command engine.",
+    "api_status": "Absent.",
+    "ui_status": "Absent chat or ask-your-ledger screen.",
+    "gaps_limitations": "Cmd+K is navigation search. It is not natural-language expense entry, question answering or anomaly explanation.",
+    "priority": "P3",
+    "evidence": [
+      "src/ai/classify-transaction.ts#export interface AiService",
+      "web/src/components/app-shell/command-palette.tsx",
+      "src/api/router.ts#export const API_ROUTES"
+    ],
+    "planned_in": "docs/roadmap.md",
+    "evidence_links": [
+      "[src/ai/classify-transaction.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/ai/classify-transaction.ts:87)",
+      "[web/src/components/app-shell/command-palette.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/app-shell/command-palette.tsx:1)",
+      "[src/api/router.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/router.ts:311)"
+    ],
+    "planned_in_link": "[docs/roadmap.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/roadmap.md:1)"
+  },
+  {
+    "feature": "46. Other promised AI helpers",
+    "backend_status": "Absent: normalizeMerchant, suggestBeneficiaries, suggestAllocation, groupIntoOccasion, explainAnomaly, proposeRule.",
+    "api_status": "Absent for these six operations.",
+    "ui_status": "Absent.",
+    "gaps_limitations": "Only classifyTransaction, parseReceipt and extractReceiptItems are implemented contracts. Deterministic matching/findings and refund projections do not implement the six missing AI operations.",
+    "priority": "P2",
+    "evidence": [
+      "docs/architecture/ai-boundary.md#Service interface",
+      "src/ai/classify-transaction.ts#export interface AiService",
+      "src/ai/README.md#**Not implemented:**"
+    ],
+    "planned_in": "docs/architecture/ai-boundary.md",
+    "evidence_links": [
+      "[docs/architecture/ai-boundary.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/architecture/ai-boundary.md:26)",
+      "[src/ai/classify-transaction.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/ai/classify-transaction.ts:87)",
+      "[src/ai/README.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/ai/README.md:64)"
+    ],
+    "planned_in_link": "[docs/architecture/ai-boundary.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/architecture/ai-boundary.md:1)"
+  },
+  {
+    "feature": "47. Expense occasions: dinner/dessert/cab grouped together",
+    "backend_status": "Schema/domain representation only: expense_occasions and expense occasionId.",
+    "api_status": "Absent occasion CRUD/grouping/query endpoints.",
+    "ui_status": "Absent.",
+    "gaps_limitations": "No manual occasion flow or AI occasion-grouping implementation. Explicitly deferred domain-level requirement.",
+    "priority": "P3",
+    "evidence": [
+      "src/db/schema.ts#export const expenseOccasions",
+      "src/db/schema.ts#occasionId:",
+      "src/ai/classify-transaction.ts#export interface AiService"
+    ],
+    "planned_in": "docs/product/requirements.md",
+    "evidence_links": [
+      "[src/db/schema.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/db/schema.ts:694)",
+      "[src/db/schema.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/db/schema.ts:720)",
+      "[src/ai/classify-transaction.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/ai/classify-transaction.ts:87)"
+    ],
+    "planned_in_link": "[docs/product/requirements.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/requirements.md:1)"
+  },
+  {
+    "feature": "48. People/accounts/merchants/groups onboarding and management",
+    "backend_status": "Partial: persistent models, read helpers and seed/low-level writes; no end-user onboarding service workflow.",
+    "api_status": "Read-only GET /api/people and /api/accounts; no roster/account/merchant/group CRUD surface.",
+    "ui_status": "Selectors exist; setup/edit/archive/import mappings are absent.",
+    "gaps_limitations": "A new empty installation cannot be populated entirely through the website. This also blocks real allocation participants, owned-account reconciliation, aliases and Splitwise person mapping.",
+    "priority": "P1",
+    "evidence": [
+      "src/services/people-service.ts",
+      "src/services/account-service.ts",
+      "src/db/schema.ts",
+      "scripts/seed-dev-data.ts#async function main",
+      "src/api/router.ts#export const PEOPLE_ROUTES"
+    ],
+    "planned_in": "docs/product/overview.md",
+    "evidence_links": [
+      "[src/services/people-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/people-service.ts:1)",
+      "[src/services/account-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/account-service.ts:1)",
+      "[src/db/schema.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/db/schema.ts:1)",
+      "[scripts/seed-dev-data.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/scripts/seed-dev-data.ts:42)",
+      "[src/api/router.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/router.ts:224)"
+    ],
+    "planned_in_link": "[docs/product/overview.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/product/overview.md:1)"
+  },
+  {
+    "feature": "49. Local PII sanitization boundary",
+    "backend_status": "Implemented redaction builders, residual-identifier assertions, local reversible map and sanitized proof-pack checks.",
+    "api_status": "Applied internally to supported AI operations and proof-pack read.",
+    "ui_status": "Local source inspection and separate recipient redaction/copy review are present.",
+    "gaps_limitations": "This is implemented for the defined text/payload paths. It is not an operational privacy validation of unbuilt OCR, new provider adapters or deployment infrastructure. No redaction-settings editor.",
+    "priority": "\u2014",
+    "evidence": [
+      "src/ai/redaction.ts#export function createLocalRedactionMap",
+      "src/ai/redaction.ts#export function assertPayloadSanitized",
+      "src/services/proof-pack-service.ts#export function assertProofPackExportable",
+      "web/src/components/proof-packs/proof-pack-preview.tsx"
+    ],
+    "planned_in": "docs/security/security-model.md",
+    "evidence_links": [
+      "[src/ai/redaction.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/ai/redaction.ts:401)",
+      "[src/ai/redaction.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/ai/redaction.ts:330)",
+      "[src/services/proof-pack-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/proof-pack-service.ts:218)",
+      "[web/src/components/proof-packs/proof-pack-preview.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/proof-packs/proof-pack-preview.tsx:1)"
+    ],
+    "planned_in_link": "[docs/security/security-model.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/security/security-model.md:1)"
+  },
+  {
+    "feature": "50. Authentication and deployable personal-data boundary",
+    "backend_status": "Not implemented: one primary user is loaded from DB; actor strings identify decisions, not authenticated sessions.",
+    "api_status": "No session/login/auth middleware. Server exposes its route dispatcher and CORS configuration.",
+    "ui_status": "Absent login/logout/settings.",
+    "gaps_limitations": "Documented single-user session auth remains deferred. Treat this as a real prerequisite before making personal financial data available over a network; CORS and actor: user do not authenticate callers.",
+    "priority": "P1",
+    "evidence": [
+      "docs/architecture/system-architecture.md#Minimal, single-user session auth",
+      "src/api/review-routes.ts#session auth",
+      "src/server.ts#createServer",
+      "web/src/lib/api.ts#const ACTOR"
+    ],
+    "planned_in": "docs/security/security-model.md",
+    "evidence_links": [
+      "[docs/architecture/system-architecture.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/architecture/system-architecture.md:48)",
+      "[src/api/review-routes.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/review-routes.ts:18)",
+      "[src/server.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/server.ts:24)",
+      "[web/src/lib/api.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/lib/api.ts:44)"
+    ],
+    "planned_in_link": "[docs/security/security-model.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/security/security-model.md:1)"
+  },
+  {
+    "feature": "51. Background imports/extraction jobs, retry and scheduling",
+    "backend_status": "Absent planned jobs table/worker. Existing work is synchronous service/request execution.",
+    "api_status": "No job status/retry/scheduler routes.",
+    "ui_status": "Absent progress/retry queue for imports or extraction.",
+    "gaps_limitations": "Architecture promises a lightweight Postgres-backed job queue, but there is no implementation. Not a blocker for small synchronous core calculations; relevant when ingestion/provider integrations are added.",
+    "priority": "P3",
+    "evidence": [
+      "docs/architecture/system-architecture.md#Postgres-backed job table",
+      "src/services/classification-service.ts#export async function classifyPayments",
+      "src/api/router.ts#export const API_ROUTES"
+    ],
+    "planned_in": "docs/decisions/0002-technology-stack.md",
+    "evidence_links": [
+      "[docs/architecture/system-architecture.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/architecture/system-architecture.md:50)",
+      "[src/services/classification-service.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/services/classification-service.ts:155)",
+      "[src/api/router.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/api/router.ts:311)"
+    ],
+    "planned_in_link": "[docs/decisions/0002-technology-stack.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0002-technology-stack.md:1)"
+  },
+  {
+    "feature": "52. Exact money and currency scope",
+    "backend_status": "Implemented BigInt paise, deterministic rounding, signed balances and refusal of unsupported/mixed currencies.",
+    "api_status": "Exact minor-unit strings cross HTTP.",
+    "ui_status": "INR formatting and exact rupee input are implemented.",
+    "gaps_limitations": "INR-only is intentional. Multi-currency/FX, investment returns, general budgets and tax calculations are not implemented and are not missing core features under the accepted current scope.",
+    "priority": "\u2014",
+    "evidence": [
+      "src/domain/money.ts#export const SUPPORTED_CURRENCY",
+      "src/domain/rounding.ts#export function splitByLargestRemainder",
+      "web/src/lib/money.ts"
+    ],
+    "planned_in": "docs/decisions/0012-deterministic-money-rounding.md",
+    "evidence_links": [
+      "[src/domain/money.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/money.ts:41)",
+      "[src/domain/rounding.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/src/domain/rounding.ts:66)",
+      "[web/src/lib/money.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/lib/money.ts:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0012-deterministic-money-rounding.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0012-deterministic-money-rounding.md:1)"
+  },
+  {
+    "feature": "53. Keyboard navigation, review workspace and explicit decisions",
+    "backend_status": "UI concern; backend decisions remain explicit audited writes.",
+    "api_status": "Uses existing read/decision routes.",
+    "ui_status": "Implemented six sections, eleven screens, Cmd/Ctrl+K, help, g navigation, j/k/Enter triage, modal isolation and responsive views.",
+    "gaps_limitations": "Fresh browser smoke passed for all eleven screens; expense search, palette, review/refund dialogs and proof-copy gating were exercised. This is interface coverage, not evidence that missing authoring flows or real adapters exist.",
+    "priority": "\u2014",
+    "evidence": [
+      "web/src/components/app-shell/shortcuts.tsx",
+      "web/src/components/app-shell/command-palette.tsx",
+      "web/src/components/ui/dialog.tsx",
+      "web/src/components/review/review-queue.tsx"
+    ],
+    "planned_in": "docs/decisions/0050-modal-isolation-and-review-workspace.md",
+    "evidence_links": [
+      "[web/src/components/app-shell/shortcuts.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/app-shell/shortcuts.tsx:1)",
+      "[web/src/components/app-shell/command-palette.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/app-shell/command-palette.tsx:1)",
+      "[web/src/components/ui/dialog.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/ui/dialog.tsx:1)",
+      "[web/src/components/review/review-queue.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/components/review/review-queue.tsx:1)"
+    ],
+    "planned_in_link": "[docs/decisions/0050-modal-isolation-and-review-workspace.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/decisions/0050-modal-isolation-and-review-workspace.md:1)"
+  },
+  {
+    "feature": "54. Complete reconciliation and audit history browsing",
+    "backend_status": "Implemented stored runs and finding records, plus limited history reads.",
+    "api_status": "Present history/read routes and configurable limits, but no offset/cursor pagination.",
+    "ui_status": "Partial: latest 20 reconciliation runs, 10 Splitwise audits and 50 findings; no Show more for these lists.",
+    "gaps_limitations": "Older history is not reachable through these list screens. Splitwise GET audit/:id has a wrapper/hook but no mounted run-detail consumer. Specific finding details are reachable; Review Show more does not extend these separate lists.",
+    "priority": "P2",
+    "evidence": [
+      "web/src/app/reconciliation/page.tsx#useReconciliationRuns(20)",
+      "web/src/app/splitwise/page.tsx#useSplitwiseAuditRuns(10)",
+      "web/src/app/splitwise/page.tsx#limit: 50",
+      "web/src/lib/queries.ts#export function useSplitwiseAuditRun"
+    ],
+    "planned_in": "docs/roadmap.md",
+    "evidence_links": [
+      "[web/src/app/reconciliation/page.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/app/reconciliation/page.tsx:23)",
+      "[web/src/app/splitwise/page.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/app/splitwise/page.tsx:35)",
+      "[web/src/app/splitwise/page.tsx](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/app/splitwise/page.tsx:116)",
+      "[web/src/lib/queries.ts](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/web/src/lib/queries.ts:144)"
+    ],
+    "planned_in_link": "[docs/roadmap.md](/Users/devv/.codex/.chatgpt-projects/g-p-6a7edd56a2388191b1b4cac8ea8a5091/personal-expense-reconciliation/docs/roadmap.md:1)"
+  }
+]

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { PageHeader, Section } from "@/components/page-header";
 import { AuditFindingsList, ExternalReadBanner } from "@/components/splitwise/audit-findings";
+import { SplitwiseConnection } from "@/components/splitwise/connection";
+import { ResyncCandidates } from "@/components/splitwise/resync-candidates";
 import { EmptyBlock, ErrorBlock, LoadingStatus, TableSkeleton } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -24,10 +26,11 @@ import {
 /**
  * The fourth pillar's screen: drift and ghost debt between this ledger and Splitwise.
  *
- * Nothing on this page writes to Splitwise, and it says so out loud. Re-syncing a `stale` row
- * remains separate, explicitly approved work that is deliberately not reachable from here
- * (ADR-0046) — reviewing a finding records what a person concluded, never an instruction to
- * correct either ledger.
+ * **Auditing** writes to nothing: reviewing a finding records what a person concluded, never an
+ * instruction to correct either ledger (ADR-0046). Correcting a stale row *is* now reachable —
+ * from its own section, one row at a time, behind a required reason — because a person who has
+ * concluded that Splitwise is wrong needs somewhere to act on it. The two remain separate acts,
+ * which is the distinction ADR-0046 actually protects.
  */
 export default function SplitwisePage() {
   const [reviewStatus, setReviewStatus] = useState<SplitwiseAuditReviewStatus | "">("open");
@@ -50,6 +53,8 @@ export default function SplitwisePage() {
       />
 
       {audit.isError && <ErrorBlock error={audit.error} />}
+
+      <SplitwiseConnection latestRun={latest} />
 
       {runs.isPending && (
         <LoadingStatus label="Loading audit history…">
@@ -117,6 +122,8 @@ export default function SplitwisePage() {
           }}
         />
       </Section>
+
+      <ResyncCandidates />
 
       <Section
         title="Audit history"

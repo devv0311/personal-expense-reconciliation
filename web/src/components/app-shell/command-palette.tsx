@@ -49,6 +49,35 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const commands = useMemo<readonly Command[]>(() => {
     const sections: Command[] = [
       { id: "go-review", label: "Review queue", hint: "g v", group: "Go to", href: "/review" },
+      { id: "go-payments", label: "Payments", hint: "g m", group: "Go to", href: "/payments" },
+      {
+        id: "go-unexplained",
+        label: "Payments with no explanation",
+        hint: "Every unexplained movement",
+        group: "Go to",
+        href: "/payments?onlyUnexplained=true",
+      },
+      {
+        id: "go-evidence",
+        label: "Evidence library",
+        hint: "g d",
+        group: "Go to",
+        href: "/evidence",
+      },
+      {
+        id: "go-unlinked",
+        label: "Evidence attached to nothing",
+        hint: "Documents the ledger is not using",
+        group: "Go to",
+        href: "/evidence?linkage=unlinked",
+      },
+      {
+        id: "go-import",
+        label: "Import a statement",
+        hint: "CSV",
+        group: "Go to",
+        href: "/payments/import",
+      },
       {
         id: "go-reconciliation",
         label: "Reconciliation",
@@ -72,6 +101,15 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         group: "Go to",
         href: "/proof-packs",
       },
+      { id: "go-analytics", label: "Analytics", hint: "g a", group: "Go to", href: "/analytics" },
+      {
+        id: "go-automation",
+        label: "Automation",
+        hint: "g u",
+        group: "Go to",
+        href: "/automation",
+      },
+      { id: "go-setup", label: "Setup", hint: "g t", group: "Go to", href: "/setup" },
     ];
 
     for (const person of people.data ?? []) {

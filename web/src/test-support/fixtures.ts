@@ -10,22 +10,43 @@
 import type {
   AccountSnapshotsResult,
   AccountSummary,
+  AnalyticsCaveats,
   BalanceResult,
+  CategorySpendResult,
   ClassificationDecisionItem,
+  CounterpartyOptions,
+  EvidenceLibraryResult,
+  EvidenceLibraryRow,
   EvidenceMatchCandidateView,
   EvidenceRecord,
+  ExpenseHistoryResult,
   ExpenseLedgerRow,
+  GroupDetail,
+  ImportBatchSummary,
+  JobRecord,
+  MerchantDetail,
+  MonthlySpendResult,
+  OccasionSummary,
+  OutstandingResult,
+  OwnSpendResult,
+  PaymentListResult,
+  PaymentWorkspaceItem,
+  PersonDetail,
   PersonSummary,
   PossibleDuplicateItem,
   ProofPackPreview,
   ReconciliationAccountSnapshot,
+  ReceiptView,
   ReconciliationRun,
   RefundAllocationState,
+  RejectedClassificationItem,
   ReviewQueueResult,
+  RuleView,
   SplitwiseAuditFinding,
   SplitwiseAuditFindingDetail,
   SplitwiseAuditRun,
   UnmatchedEvidenceItem,
+  UnsettledResult,
 } from "@/lib/types";
 
 export const DEV: PersonSummary = {
@@ -205,6 +226,7 @@ export const EVIDENCE: EvidenceRecord = {
   linkedPaymentId: null,
   linkedExpenseId: null,
   createdAt: "2026-09-01T10:00:00.000Z",
+  receiptId: null,
 };
 
 /* -------------------------------------------------------------- expenses and refunds */
@@ -614,4 +636,446 @@ export const BALANCE: BalanceResult = {
   netBalance: "-90000",
   evidenceStatus: "open_unconfirmed",
   contributions: [{ debtorId: "p-alex", creditorId: "p-dev", amount: "90000", expenseId: "exp-1" }],
+  settlements: [],
+  pendingRefundExpenseIds: [],
+};
+
+/* -------------------------------------------------------------------- payment workspace */
+
+/** An unexplained debit: nothing links to it, and nobody has said what it was for. */
+export const UNEXPLAINED_PAYMENT: PaymentWorkspaceItem = {
+  id: "pay-1",
+  accountId: ACCOUNT.id,
+  accountName: ACCOUNT.name,
+  importBatchId: "batch-1",
+  amount: "184000",
+  currency: "INR",
+  direction: "debit",
+  occurredAt: "2026-08-05T09:15:00.000Z",
+  rawDescription: "UPI-BLINKIT-PAYU@AXIS-517290",
+  channel: "upi",
+  counterpartyType: "unknown",
+  counterpartyId: null,
+  counterpartyName: null,
+  externalReference: "517290",
+  referenceType: "upi_utr",
+  sourceSystem: "hdfc-savings-export",
+  state: "imported",
+  ignoredReason: null,
+  cashFlowCategory: null,
+  cashFlowState: "imported",
+  cashFlowApprovedAt: null,
+  cashFlowApprovedBy: null,
+  expenseLinkTotal: "0",
+  settlementTotal: "0",
+  adjustmentTotal: "0",
+  evidenceCount: 0,
+  expenseLinkCount: 0,
+  settlementCount: 0,
+  explainedTotal: "0",
+  unexplainedTotal: "184000",
+  isDuplicateRepresentation: false,
+};
+
+/** A credit with a proposed refund role, waiting on the approval step and its evidence gate. */
+export const CLASSIFIED_CREDIT: PaymentWorkspaceItem = {
+  ...UNEXPLAINED_PAYMENT,
+  id: "pay-2",
+  amount: "40000",
+  direction: "credit",
+  rawDescription: "REFUND BLINKIT ORDER 8842",
+  state: "normalized",
+  cashFlowState: "cash_flow_classified",
+  cashFlowCategory: "REFUND",
+  unexplainedTotal: "40000",
+};
+
+/** An unexplained credit — what a refund's money looks like before anything names it. */
+export const CREDIT_PAYMENT: PaymentWorkspaceItem = {
+  ...UNEXPLAINED_PAYMENT,
+  id: "pay-credit",
+  amount: "40000",
+  direction: "credit",
+  rawDescription: "REFUND SWIGGY ORDER 5512",
+  unexplainedTotal: "40000",
+};
+
+/** Explained by an expense link — the case that must never read as an unverified zero. */
+export const EXPLAINED_PAYMENT: PaymentWorkspaceItem = {
+  ...UNEXPLAINED_PAYMENT,
+  id: "pay-3",
+  rawDescription: "UPI-SWIGGY-8817",
+  state: "linked",
+  expenseLinkTotal: "184000",
+  expenseLinkCount: 1,
+  explainedTotal: "184000",
+  unexplainedTotal: "0",
+};
+
+export function paymentPage(
+  payments: readonly PaymentWorkspaceItem[],
+  overrides: Partial<PaymentListResult> = {},
+): PaymentListResult {
+  return {
+    payments,
+    total: payments.length,
+    filteredTotalIsExact: true,
+    limit: 50,
+    offset: 0,
+    ...overrides,
+  };
+}
+
+export const COUNTERPARTY_OPTIONS: CounterpartyOptions = {
+  merchants: [{ id: "m-blinkit", canonicalName: "Blinkit" }],
+  people: [
+    { id: DEV.id, displayName: DEV.displayName },
+    { id: ALEX.id, displayName: ALEX.displayName },
+  ],
+  accounts: [{ id: ACCOUNT.id, name: ACCOUNT.name }],
+};
+
+export const IMPORT_BATCH: ImportBatchSummary = {
+  id: "batch-1",
+  sourceChannel: "bank_statement",
+  fileReference: "august.csv",
+  contentHash: "b1a2c3",
+  parserVersion: "bank-csv/1",
+  rowCount: 42,
+  importedAt: "2026-09-01T04:30:00.000Z",
+  paymentCount: 42,
+  ignoredCount: 2,
+};
+
+/* ------------------------------------------------------------------------- master data */
+
+export const PERSON_DETAILS: readonly PersonDetail[] = [
+  {
+    id: DEV.id,
+    displayName: DEV.displayName,
+    splitwiseUserId: DEV.splitwiseUserId,
+    notes: null,
+    archivedAt: null,
+    isUser: true,
+  },
+  {
+    id: ALEX.id,
+    displayName: ALEX.displayName,
+    splitwiseUserId: null,
+    notes: "Flatmate",
+    archivedAt: null,
+    isUser: false,
+  },
+];
+
+export const MERCHANT: MerchantDetail = {
+  id: "m-blinkit",
+  canonicalName: "Blinkit",
+  defaultCategory: "groceries",
+  archivedAt: null,
+  aliases: [{ id: "al-1", rawPattern: "UPI-BLINKIT-PAYU@AXIS" }],
+};
+
+export const MERCHANT_WITHOUT_ALIAS: MerchantDetail = {
+  id: "m-swiggy",
+  canonicalName: "Swiggy",
+  defaultCategory: null,
+  archivedAt: null,
+  aliases: [],
+};
+
+export const GROUP: GroupDetail = {
+  id: "g-flat",
+  name: "Flat 402",
+  type: "flatmates",
+  archivedAt: null,
+  memberships: [
+    {
+      id: "gm-1",
+      personId: DEV.id,
+      displayName: DEV.displayName,
+      joinedAt: "2026-01-01T00:00:00.000Z",
+      leftAt: null,
+    },
+    {
+      id: "gm-2",
+      personId: ALEX.id,
+      displayName: ALEX.displayName,
+      joinedAt: "2026-03-01T00:00:00.000Z",
+      leftAt: "2026-08-01T00:00:00.000Z",
+    },
+  ],
+};
+
+/* --------------------------------------------------------------------- evidence library */
+
+export const LIBRARY_ROWS: readonly EvidenceLibraryRow[] = [
+  {
+    id: "ev-1",
+    type: "upi_notification",
+    noteKind: null,
+    storageRef: null,
+    mediaType: null,
+    byteSize: null,
+    rawText: "Rs.640.00 debited from A/c XX4821 on 08-Aug-26 to PEPPERMILL CAFE.",
+    capturedAt: "2026-08-08T11:31:00.000Z",
+    createdAt: "2026-09-01T10:00:00.000Z",
+    linkedPaymentId: null,
+    linkedExpenseId: null,
+    hasReceipt: false,
+    hasObservation: true,
+  },
+  {
+    id: "ev-2",
+    type: "receipt_image",
+    noteKind: null,
+    storageRef: "sha256/abc.jpg",
+    mediaType: "image/jpeg",
+    byteSize: 20481,
+    rawText: null,
+    capturedAt: "2026-08-05T09:20:00.000Z",
+    createdAt: "2026-09-01T10:05:00.000Z",
+    linkedPaymentId: "pay-1",
+    linkedExpenseId: null,
+    hasReceipt: true,
+    hasObservation: false,
+  },
+];
+
+export function evidenceLibrary(
+  rows: readonly EvidenceLibraryRow[] = LIBRARY_ROWS,
+): EvidenceLibraryResult {
+  return { evidence: rows, total: rows.length, limit: 25, offset: 0 };
+}
+
+export const RECEIPT_VIEW: ReceiptView = {
+  receipt: {
+    id: "rec-1",
+    evidenceId: "ev-2",
+    merchantId: null,
+    subtotal: "180000",
+    tax: "9000",
+    total: "189000",
+    currency: "INR",
+    extractionConfidence: "medium",
+    extractedAt: "2026-09-01T10:06:00.000Z",
+    confirmedByUser: false,
+    createdAt: "2026-09-01T10:06:00.000Z",
+  },
+  items: [
+    {
+      id: "ri-1",
+      receiptId: "rec-1",
+      description: "Paneer tikka",
+      quantity: "1",
+      unitPrice: "60000",
+      lineTotal: "60000",
+      suggestedCategory: null,
+    },
+  ],
+  itemsSubtotalDiscrepancy: "120000",
+  paymentDiscrepancy: null,
+  candidateMatches: [],
+};
+
+/* ------------------------------------------------------- analytics, rules, jobs, occasions */
+
+const CAVEATS: AnalyticsCaveats = {
+  pendingRefundExpenseIds: [],
+  excludes: [
+    "rejected expenses (invariants.md #20)",
+    "transfers between own accounts (invariants.md #7)",
+  ],
+};
+
+const PERIOD = { start: "2026-08-01T00:00:00.000Z", end: "2026-09-01T00:00:00.000Z" };
+
+export const OWN_SPEND: OwnSpendResult = {
+  period: PERIOD,
+  ownShare: "240000",
+  paidByUser: "400000",
+  frontedForOthers: "160000",
+  caveats: CAVEATS,
+};
+
+/** One contributing expense has a refund the allocation has not absorbed — a visible caveat. */
+export const OWN_SPEND_WITH_PENDING: OwnSpendResult = {
+  ...OWN_SPEND,
+  caveats: { ...CAVEATS, pendingRefundExpenseIds: ["exp-1"] },
+};
+
+export const CATEGORY_SPEND: CategorySpendResult = {
+  period: PERIOD,
+  categories: [
+    { category: "groceries", netTotal: "180000", grossTotal: "220000", expenseCount: 4 },
+    { category: null, netTotal: "60000", grossTotal: "60000", expenseCount: 1 },
+  ],
+  netTotal: "240000",
+  caveats: CAVEATS,
+};
+
+export const MONTHLY_SPEND: MonthlySpendResult = {
+  period: PERIOD,
+  months: [{ month: "2026-08", netTotal: "240000", expenseCount: 5 }],
+  caveats: CAVEATS,
+};
+
+export const OUTSTANDING: OutstandingResult = {
+  counterparties: [
+    {
+      personId: "p-alex",
+      displayName: "Alex",
+      netBalance: "90000",
+      contributingExpenseCount: 2,
+    },
+  ],
+  totalOwedToUser: "90000",
+  totalOwedByUser: "0",
+  caveats: CAVEATS,
+};
+
+export const UNSETTLED: UnsettledResult = {
+  expenses: [
+    {
+      expenseId: "exp-1",
+      description: "Dinner at Toit",
+      occurredAt: "2026-08-12T19:00:00.000Z",
+      netAmount: "240000",
+      owedToUser: "90000",
+      beneficiaries: [{ personId: "p-alex", displayName: "Alex" }],
+    },
+  ],
+  totalOwedToUser: "90000",
+  caveats: CAVEATS,
+};
+
+export const PROPOSE_RULE: RuleView = {
+  id: "rule-1",
+  name: "Blinkit is a merchant",
+  match: { description: "BLINKIT", descriptionOperator: "contains" },
+  assertion: { action: "set_counterparty_type", counterpartyType: "merchant" },
+  effect: "propose",
+  active: true,
+  origin: "user",
+  timesApplied: 3,
+  lastAppliedAt: "2026-09-01T10:00:00.000Z",
+  archivedAt: null,
+  createdAt: "2026-08-01T10:00:00.000Z",
+};
+
+export const APPLY_RULE: RuleView = {
+  ...PROPOSE_RULE,
+  id: "rule-2",
+  name: "Rent to the landlord",
+  effect: "apply",
+  match: { description: "NEFT-LANDLORD", descriptionOperator: "startsWith", direction: "debit" },
+  assertion: { action: "set_expense_category", category: "rent" },
+};
+
+export const FAILED_JOB: JobRecord = {
+  id: "job-1",
+  kind: "classify_payments",
+  status: "failed",
+  payload: {},
+  result: null,
+  attempts: 2,
+  maxAttempts: 3,
+  lastError: "No model provider is configured.",
+  actor: "user",
+  scheduledFor: "2026-09-01T09:00:00.000Z",
+  startedAt: "2026-09-01T09:00:01.000Z",
+  finishedAt: "2026-09-01T09:00:02.000Z",
+  createdAt: "2026-09-01T08:59:00.000Z",
+};
+
+export const OCCASION: OccasionSummary = {
+  id: "occ-1",
+  name: "Anjali's birthday",
+  occurredStart: "2026-08-12T00:00:00.000Z",
+  occurredEnd: null,
+  defaultParticipants: [],
+  createdAt: "2026-08-13T10:00:00.000Z",
+  expenseCount: 3,
+};
+
+/** A proposal a person declined: the payment is left with a visible amount and no explanation. */
+export const REJECTED_ITEM: RejectedClassificationItem = {
+  kind: "rejected_classification",
+  id: "inf-9",
+  amount: "124000",
+  occurredAt: "2026-08-19T13:10:00.000Z",
+  reasons: ["payment_unexplained"],
+  payment: CLASSIFICATION_ITEM.payment,
+  inferenceId: "inf-9",
+  decidedAt: "2026-08-20T09:00:00.000Z",
+  decidedBy: "user",
+  expenseId: null,
+  expenseState: null,
+};
+
+export const EXPENSE_HISTORY: ExpenseHistoryResult = {
+  expenseId: "exp-1",
+  allocationVersions: [
+    {
+      allocationId: "alloc-1",
+      method: "equal",
+      decidedAt: "2026-08-11T20:00:00.000Z",
+      decidedBy: "manual",
+      supersededAt: "2026-08-20T10:00:00.000Z",
+      lines: [
+        {
+          beneficiaryType: "person",
+          beneficiaryId: "p-dev",
+          beneficiaryName: "Dev",
+          amount: "107500",
+          expenseItemId: null,
+        },
+        {
+          beneficiaryType: "person",
+          beneficiaryId: "p-alex",
+          beneficiaryName: "Alex",
+          amount: "107500",
+          expenseItemId: null,
+        },
+      ],
+    },
+    {
+      allocationId: "alloc-2",
+      method: "item_based",
+      decidedAt: "2026-08-20T10:00:00.000Z",
+      decidedBy: "manual",
+      supersededAt: null,
+      lines: [
+        {
+          beneficiaryType: "person",
+          beneficiaryId: "p-dev",
+          beneficiaryName: "Dev",
+          amount: "75000",
+          expenseItemId: "item-1",
+        },
+        {
+          beneficiaryType: "person",
+          beneficiaryId: "p-alex",
+          beneficiaryName: "Alex",
+          amount: "75000",
+          expenseItemId: "item-2",
+        },
+      ],
+    },
+  ],
+  events: [
+    {
+      entityType: "allocation",
+      entityId: "alloc-2",
+      action: "supersede",
+      oldValue: { method: "equal" },
+      newValue: { method: "item_based" },
+      actor: "user",
+      source: "api POST /api/expenses/:expenseId/adjustments/distribute",
+      reason: "A refund came back on two items",
+      occurredAt: "2026-08-20T10:00:00.000Z",
+      sequence: "42",
+    },
+  ],
+  sources: { allocationIds: [], adjustmentIds: [], evidenceIds: [], settlementIds: [] },
 };

@@ -90,7 +90,11 @@ export type DomainErrorCode =
   /** An observed account hint was not the masked trailing digits it claims to be. */
   | 'EVIDENCE_OBSERVATION_INVALID'
   /** A match candidate was decided by an actor the audit trail cannot attribute. */
-  | 'EVIDENCE_MATCH_DECISION_INVALID';
+  | 'EVIDENCE_MATCH_DECISION_INVALID'
+  /** A standing rule was written with no condition, so it would match every payment. */
+  | 'RULE_PATTERN_EMPTY'
+  /** A rule asserts a fact its own pattern makes impossible (a REFUND on a debit-only rule). */
+  | 'RULE_ASSERTION_INVALID';
 
 /** Thrown by `src/domain` when an input violates a documented invariant. */
 export class DomainError extends Error {

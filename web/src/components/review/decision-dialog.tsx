@@ -40,6 +40,11 @@ interface DecisionDialogProps {
   reasonLabel?: string;
   reasonRequired?: boolean;
   reasonPlaceholder?: string;
+  /**
+   * Blocks confirmation for a caller's own reason — a form inside the dialog that is not filled
+   * in yet. The required-reason rule is separate and always applies on top of this.
+   */
+  confirmDisabled?: boolean;
   pending: boolean;
   error: unknown;
   children?: ReactNode;
@@ -55,6 +60,7 @@ function DecisionDialogBody({
   reasonLabel = "Reason",
   reasonRequired = false,
   reasonPlaceholder,
+  confirmDisabled = false,
   pending,
   error,
   children,
@@ -63,7 +69,8 @@ function DecisionDialogBody({
   const [reason, setReason] = useState("");
 
   const trimmed = reason.trim();
-  const blocked = reasonRequired && trimmed.length === 0;
+  const missingReason = reasonRequired && trimmed.length === 0;
+  const blocked = missingReason || confirmDisabled;
 
   return (
     <Dialog
@@ -99,7 +106,7 @@ function DecisionDialogBody({
             placeholder={reasonPlaceholder}
             onChange={(event) => setReason(event.target.value)}
           />
-          {blocked && (
+          {missingReason && (
             <p className="text-meta text-attention">
               This decision is recorded with your reason in the audit trail, so it needs one.
             </p>

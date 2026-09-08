@@ -6,6 +6,7 @@ import { ShortcutHelp } from "@/components/app-shell/shortcut-help";
 import { ShortcutProvider } from "@/components/app-shell/shortcuts";
 import { Nav } from "@/components/nav";
 import { QueryProvider } from "@/components/query-provider";
+import { SessionGate } from "@/components/session/session-gate";
 
 /**
  * The chrome every screen sits inside: query cache, keyboard layer, navigation, and the two
@@ -40,7 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </a>
         <Nav />
         <main id="main" tabIndex={-1} className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
-          {children}
+          <SessionGate>{children}</SessionGate>
         </main>
       </ShortcutProvider>
     </QueryProvider>

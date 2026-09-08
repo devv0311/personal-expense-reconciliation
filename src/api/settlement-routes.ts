@@ -15,12 +15,14 @@
 
 import { asId } from '../domain/index.js';
 import type { Paise } from '../domain/index.js';
-import { recordSettlement } from '../services/index.js';
+import { listSettlementRegisterEntries, recordSettlement } from '../services/index.js';
 
 import {
   ApiRequestError,
   jsonResponse,
+  optionalPositiveInteger,
   optionalString,
+  optionalUuidParam,
   readJsonObject,
   requireMinorUnitsField,
   requireParam,
@@ -77,4 +79,30 @@ function requirePersonActor(body: Record<string, unknown>): string {
     );
   }
   return actor;
+}
+
+/**
+ * `GET /api/settlements` — the settlement register (audit row 29).
+ *
+ * Every repayment on record, newest first, optionally narrowed to one counterparty. A read:
+ * what a pair currently owes each other is `GET /api/balances/:a/:b`, which nets these
+ * against the obligations they discharge. Two answers to that question would be one too many.
+ */
+export async function getSettlementsRoute(
+  deps: ApiDependencies,
+  request: Request,
+): Promise<Response> {
+  const params = new URL(request.url).searchParams;
+  const counterpartyPersonId = optionalUuidParam(params, 'counterpartyPersonId');
+  const limit = optionalPositiveInteger(params, 'limit');
+  const offset = optionalPositiveInteger(params, 'offset');
+
+  const result = await listSettlementRegisterEntries(deps.db, {
+    ...(counterpartyPersonId === undefined
+      ? {}
+      : { counterpartyPersonId: asId<'person'>(counterpartyPersonId) }),
+    ...(limit === undefined ? {} : { limit }),
+    ...(offset === undefined ? {} : { offset }),
+  });
+  return jsonResponse(200, result);
 }

@@ -9,3 +9,8 @@
 export * from './client.js';
 export * as schema from './schema.js';
 export * from './repositories.js';
+export * from './master-data-repositories.js';
+export * from './payment-workspace-repositories.js';
+export * from './history-repositories.js';
+export * from './analytics-repositories.js';
+export * from './job-repositories.js';

@@ -6,6 +6,7 @@ import { Suspense, useState } from "react";
 import { BalanceView } from "@/components/balance-view";
 import { PageHeader } from "@/components/page-header";
 import { PersonSelect } from "@/components/person-select";
+import { SettlementRegister } from "@/components/settlements/settlement-register";
 import {
   EmptyBlock,
   ErrorBlock,
@@ -61,7 +62,7 @@ function BalancesContent() {
           personBId !== null && personBId !== userPersonId ? (
             <Link
               href={`/proof-packs?recipient=${personBId}`}
-              className="text-meta text-accent underline-offset-2 hover:underline"
+              className="text-meta text-accent underline underline-offset-2"
             >
               Preview a proof pack for this person
             </Link>
@@ -118,6 +119,14 @@ function BalancesContent() {
           {balanceQuery.isSuccess && (
             <BalanceView balance={balanceQuery.data} people={peopleQuery.data} />
           )}
+
+          {/* The whole register, or one person's, depending on whether a pair is chosen. It is
+              the same recorded repayments either way — a filter, never a different figure. */}
+          <SettlementRegister
+            {...(personBId !== null && personBId !== userPersonId
+              ? { counterpartyPersonId: personBId }
+              : {})}
+          />
         </>
       )}
     </div>

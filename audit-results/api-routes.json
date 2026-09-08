@@ -1,0 +1,237 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/review",
+    "line": 111
+  },
+  {
+    "method": "POST",
+    "path": "/api/review/inferences/:inferenceId/decision",
+    "line": 113
+  },
+  {
+    "method": "POST",
+    "path": "/api/review/payments/:paymentId/reclassify",
+    "line": 118
+  },
+  {
+    "method": "POST",
+    "path": "/api/review/payments/:paymentId/duplicate",
+    "line": 123
+  },
+  {
+    "method": "POST",
+    "path": "/api/evidence/files",
+    "line": 138
+  },
+  {
+    "method": "POST",
+    "path": "/api/evidence/notes",
+    "line": 139
+  },
+  {
+    "method": "POST",
+    "path": "/api/evidence/notifications",
+    "line": 140
+  },
+  {
+    "method": "POST",
+    "path": "/api/evidence/matches/:candidateId/decision",
+    "line": 142
+  },
+  {
+    "method": "POST",
+    "path": "/api/evidence/:evidenceId/link",
+    "line": 146
+  },
+  {
+    "method": "POST",
+    "path": "/api/evidence/:evidenceId/receipt",
+    "line": 147
+  },
+  {
+    "method": "POST",
+    "path": "/api/evidence/:evidenceId/observation",
+    "line": 149
+  },
+  {
+    "method": "GET",
+    "path": "/api/evidence/:evidenceId/observation",
+    "line": 154
+  },
+  {
+    "method": "POST",
+    "path": "/api/evidence/:evidenceId/enrich",
+    "line": 158
+  },
+  {
+    "method": "GET",
+    "path": "/api/evidence/:evidenceId/matches",
+    "line": 159
+  },
+  {
+    "method": "GET",
+    "path": "/api/evidence/:evidenceId",
+    "line": 160
+  },
+  {
+    "method": "GET",
+    "path": "/api/evidence/:evidenceId/content",
+    "line": 161
+  },
+  {
+    "method": "POST",
+    "path": "/api/receipts/:receiptId/confirm",
+    "line": 166
+  },
+  {
+    "method": "POST",
+    "path": "/api/receipts/:receiptId/correct",
+    "line": 167
+  },
+  {
+    "method": "GET",
+    "path": "/api/receipts/:receiptId",
+    "line": 168
+  },
+  {
+    "method": "POST",
+    "path": "/api/expenses/:expenseId/items",
+    "line": 176
+  },
+  {
+    "method": "GET",
+    "path": "/api/expenses/:expenseId/items",
+    "line": 177
+  },
+  {
+    "method": "POST",
+    "path": "/api/expenses/:expenseId/allocation",
+    "line": 178
+  },
+  {
+    "method": "POST",
+    "path": "/api/expenses/:expenseId/adjustments/distribute",
+    "line": 180
+  },
+  {
+    "method": "POST",
+    "path": "/api/expenses/:expenseId/adjustments",
+    "line": 185
+  },
+  {
+    "method": "GET",
+    "path": "/api/expenses/:expenseId/refund-allocation",
+    "line": 190
+  },
+  {
+    "method": "POST",
+    "path": "/api/payments/:paymentId/settlements",
+    "line": 198
+  },
+  {
+    "method": "GET",
+    "path": "/api/payments/:paymentId/context",
+    "line": 206
+  },
+  {
+    "method": "GET",
+    "path": "/api/expenses",
+    "line": 214
+  },
+  {
+    "method": "GET",
+    "path": "/api/expenses/:expenseId",
+    "line": 215
+  },
+  {
+    "method": "GET",
+    "path": "/api/balances/:personAId/:personBId",
+    "line": 220
+  },
+  {
+    "method": "GET",
+    "path": "/api/people",
+    "line": 225
+  },
+  {
+    "method": "GET",
+    "path": "/api/accounts",
+    "line": 233
+  },
+  {
+    "method": "GET",
+    "path": "/api/proof-packs/:recipientPersonId",
+    "line": 242
+  },
+  {
+    "method": "POST",
+    "path": "/api/reconciliation/runs",
+    "line": 250
+  },
+  {
+    "method": "GET",
+    "path": "/api/reconciliation/runs",
+    "line": 251
+  },
+  {
+    "method": "GET",
+    "path": "/api/reconciliation/runs/:id",
+    "line": 252
+  },
+  {
+    "method": "GET",
+    "path": "/api/reconciliation/runs/:id/account-snapshots",
+    "line": 254
+  },
+  {
+    "method": "POST",
+    "path": "/api/integrations/splitwise/connect",
+    "line": 263
+  },
+  {
+    "method": "POST",
+    "path": "/api/expenses/:expenseId/ready-to-sync",
+    "line": 267
+  },
+  {
+    "method": "POST",
+    "path": "/api/expenses/:expenseId/splitwise-sync",
+    "line": 268
+  },
+  {
+    "method": "POST",
+    "path": "/api/settlements/:settlementId/splitwise-sync",
+    "line": 270
+  },
+  {
+    "method": "POST",
+    "path": "/api/splitwise/audits",
+    "line": 282
+  },
+  {
+    "method": "GET",
+    "path": "/api/splitwise/audits",
+    "line": 283
+  },
+  {
+    "method": "GET",
+    "path": "/api/splitwise/audits/:id",
+    "line": 284
+  },
+  {
+    "method": "GET",
+    "path": "/api/splitwise/audit-findings",
+    "line": 286
+  },
+  {
+    "method": "GET",
+    "path": "/api/splitwise/audit-findings/:id",
+    "line": 291
+  },
+  {
+    "method": "POST",
+    "path": "/api/splitwise/audit-findings/:id/review",
+    "line": 296
+  }
+]

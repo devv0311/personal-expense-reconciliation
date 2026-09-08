@@ -301,3 +301,139 @@ export function requireParam(params: Readonly<Record<string, string>>, name: str
   if (value === undefined) throw new ApiRequestError(`"${name}" is missing from the path.`, name);
   return value;
 }
+
+/**
+ * The actor a mutating request is made as.
+ *
+ * Every route that writes takes this from the body rather than a session, because there was
+ * no session to take it from. `requireSession` (`src/api/session-routes.ts`) now supplies one
+ * when authentication is enabled; this stays the check that the *claimed* actor is a person
+ * rather than a model or a rule. `'ai'` is never a valid actor for a write (`ai-boundary.md`),
+ * and `'rule:<id>'` is written by the rule engine inside the process, never asserted over HTTP.
+ */
+export function requirePersonActor(body: Record<string, unknown>, activity: string): string {
+  const actor = requireString(body, 'actor');
+  if (actor !== 'user' && !actor.startsWith('user:')) {
+    throw new ApiRequestError(
+      `"${actor}" cannot ${activity} over HTTP. A request here is a person's act, so the ` +
+        'actor is "user" or "user:<id>".',
+      'actor',
+    );
+  }
+  return actor;
+}
+
+/** An optional boolean body field — absent and `null` both read as `undefined`. */
+export function optionalBoolean(body: Record<string, unknown>, field: string): boolean | undefined {
+  const value = body[field];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'boolean') {
+    throw new ApiRequestError(`"${field}", when present, must be true or false.`, field);
+  }
+  return value;
+}
+
+/** A required UUID body field, returned as a plain string for `asId` to brand. */
+export function requireUuidField(body: Record<string, unknown>, field: string): string {
+  return requireUuid(requireString(body, field), field);
+}
+
+/**
+ * An optional UUID body field, distinguishing "absent" from "explicitly null".
+ *
+ * `undefined` means leave it alone; `null` means clear it. Several corrections need both —
+ * unlinking a refund from its bank credit is not the same act as never having linked one.
+ */
+export function optionalUuidField(
+  body: Record<string, unknown>,
+  field: string,
+): string | null | undefined {
+  if (!(field in body)) return undefined;
+  const value = body[field];
+  if (value === null) return null;
+  if (typeof value !== 'string') {
+    throw new ApiRequestError(`"${field}", when present, must be a UUID or null.`, field);
+  }
+  return requireUuid(value, field);
+}
+
+/** A required ISO-8601 date-only or timestamp query parameter. */
+export function optionalTimestampParam(params: URLSearchParams, field: string): Date | undefined {
+  const raw = params.get(field);
+  if (raw === null || raw.length === 0) return undefined;
+  const value = new Date(raw);
+  if (Number.isNaN(value.getTime())) {
+    throw new ApiRequestError(`"${field}" must be an ISO-8601 date or timestamp.`, field);
+  }
+  return value;
+}
+
+/** A query parameter restricted to a known value set. */
+export function optionalOneOfParam<T extends string>(
+  params: URLSearchParams,
+  field: string,
+  permitted: readonly T[],
+): T | undefined {
+  const raw = params.get(field);
+  if (raw === null || raw.length === 0) return undefined;
+  if (!(permitted as readonly string[]).includes(raw)) {
+    throw new ApiRequestError(`"${field}" must be one of ${permitted.join(', ')}.`, field);
+  }
+  return raw as T;
+}
+
+/** A UUID query parameter, e.g. `?accountId=…`. */
+export function optionalUuidParam(params: URLSearchParams, field: string): string | undefined {
+  const raw = params.get(field);
+  if (raw === null || raw.length === 0) return undefined;
+  return requireUuid(raw, field);
+}
+
+/** An optional body field restricted to a known value set. */
+export function optionalOneOf<T extends string>(
+  body: Record<string, unknown>,
+  field: string,
+  permitted: readonly T[],
+): T | undefined {
+  const value = optionalString(body, field);
+  if (value === undefined) return undefined;
+  if (!(permitted as readonly string[]).includes(value)) {
+    throw new ApiRequestError(`"${field}" must be one of ${permitted.join(', ')}.`, field);
+  }
+  return value as T;
+}
+
+/** A required array of strings, refused when empty. */
+export function requireStringArray(
+  body: Record<string, unknown>,
+  field: string,
+): readonly string[] {
+  const raw = body[field];
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new ApiRequestError(`"${field}" is required and must be a non-empty array.`, field);
+  }
+  return raw.map((entry, index) => {
+    if (typeof entry !== 'string' || entry.trim().length === 0) {
+      throw new ApiRequestError(`"${field}[${index}]" must be a non-empty string.`, field);
+    }
+    return entry;
+  });
+}
+
+/** An optional array of objects, each parsed by the caller. */
+export function optionalObjectArray(
+  body: Record<string, unknown>,
+  field: string,
+): readonly Record<string, unknown>[] | undefined {
+  if (!(field in body) || body[field] === null) return undefined;
+  const raw = body[field];
+  if (!Array.isArray(raw)) {
+    throw new ApiRequestError(`"${field}", when present, must be an array.`, field);
+  }
+  return raw.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new ApiRequestError(`"${field}[${index}]" must be an object.`, field);
+    }
+    return entry as Record<string, unknown>;
+  });
+}

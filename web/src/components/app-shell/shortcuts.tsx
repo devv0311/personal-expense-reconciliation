@@ -52,11 +52,16 @@ export function useShortcuts(): ShortcutContextValue {
 /** The `g`-prefixed destinations, shared by the help dialog and the listener below. */
 export const GO_TO_DESTINATIONS = [
   { key: "v", href: "/review", label: "Review queue" },
+  { key: "m", href: "/payments", label: "Payments" },
+  { key: "d", href: "/evidence", label: "Evidence" },
   { key: "r", href: "/reconciliation", label: "Reconciliation" },
   { key: "e", href: "/expenses", label: "Expenses" },
   { key: "b", href: "/balances", label: "Balances" },
   { key: "s", href: "/splitwise", label: "Splitwise audit" },
   { key: "p", href: "/proof-packs", label: "Proof packs" },
+  { key: "a", href: "/analytics", label: "Analytics" },
+  { key: "u", href: "/automation", label: "Automation" },
+  { key: "t", href: "/setup", label: "Setup" },
 ] as const;
 
 const GLOBAL_SECTION: ShortcutSection = {

@@ -248,3 +248,150 @@ export const allocationMethodLabel = labelled({
   quantity_based: "Quantity-based",
   custom: "Custom",
 });
+
+/* ------------------------------------------------------------------ the payment workspace */
+
+export const paymentStateLabel = labelled({
+  imported: "Imported",
+  normalized: "Normalized",
+  linked: "Linked",
+  ignored: "Ignored",
+});
+
+export const paymentStateDetail = labelled({
+  imported: "Read from a statement or typed in. Nothing has interpreted it yet.",
+  normalized: "Channel and merchant resolved deterministically. Not yet explained.",
+  linked: "Attached to what it paid for.",
+  ignored: "Kept for provenance and counted by nothing — usually a confirmed duplicate.",
+});
+
+export const cashFlowStateLabel = labelled({
+  imported: "Not started",
+  normalized: "Ready to classify",
+  cash_flow_classified: "Proposed, not approved",
+  approved: "Approved",
+});
+
+export const cashFlowCategoryLabel = labelled({
+  PEER_SETTLEMENT: "Peer settlement",
+  REFUND: "Refund",
+  INTERNAL_TRANSFER: "Internal transfer",
+  EXTERNAL_INFLOW: "External inflow",
+});
+
+/**
+ * What approving each category will require, in the person's own words before they press it.
+ *
+ * These are ADR-0017's evidence gates (17.1–17.3) stated ahead of the request rather than
+ * discovered through a refusal: the service checks them regardless, and a reader who is told
+ * why beforehand can go and record the missing evidence instead of guessing.
+ */
+export const cashFlowCategoryGate = labelled({
+  PEER_SETTLEMENT: "Needs a recorded settlement against this payment.",
+  REFUND: "Needs a recorded expense adjustment against this payment, and a credit.",
+  INTERNAL_TRANSFER: "Needs both legs: an account you own, and the counter-leg named.",
+  EXTERNAL_INFLOW: "Needs linked evidence for the credit, and a credit direction.",
+});
+
+export const counterpartyTypeLabel = labelled({
+  merchant: "Merchant",
+  person: "Person",
+  internal_account: "Own account",
+  investment_instrument: "Investment",
+  unknown: "Unknown",
+});
+
+export const counterpartyTypeDetail = labelled({
+  merchant: "A shop, service or platform. The ordinary spending case.",
+  person: "Money that moved between you and someone else.",
+  internal_account: "A transfer between two accounts you own. Never spending (invariant #7).",
+  investment_instrument: "A purchase of an asset. Never spending (invariant #7).",
+  unknown: "Nobody has said. Deliberately not a guess.",
+});
+
+export const paymentChannelLabel = labelled({
+  upi: "UPI",
+  bank_transfer: "Bank transfer",
+  card: "Card",
+  cash: "Cash",
+  other: "Other",
+});
+
+export const referenceTypeLabel = labelled({
+  upi_utr: "UPI UTR",
+  upi_rrn: "UPI RRN",
+  bank_reference: "Bank reference",
+  card_reference: "Card reference",
+  merchant_order_id: "Merchant order id",
+  cheque_number: "Cheque number",
+  other: "Other reference",
+});
+
+export const sourceChannelLabel = labelled({
+  bank_statement: "Bank statement",
+  manual_entry: "Typed in by hand",
+});
+
+export const classificationOutcomeLabel = labelled({
+  proposed: "Proposal recorded",
+  internal_transfer: "Matched as an internal transfer",
+  skipped: "Skipped",
+  rejected: "Model answer refused",
+});
+
+export const classificationSkipLabel = labelled({
+  not_normalized: "Not normalized yet",
+  already_classified: "Already classified",
+  non_spend_counterparty: "A transfer or investment — never spending",
+  credit_out_of_scope: "A credit, which this path does not classify",
+});
+
+/* ------------------------------------------------------------------------------ rules */
+
+export const ruleActionLabel = labelled({
+  set_counterparty_type: "Set the counterparty type",
+  set_cash_flow_category: "Set the cash-flow role",
+  set_expense_category: "Set the expense category",
+});
+
+export const ruleEffectLabel = labelled({
+  propose: "Propose it",
+  apply: "Apply it unattended",
+});
+
+export const ruleEffectDetail = labelled({
+  propose: "Records a suggestion for you to accept or reject. Writes nothing on its own.",
+  apply:
+    "Writes the fact without asking, attributed to the rule rather than to you. Only ever a " +
+    "restatement of a decision you have already made — no rule touches an allocation or an amount.",
+});
+
+export const ruleOutcomeLabel = labelled({
+  applied: "Applied",
+  proposed: "Proposed",
+  skipped: "Skipped",
+});
+
+export const ruleOperatorLabel = labelled({
+  contains: "contains",
+  equals: "is exactly",
+  startsWith: "starts with",
+});
+
+/* ------------------------------------------------------------------------------- jobs */
+
+export const jobKindLabel = labelled({
+  import_bank_statement_csv: "Import a statement",
+  normalize_payments: "Normalize payments",
+  classify_payments: "Classify payments",
+  extract_receipt: "Extract a receipt",
+  run_splitwise_audit: "Run a Splitwise audit",
+});
+
+export const jobStatusLabel = labelled({
+  queued: "Queued",
+  running: "Running",
+  succeeded: "Succeeded",
+  failed: "Failed",
+  cancelled: "Cancelled",
+});

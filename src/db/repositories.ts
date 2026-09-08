@@ -13,6 +13,7 @@
  */
 
 import { and, asc, desc, eq, exists, inArray, isNull, not, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import type {
@@ -334,12 +335,94 @@ export interface ListExpensesFilter {
    * `netAmount` here can never disagree with `netAmount` in the list beside it.
    */
   readonly expenseId?: ExpenseId;
+  /**
+   * Case-insensitive substring of the description or category.
+   *
+   * Server-side on purpose. Audit row 32 recorded the failure this closes: the ledger loaded
+   * the 200 newest rows and searched those in the browser, so an older expense was simply
+   * invisible and the result count said nothing about the ledger.
+   */
+  readonly search?: string;
+  readonly category?: string;
+  readonly occurredFrom?: Date;
+  /** Exclusive, matching every other period boundary in this system. */
+  readonly occurredTo?: Date;
+  /** Only expenses whose current allocation names this person or a group they were in. */
+  readonly beneficiaryPersonId?: PersonId;
+  /** Only expenses that still have no current allocation — the "who benefited?" backlog. */
+  readonly withoutAllocation?: boolean;
   /** Defaults to `DEFAULT_EXPENSE_LEDGER_LIMIT`; a listing is bounded even with no filter. */
   readonly limit?: number;
+  readonly offset?: number;
+}
+
+/** Builds the `WHERE` fragments shared by {@link listExpenses} and {@link countExpenses}. */
+function expenseLedgerConditions(filter: ListExpensesFilter): SQL[] {
+  const conditions: SQL[] = [];
+  if (filter.state !== undefined) conditions.push(eq(expenses.state, filter.state));
+  if (filter.paidByPersonId !== undefined) {
+    conditions.push(eq(expenses.paidByPersonId, filter.paidByPersonId));
+  }
+  if (filter.expenseId !== undefined) conditions.push(eq(expenses.id, filter.expenseId));
+  if (filter.category !== undefined) conditions.push(eq(expenses.category, filter.category));
+  if (filter.occurredFrom !== undefined) {
+    conditions.push(sql`${expenses.occurredAt} >= ${filter.occurredFrom}`);
+  }
+  if (filter.occurredTo !== undefined) {
+    conditions.push(sql`${expenses.occurredAt} < ${filter.occurredTo}`);
+  }
+  if (filter.search !== undefined && filter.search.trim().length > 0) {
+    const pattern = `%${filter.search.trim()}%`;
+    conditions.push(
+      sql`(${expenses.description} ilike ${pattern} or ${expenses.category} ilike ${pattern})`,
+    );
+  }
+  if (filter.withoutAllocation === true) {
+    conditions.push(
+      sql`not exists (
+        select 1 from ${allocations}
+        where ${allocations.expenseId} = ${expenses.id}
+          and ${allocations.supersededAt} is null
+      )`,
+    );
+  }
+  if (filter.beneficiaryPersonId !== undefined) {
+    // A person benefits either through a `person` line or through a `group` line's
+    // snapshotted expansion — both, because ADR-0009 makes the expansion the authoritative
+    // per-person share of a group line and looking only at direct lines would hide every
+    // flat expense from the person who owes for it.
+    conditions.push(
+      sql`exists (
+        select 1 from ${allocations}
+        join ${allocationLines} on ${allocationLines.allocationId} = ${allocations.id}
+        left join ${allocationLineGroupExpansions}
+          on ${allocationLineGroupExpansions.allocationLineId} = ${allocationLines.id}
+        where ${allocations.expenseId} = ${expenses.id}
+          and ${allocations.supersededAt} is null
+          and (
+            (${allocationLines.beneficiaryType} = 'person'
+              and ${allocationLines.beneficiaryId} = ${filter.beneficiaryPersonId})
+            or ${allocationLineGroupExpansions.personId} = ${filter.beneficiaryPersonId}
+          )
+      )`,
+    );
+  }
+  return conditions;
+}
+
+/** How many expenses match a filter across the whole ledger, not just the page. */
+export async function countExpenses(
+  exec: Executor,
+  filter: ListExpensesFilter = {},
+): Promise<number> {
+  const conditions = expenseLedgerConditions(filter);
+  const query = exec.select({ total: sql<number>`count(*)::int` }).from(expenses);
+  const [row] = await (conditions.length === 0 ? query : query.where(and(...conditions)));
+  return Number(row?.total ?? 0);
 }
 
 /** No filter narrows an unbounded table to a safe size on its own — this does. */
-const DEFAULT_EXPENSE_LEDGER_LIMIT = 200;
+export const DEFAULT_EXPENSE_LEDGER_LIMIT = 200;
 
 /**
  * The expense ledger, newest `occurred_at` first (`docs/roadmap.md` phase 13: "querying/
@@ -355,12 +438,7 @@ export async function listExpenses(
   exec: Executor,
   filter: ListExpensesFilter = {},
 ): Promise<ExpenseLedgerRow[]> {
-  const conditions = [];
-  if (filter.state !== undefined) conditions.push(eq(expenses.state, filter.state));
-  if (filter.paidByPersonId !== undefined) {
-    conditions.push(eq(expenses.paidByPersonId, filter.paidByPersonId));
-  }
-  if (filter.expenseId !== undefined) conditions.push(eq(expenses.id, filter.expenseId));
+  const conditions = expenseLedgerConditions(filter);
 
   const rows = await exec
     .select({
@@ -377,7 +455,8 @@ export async function listExpenses(
     .from(expenses)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(expenses.occurredAt), asc(expenses.id))
-    .limit(filter.limit ?? DEFAULT_EXPENSE_LEDGER_LIMIT);
+    .limit(filter.limit ?? DEFAULT_EXPENSE_LEDGER_LIMIT)
+    .offset(filter.offset ?? 0);
 
   if (rows.length === 0) return [];
 
@@ -636,15 +715,89 @@ export async function getSettlementById(
   return row === undefined ? null : (row as SettlementRow);
 }
 
+/** One row of the settlement register, with everything a surface needs to name it. */
+export interface SettlementRegisterRow extends SettlementRow {
+  readonly counterpartyName: string;
+  /** From the linked payment, which is what says which way the money actually moved. */
+  readonly direction: PaymentDirection;
+  readonly occurredAt: Date;
+  readonly paymentDescription: string;
+}
+
+/**
+ * Every recorded settlement, newest first (audit row 29).
+ *
+ * Direction comes from the linked payment rather than from the settlement row, because that
+ * is where it lives: a `Settlement` has no direction column, deliberately — the payment says
+ * whether money left or arrived (`schema.ts`, `settlements`).
+ */
+export async function listSettlementRegister(
+  exec: Executor,
+  options: {
+    readonly counterpartyPersonId?: PersonId;
+    readonly limit?: number;
+    readonly offset?: number;
+  } = {},
+): Promise<SettlementRegisterRow[]> {
+  const base = exec
+    .select({
+      id: settlements.id,
+      paymentId: settlements.paymentId,
+      counterpartyPersonId: settlements.counterpartyPersonId,
+      amount: settlements.amount,
+      reason: settlements.reason,
+      recordedAt: settlements.recordedAt,
+      counterpartyName: people.displayName,
+      direction: payments.direction,
+      occurredAt: payments.occurredAt,
+      paymentDescription: payments.rawDescription,
+    })
+    .from(settlements)
+    .innerJoin(people, eq(people.id, settlements.counterpartyPersonId))
+    .innerJoin(payments, eq(payments.id, settlements.paymentId));
+
+  const rows = await (
+    options.counterpartyPersonId === undefined
+      ? base
+      : base.where(eq(settlements.counterpartyPersonId, options.counterpartyPersonId))
+  )
+    .orderBy(desc(payments.occurredAt), desc(settlements.recordedAt))
+    .limit(options.limit ?? 100)
+    .offset(options.offset ?? 0);
+
+  return rows.map((row) => ({
+    ...row,
+    id: row.id as SettlementId,
+    paymentId: row.paymentId as PaymentId,
+    counterpartyPersonId: row.counterpartyPersonId as PersonId,
+    amount: row.amount as Paise,
+    direction: row.direction as PaymentDirection,
+  }));
+}
+
+export async function countSettlements(
+  exec: Executor,
+  counterpartyPersonId?: PersonId,
+): Promise<number> {
+  const base = exec.select({ total: sql<number>`count(*)::int` }).from(settlements);
+  const [row] = await (counterpartyPersonId === undefined
+    ? base
+    : base.where(eq(settlements.counterpartyPersonId, counterpartyPersonId)));
+  return Number(row?.total ?? 0);
+}
+
 export async function listPaymentExpenseLinksByPayment(
   exec: Executor,
   paymentId: PaymentId,
-): Promise<Array<{ amount: Paise }>> {
+): Promise<Array<{ expenseId: ExpenseId; amount: Paise }>> {
   const rows = await exec
-    .select({ amount: paymentExpenseLinks.amount })
+    .select({ expenseId: paymentExpenseLinks.expenseId, amount: paymentExpenseLinks.amount })
     .from(paymentExpenseLinks)
     .where(eq(paymentExpenseLinks.paymentId, paymentId));
-  return rows as Array<{ amount: Paise }>;
+  return rows.map((row) => ({
+    expenseId: row.expenseId as ExpenseId,
+    amount: row.amount as Paise,
+  }));
 }
 
 /**
@@ -666,6 +819,27 @@ export async function listExpensePaymentIds(
   return rows.map((row) => row.paymentId as PaymentId);
 }
 
+/** Every funding link on one expense, with its payment and portion — a read for authoring. */
+export async function listExpenseFundingLinks(
+  exec: Executor,
+  expenseId: ExpenseId,
+): Promise<Array<{ linkId: string; paymentId: PaymentId; amount: Paise }>> {
+  const rows = await exec
+    .select({
+      linkId: paymentExpenseLinks.id,
+      paymentId: paymentExpenseLinks.paymentId,
+      amount: paymentExpenseLinks.amount,
+    })
+    .from(paymentExpenseLinks)
+    .where(eq(paymentExpenseLinks.expenseId, expenseId))
+    .orderBy(asc(paymentExpenseLinks.createdAt), asc(paymentExpenseLinks.id));
+  return rows.map((row) => ({
+    linkId: row.linkId,
+    paymentId: row.paymentId as PaymentId,
+    amount: row.amount as Paise,
+  }));
+}
+
 export interface PaymentExpenseLinkDraft {
   readonly paymentId: PaymentId;
   readonly expenseId: ExpenseId;
@@ -682,12 +856,16 @@ export interface PaymentExpenseLinkDraft {
 export async function insertPaymentExpenseLink(
   exec: Executor,
   draft: PaymentExpenseLinkDraft,
-): Promise<void> {
-  await exec.insert(paymentExpenseLinks).values({
-    paymentId: draft.paymentId,
-    expenseId: draft.expenseId,
-    amount: draft.amount,
-  });
+): Promise<string> {
+  const [row] = await exec
+    .insert(paymentExpenseLinks)
+    .values({
+      paymentId: draft.paymentId,
+      expenseId: draft.expenseId,
+      amount: draft.amount,
+    })
+    .returning({ id: paymentExpenseLinks.id });
+  return requireRow(row, 'payment_expense_links').id;
 }
 
 /* ======================================================================== adjustments */
@@ -967,7 +1145,7 @@ export async function listExpenseItemContexts(
   const rows = await exec
     .select({ id: expenseItems.id, expenseId: expenseItems.expenseId, amount: expenseItems.amount })
     .from(expenseItems)
-    .where(eq(expenseItems.expenseId, expenseId))
+    .where(and(eq(expenseItems.expenseId, expenseId), isNull(expenseItems.supersededAt)))
     .orderBy(asc(expenseItems.id));
   return rows.map((row) => ({
     expenseItemId: row.id as ExpenseItemId,
@@ -2096,7 +2274,9 @@ export async function listExpenseItems(
   const rows = await exec
     .select({ id: expenseItems.id, amount: expenseItems.amount })
     .from(expenseItems)
-    .where(eq(expenseItems.expenseId, expenseId))
+    // Current items only: a superseded row is kept so an old allocation line still resolves,
+    // but it is not part of what this expense is made of now (audit row 17).
+    .where(and(eq(expenseItems.expenseId, expenseId), isNull(expenseItems.supersededAt)))
     .orderBy(asc(expenseItems.id));
   return rows as Array<{ id: string; amount: Paise }>;
 }
@@ -2109,6 +2289,8 @@ export interface ExpenseItemRow {
   readonly amount: Paise;
   readonly quantity: string;
   readonly receiptItemId: ReceiptItemId | null;
+  /** Non-null once a corrected breakdown replaced this row (audit row 17). */
+  readonly supersededAt: Date | null;
 }
 
 export interface InsertExpenseItemDraft {
@@ -2147,15 +2329,23 @@ export async function insertExpenseItems(
   return rows.map((row) => row.id as ExpenseItemId);
 }
 
-/** Every `ExpenseItem` for an expense, in the shape a caller reading them back needs. */
+/**
+ * An expense's **current** item set, in the shape a caller reading them back needs.
+ *
+ * Pass `includeSuperseded` to see the corrected-away rows too — a history panel wants them;
+ * everything financial wants only what the expense is made of now.
+ */
 export async function listExpenseItemsByExpense(
   exec: Executor,
   expenseId: ExpenseId,
+  options: { readonly includeSuperseded?: boolean } = {},
 ): Promise<ExpenseItemRow[]> {
+  const conditions = [eq(expenseItems.expenseId, expenseId)];
+  if (options.includeSuperseded !== true) conditions.push(isNull(expenseItems.supersededAt));
   const rows = await exec
     .select()
     .from(expenseItems)
-    .where(eq(expenseItems.expenseId, expenseId))
+    .where(and(...conditions))
     .orderBy(asc(expenseItems.createdAt), asc(expenseItems.id));
   return rows.map((row) => ({
     id: row.id as ExpenseItemId,
@@ -2164,7 +2354,42 @@ export async function listExpenseItemsByExpense(
     amount: row.amount as Paise,
     quantity: row.quantity,
     receiptItemId: row.receiptItemId as ReceiptItemId | null,
+    supersededAt: row.supersededAt,
   }));
+}
+
+/**
+ * Stamps `superseded_at` on a set of items, so a corrected breakdown replaces rather than
+ * edits (audit row 17).
+ *
+ * The rows survive: `allocation_lines.expense_item_id` still points at them, and an old
+ * allocation version has to stay explicable. `services.correctExpenseItems` refuses the
+ * correction outright when an item refund has been attributed to any of these items, so a
+ * superseded row is never one an `ExpenseAdjustmentItem` depends on.
+ */
+export async function supersedeExpenseItems(
+  exec: Executor,
+  itemIds: readonly ExpenseItemId[],
+  supersededAt: Date,
+): Promise<void> {
+  if (itemIds.length === 0) return;
+  await exec
+    .update(expenseItems)
+    .set({ supersededAt })
+    .where(inArray(expenseItems.id, [...itemIds]));
+}
+
+/** How many item-refund attributions reference any of these items. Zero permits correction. */
+export async function countAdjustmentItemsForExpenseItems(
+  exec: Executor,
+  itemIds: readonly ExpenseItemId[],
+): Promise<number> {
+  if (itemIds.length === 0) return 0;
+  const [row] = await exec
+    .select({ total: sql<number>`count(*)::int` })
+    .from(expenseAdjustmentItems)
+    .where(inArray(expenseAdjustmentItems.expenseItemId, [...itemIds]));
+  return Number(row?.total ?? 0);
 }
 
 /**
@@ -4388,4 +4613,190 @@ function requireRow<T>(row: T | undefined, table: string): T {
     throw new Error(`Expected ${table} to return the inserted row, got none.`);
   }
   return row;
+}
+
+/**
+ * The three totals that decide whether an expense's allocation is up to date (audit row 25).
+ *
+ * Aggregation only. Whether the numbers *mean* a distribution is pending is
+ * `domain.undistributedAmount`'s call, made by the service — this returns the sums it needs
+ * per expense, so the rule stays in one place rather than becoming a `WHERE` clause that
+ * approximates it.
+ */
+export interface ExpenseDistributionTotals {
+  readonly expenseId: ExpenseId;
+  readonly grossAmount: Paise;
+  readonly adjustmentTotal: Paise;
+  /** The **current** allocation's lines; zero when the expense has no allocation yet. */
+  readonly currentLineTotal: Paise;
+  readonly hasCurrentAllocation: boolean;
+}
+
+export async function loadExpenseDistributionTotals(
+  exec: Executor,
+  expenseIds: readonly ExpenseId[],
+): Promise<ExpenseDistributionTotals[]> {
+  if (expenseIds.length === 0) return [];
+  const ids = [...expenseIds];
+
+  const [expenseRows, adjustmentRows, allocationRows] = await Promise.all([
+    exec
+      .select({ id: expenses.id, amount: expenses.amount })
+      .from(expenses)
+      .where(inArray(expenses.id, ids)),
+    exec
+      .select({
+        expenseId: expenseAdjustments.originalExpenseId,
+        total: sql<string>`coalesce(sum(${expenseAdjustments.amount}), 0)`,
+      })
+      .from(expenseAdjustments)
+      .where(inArray(expenseAdjustments.originalExpenseId, ids))
+      .groupBy(expenseAdjustments.originalExpenseId),
+    exec
+      .select({
+        expenseId: allocations.expenseId,
+        total: sql<string>`coalesce(sum(${allocationLines.amount}), 0)`,
+      })
+      .from(allocations)
+      .leftJoin(allocationLines, eq(allocationLines.allocationId, allocations.id))
+      .where(and(inArray(allocations.expenseId, ids), isNull(allocations.supersededAt)))
+      .groupBy(allocations.expenseId),
+  ]);
+
+  const adjustments = new Map(adjustmentRows.map((row) => [row.expenseId, BigInt(row.total)]));
+  const allocated = new Map(allocationRows.map((row) => [row.expenseId, BigInt(row.total)]));
+
+  return expenseRows.map((row) => ({
+    expenseId: row.id as ExpenseId,
+    grossAmount: row.amount as Paise,
+    adjustmentTotal: (adjustments.get(row.id) ?? 0n) as Paise,
+    currentLineTotal: (allocated.get(row.id) ?? 0n) as Paise,
+    hasCurrentAllocation: allocated.has(row.id),
+  }));
+}
+
+/* ------------------------------------------------------ Splitwise re-sync (audit row 40) */
+
+export interface SplitwiseExpenseDetailRow {
+  readonly id: SplitwiseExpenseId;
+  readonly expenseId: ExpenseId;
+  readonly splitwiseExpenseId: string;
+  readonly syncedAt: Date;
+  readonly ourSnapshot: unknown;
+  readonly theirSnapshot: unknown;
+  readonly syncStatus: SplitwiseExpenseSyncStatus;
+}
+
+export async function getSplitwiseExpenseRow(
+  exec: Executor,
+  id: SplitwiseExpenseId,
+): Promise<SplitwiseExpenseDetailRow | null> {
+  const [row] = await exec.select().from(splitwiseExpenses).where(eq(splitwiseExpenses.id, id));
+  return row === undefined
+    ? null
+    : {
+        id: row.id as SplitwiseExpenseId,
+        expenseId: row.expenseId as ExpenseId,
+        splitwiseExpenseId: row.splitwiseExpenseId,
+        syncedAt: row.syncedAt,
+        ourSnapshot: row.ourSnapshot,
+        theirSnapshot: row.theirSnapshot,
+        syncStatus: row.syncStatus as SplitwiseExpenseSyncStatus,
+      };
+}
+
+/**
+ * Every synced row a person could choose to repair — `stale` (our side moved) or `drifted`
+ * (theirs did).
+ *
+ * `synced` rows are excluded: re-syncing a row both ledgers agree about would write a
+ * duplicate into somebody else's ledger for nothing.
+ */
+export async function listResyncableSplitwiseExpenses(exec: Executor): Promise<
+  Array<{
+    splitwiseExpenseId: SplitwiseExpenseId;
+    expenseId: ExpenseId;
+    externalId: string;
+    syncStatus: string;
+    syncedAt: Date;
+    syncedSnapshot: unknown;
+    currentNetAmount: string;
+    description: string | null;
+  }>
+> {
+  const rows = await exec
+    .select({
+      id: splitwiseExpenses.id,
+      expenseId: splitwiseExpenses.expenseId,
+      externalId: splitwiseExpenses.splitwiseExpenseId,
+      syncStatus: splitwiseExpenses.syncStatus,
+      syncedAt: splitwiseExpenses.syncedAt,
+      ourSnapshot: splitwiseExpenses.ourSnapshot,
+      description: expenses.description,
+      grossAmount: expenses.amount,
+    })
+    .from(splitwiseExpenses)
+    .innerJoin(expenses, eq(expenses.id, splitwiseExpenses.expenseId))
+    .where(inArray(splitwiseExpenses.syncStatus, ['stale', 'drifted']))
+    .orderBy(desc(splitwiseExpenses.syncedAt));
+  if (rows.length === 0) return [];
+
+  const adjustmentRows = await exec
+    .select({
+      expenseId: expenseAdjustments.originalExpenseId,
+      total: sql<string>`coalesce(sum(${expenseAdjustments.amount}), 0)`,
+    })
+    .from(expenseAdjustments)
+    .where(
+      inArray(
+        expenseAdjustments.originalExpenseId,
+        rows.map((row) => row.expenseId),
+      ),
+    )
+    .groupBy(expenseAdjustments.originalExpenseId);
+  const adjustments = new Map(adjustmentRows.map((row) => [row.expenseId, BigInt(row.total)]));
+
+  return rows.map((row) => ({
+    splitwiseExpenseId: row.id as SplitwiseExpenseId,
+    expenseId: row.expenseId as ExpenseId,
+    externalId: row.externalId,
+    syncStatus: row.syncStatus,
+    syncedAt: row.syncedAt,
+    syncedSnapshot: row.ourSnapshot,
+    // `domain.netAmount` does the subtraction, exactly as the ledger read does.
+    currentNetAmount: netAmount(row.grossAmount as Paise, [
+      (adjustments.get(row.expenseId) ?? 0n) as Paise,
+    ]).toString(),
+    description: row.description,
+  }));
+}
+
+/**
+ * Replaces what a `SplitwiseExpense` row records about the last successful push.
+ *
+ * The only update this table permits beyond the drift/stale status flags, and it exists for
+ * one caller: `services.resyncExpenseToSplitwise`, after Splitwise has already accepted the
+ * corrected entry. Nothing here can invent a sync that did not happen.
+ */
+export async function updateSplitwiseExpenseSync(
+  exec: Executor,
+  id: SplitwiseExpenseId,
+  next: {
+    readonly splitwiseExpenseId: string;
+    readonly syncedAt: Date;
+    readonly ourSnapshot: unknown;
+    readonly theirSnapshot: unknown;
+    readonly syncStatus: SplitwiseExpenseSyncStatus;
+  },
+): Promise<void> {
+  await exec
+    .update(splitwiseExpenses)
+    .set({
+      splitwiseExpenseId: next.splitwiseExpenseId,
+      syncedAt: next.syncedAt,
+      ourSnapshot: next.ourSnapshot,
+      theirSnapshot: next.theirSnapshot,
+      syncStatus: next.syncStatus,
+    })
+    .where(eq(splitwiseExpenses.id, id));
 }

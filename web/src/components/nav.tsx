@@ -3,19 +3,31 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useShortcuts } from "@/components/app-shell/shortcuts";
-import { useReviewQueue } from "@/lib/queries";
+import { Button } from "@/components/ui/button";
+import { useReviewQueue, useSession, useSignOut } from "@/lib/queries";
+import type { SessionState } from "@/lib/types";
 
 /**
- * One row, one entry per workflow — six, matching `CLAUDE.md`'s six pillars, with evidence and
- * receipts reached from the queue and the ledger rather than given a seventh tab of their own
- * (a document is always about a payment or an expense; a list of loose documents is not a
- * workflow).
+ * One row, one entry per workflow, with evidence and receipts reached from the queue and the
+ * ledger rather than given tabs of their own (a document is always about a payment or an
+ * expense; a list of loose documents is not a workflow).
+ *
+ * Phase 21 shipped six, matching `CLAUDE.md`'s six pillars. **Payments** joins them because the
+ * pillars all start from a cash movement, and until this row existed there was no screen where
+ * an imported statement line could be seen at all — the audit's first finding. **Evidence** is
+ * here for the same reason: a document attached to nothing only ever surfaced if the review
+ * queue happened to raise it, and a library is not a work queue. **Setup** sits
+ * apart with **Analytics** and **Automation**, in a quieter second group: none of the three is
+ * a workflow to return to daily. Setup changes what the ledger can say rather than what it
+ * says; analytics only reads; and automation is configuration for the workflows above.
  *
  * The review count is the product's only live figure outside a screen: it is what makes the
  * queue a place you go back to. It is a count, not money, so it is never toned `debit`.
  */
 const SECTIONS = [
   { href: "/review", label: "Review" },
+  { href: "/payments", label: "Payments" },
+  { href: "/evidence", label: "Evidence" },
   { href: "/reconciliation", label: "Reconciliation" },
   { href: "/expenses", label: "Expenses" },
   { href: "/balances", label: "Balances" },
@@ -23,10 +35,19 @@ const SECTIONS = [
   { href: "/proof-packs", label: "Proof packs" },
 ] as const;
 
+/** Reached often enough to belong in the chrome, rarely enough not to be a workflow tab. */
+const UTILITIES = [
+  { href: "/analytics", label: "Analytics" },
+  { href: "/automation", label: "Automation" },
+  { href: "/setup", label: "Setup" },
+] as const;
+
 export function Nav() {
   const pathname = usePathname();
   const { openCommandPalette } = useShortcuts();
   const queue = useReviewQueue({ limit: 1 });
+  const session = useSession();
+  const signOut = useSignOut();
 
   return (
     <header className="border-b border-rule bg-paper">
@@ -46,6 +67,11 @@ export function Nav() {
             </span>
             <span className="sr-only">Open the command palette</span>
           </button>
+          <SessionBadge
+            state={session.data}
+            signingOut={signOut.isPending}
+            onSignOut={() => signOut.mutate()}
+          />
         </div>
         <nav aria-label="Main" className="flex flex-wrap gap-x-6 gap-y-2 text-body">
           {SECTIONS.map((section) => {
@@ -72,8 +98,59 @@ export function Nav() {
               </Link>
             );
           })}
+          {UTILITIES.map((utility) => {
+            const active = pathname?.startsWith(utility.href) ?? false;
+            return (
+              <Link
+                key={utility.href}
+                href={utility.href}
+                aria-current={active ? "page" : undefined}
+                className={`border-b-2 pb-1 transition-colors ${
+                  active
+                    ? "border-accent font-medium text-ink"
+                    : "border-transparent text-ink-faint hover:text-ink"
+                }`}
+              >
+                {utility.label}
+              </Link>
+            );
+          })}
         </nav>
       </div>
     </header>
+  );
+}
+
+/**
+ * Who this browser is, and the way out.
+ *
+ * When the API is not enforcing authentication it says so rather than showing nothing: an
+ * unlocked ledger that looks locked is the more dangerous of the two mistakes.
+ */
+function SessionBadge({
+  state,
+  signingOut,
+  onSignOut,
+}: {
+  state: SessionState | undefined;
+  signingOut: boolean;
+  onSignOut: () => void;
+}) {
+  if (state === undefined) return null;
+  if (!state.authenticationRequired) {
+    return (
+      <span className="text-micro text-ink-faint" title="AUTH_REQUIRED is off on this API">
+        Not password-protected
+      </span>
+    );
+  }
+  if (state.session === null) return null;
+  return (
+    <span className="flex items-center gap-2 text-micro text-ink-faint">
+      {state.session.email}
+      <Button variant="link" size="sm" disabled={signingOut} onClick={onSignOut}>
+        {signingOut ? "Signing out…" : "Sign out"}
+      </Button>
+    </span>
   );
 }

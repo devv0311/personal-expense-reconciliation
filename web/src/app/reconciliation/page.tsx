@@ -74,7 +74,7 @@ export default function ReconciliationPage() {
                     <TableCell className="whitespace-nowrap">
                       <Link
                         href={`/reconciliation/${run.id}`}
-                        className="text-accent underline-offset-2 hover:underline"
+                        className="text-accent underline underline-offset-2"
                       >
                         {formatPeriod(run.periodStart, run.periodEnd)}
                       </Link>
@@ -98,7 +98,7 @@ export default function ReconciliationPage() {
                 <li key={run.id} className="border-b border-rule py-3 last:border-b-0">
                   <Link
                     href={`/reconciliation/${run.id}`}
-                    className="text-accent underline-offset-2 hover:underline"
+                    className="text-accent underline underline-offset-2"
                   >
                     {formatPeriod(run.periodStart, run.periodEnd)}
                   </Link>

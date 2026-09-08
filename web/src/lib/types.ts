@@ -33,6 +33,14 @@ export interface ExpenseLedgerRow {
   readonly state: ExpenseState;
 }
 
+export interface ExpensePage {
+  readonly expenses: readonly ExpenseLedgerRow[];
+  /** How many match across the whole ledger, not how many were returned (audit row 32). */
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+}
+
 export type ObligationEvidenceStatus =
   "open_unconfirmed" | "believed_settled_unconfirmed_by_ledger" | "settled_confirmed";
 
@@ -43,12 +51,36 @@ export interface ObligationContribution {
   readonly expenseId: string;
 }
 
+/** One recorded repayment between the two people, as the balance read reports it. */
+export interface BalanceSettlementLine {
+  readonly settlementId: string;
+  readonly paymentId: string;
+  readonly fromPersonId: string;
+  readonly toPersonId: string;
+  readonly amount: string;
+  readonly occurredAt: string;
+  readonly reason: string | null;
+}
+
 export interface BalanceResult {
   readonly personAId: string;
   readonly personBId: string;
   readonly netBalance: string;
   readonly evidenceStatus: ObligationEvidenceStatus;
   readonly contributions: readonly ObligationContribution[];
+  /**
+   * The repayments already netted into `netBalance`.
+   *
+   * Gross obligations minus these settlements **is** the net, so a screen quoting one figure
+   * can show both halves of it rather than leaving the subtraction unexplainable.
+   */
+  readonly settlements: readonly BalanceSettlementLine[];
+  /**
+   * Contributing expenses whose refund is recorded but not yet distributed — a caveat, not a
+   * correction. `netBalance` is exactly what the current allocations say, and these have a
+   * reduction no allocation reflects yet.
+   */
+  readonly pendingRefundExpenseIds: readonly string[];
 }
 
 export interface PersonSummary {
@@ -298,6 +330,8 @@ export interface EvidenceRecord {
   readonly linkedPaymentId: string | null;
   readonly linkedExpenseId: string | null;
   readonly createdAt: string;
+  /** The `Receipt` extracted from this document, if one was. A pointer, not the extraction. */
+  readonly receiptId: string | null;
 }
 
 export interface EvidenceMatchesResult {
@@ -714,4 +748,631 @@ export interface ProofPackPreview {
   readonly evidenceReferences: readonly ProofPackEvidenceRef[];
   readonly warnings: readonly ProofPackWarning[];
   readonly pack: ProofPack;
+}
+
+/* ------------------------------------------------------------------ the payment workspace */
+
+export const PAYMENT_DIRECTIONS = ["debit", "credit"] as const;
+export type PaymentDirection = (typeof PAYMENT_DIRECTIONS)[number];
+
+export const PAYMENT_CHANNELS = ["upi", "bank_transfer", "card", "cash", "other"] as const;
+export type PaymentChannel = (typeof PAYMENT_CHANNELS)[number];
+
+export const PAYMENT_COUNTERPARTY_TYPES = [
+  "merchant",
+  "person",
+  "internal_account",
+  "investment_instrument",
+  "unknown",
+] as const;
+export type PaymentCounterpartyType = (typeof PAYMENT_COUNTERPARTY_TYPES)[number];
+
+export const PAYMENT_REFERENCE_TYPES = [
+  "upi_utr",
+  "upi_rrn",
+  "bank_reference",
+  "card_reference",
+  "merchant_order_id",
+  "cheque_number",
+  "other",
+] as const;
+export type PaymentReferenceType = (typeof PAYMENT_REFERENCE_TYPES)[number];
+
+export const PAYMENT_STATES = ["imported", "normalized", "linked", "ignored"] as const;
+export type PaymentState = (typeof PAYMENT_STATES)[number];
+
+/**
+ * ADR-0017's cash-flow lifecycle, which runs beside the older `imported → normalized → linked`
+ * one rather than replacing it. A payment has a position in both at once.
+ */
+export const CASH_FLOW_STATES = [
+  "imported",
+  "normalized",
+  "cash_flow_classified",
+  "approved",
+] as const;
+export type CashFlowState = (typeof CASH_FLOW_STATES)[number];
+
+export const CASH_FLOW_CATEGORIES = [
+  "PEER_SETTLEMENT",
+  "REFUND",
+  "INTERNAL_TRANSFER",
+  "EXTERNAL_INFLOW",
+] as const;
+export type CashFlowCategory = (typeof CASH_FLOW_CATEGORIES)[number];
+
+/** The two the schema's `CHECK` allows only on a credit (ADR-0017 (cash balance), 17.2). */
+export const CREDIT_ONLY_CASH_FLOW_CATEGORIES: readonly CashFlowCategory[] = [
+  "REFUND",
+  "EXTERNAL_INFLOW",
+];
+
+export const ACCOUNT_TYPES = ["bank", "upi", "card", "cash", "wallet"] as const;
+export type AccountType = (typeof ACCOUNT_TYPES)[number];
+
+/**
+ * One movement, with everything the ledger can say about what explains it.
+ *
+ * `explainedTotal` and `unexplainedTotal` are `domain.explainedAmount`'s own answers, computed
+ * by the service and quoted here — this package subtracts nothing (ADR-0048). A zero
+ * `unexplainedTotal` on a movement nobody has classified is not a verified zero, which is why
+ * the state fields travel beside the figure rather than being collapsed into it.
+ */
+export interface PaymentWorkspaceItem {
+  readonly id: string;
+  readonly accountId: string;
+  readonly accountName: string;
+  readonly importBatchId: string;
+  readonly amount: string;
+  readonly currency: string;
+  readonly direction: PaymentDirection;
+  readonly occurredAt: string;
+  readonly rawDescription: string;
+  readonly channel: string;
+  readonly counterpartyType: PaymentCounterpartyType;
+  readonly counterpartyId: string | null;
+  readonly counterpartyName: string | null;
+  readonly externalReference: string | null;
+  readonly referenceType: string | null;
+  readonly sourceSystem: string | null;
+  readonly state: PaymentState;
+  readonly ignoredReason: string | null;
+  readonly cashFlowCategory: CashFlowCategory | null;
+  readonly cashFlowState: CashFlowState;
+  readonly cashFlowApprovedAt: string | null;
+  readonly cashFlowApprovedBy: string | null;
+  readonly expenseLinkTotal: string;
+  readonly settlementTotal: string;
+  readonly adjustmentTotal: string;
+  readonly evidenceCount: number;
+  readonly expenseLinkCount: number;
+  readonly settlementCount: number;
+  readonly explainedTotal: string;
+  readonly unexplainedTotal: string;
+  readonly isDuplicateRepresentation: boolean;
+}
+
+export interface PaymentListResult {
+  readonly payments: readonly PaymentWorkspaceItem[];
+  /** Matching rows in the whole ledger, not on this page (audit row 32). */
+  readonly total: number;
+  /** False when `onlyUnexplained` narrowed the page after the count — say "at least", not "of". */
+  readonly filteredTotalIsExact: boolean;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+export interface CounterpartyOptions {
+  readonly merchants: readonly { readonly id: string; readonly canonicalName: string }[];
+  readonly people: readonly { readonly id: string; readonly displayName: string }[];
+  readonly accounts: readonly { readonly id: string; readonly name: string }[];
+}
+
+export interface CashFlowDecisionResult {
+  readonly paymentId: string;
+  readonly cashFlowState: CashFlowState;
+  readonly cashFlowCategory: CashFlowCategory | null;
+}
+
+/* -------------------------------------------------------------------- statement imports */
+
+export interface ImportBatchSummary {
+  readonly id: string;
+  readonly sourceChannel: string;
+  readonly fileReference: string | null;
+  readonly contentHash: string | null;
+  readonly parserVersion: string | null;
+  readonly rowCount: number | null;
+  readonly importedAt: string;
+  readonly paymentCount: number;
+  readonly ignoredCount: number;
+}
+
+export interface ImportHistoryResult {
+  readonly batches: readonly ImportBatchSummary[];
+  readonly total: number;
+}
+
+export interface ImportedDuplicate {
+  readonly paymentId: string;
+  readonly duplicateOfPaymentId: string;
+  readonly externalReference: string;
+}
+
+/**
+ * `already_imported` is a recognised no-op, not a failure: the file's content hash matched a
+ * batch already on record, so nothing was written twice (`invariants.md` #10).
+ */
+export type ImportStatementResult =
+  | {
+      readonly outcome: "imported";
+      readonly importBatchId: string;
+      readonly contentHash: string;
+      readonly paymentIds: readonly string[];
+      readonly duplicates: readonly ImportedDuplicate[];
+    }
+  | {
+      readonly outcome: "already_imported";
+      readonly importBatchId: string;
+      readonly contentHash: string;
+      readonly previouslyImportedAt: string;
+    };
+
+export interface NormalizePaymentsResult {
+  readonly normalizedPaymentIds: readonly string[];
+  readonly channelRefinedCount: number;
+  readonly merchantResolvedCount: number;
+}
+
+/** One entry per payment offered. A rejected answer is a fact about that payment, not the run. */
+export type ClassificationOutcome =
+  | { readonly outcome: "skipped"; readonly paymentId: string; readonly reason: string }
+  | {
+      readonly outcome: "internal_transfer";
+      readonly paymentId: string;
+      readonly counterLegPaymentId: string;
+    }
+  | {
+      readonly outcome: "proposed";
+      readonly paymentId: string;
+      readonly inferenceId: string;
+      readonly proposedKind: string;
+      readonly confidence: string;
+      readonly expenseId: string | null;
+      readonly expenseState: ExpenseState | null;
+    }
+  | {
+      readonly outcome: "rejected";
+      readonly paymentId: string;
+      readonly reason: string;
+      readonly code: string;
+    };
+
+export interface ClassifyPaymentsResult {
+  readonly outcomes: readonly ClassificationOutcome[];
+}
+
+/* ------------------------------------------------------------------------- master data */
+
+export interface PersonDetail {
+  readonly id: string;
+  readonly displayName: string;
+  readonly splitwiseUserId: string | null;
+  readonly notes: string | null;
+  readonly archivedAt: string | null;
+  readonly isUser: boolean;
+}
+
+export interface MerchantDetail {
+  readonly id: string;
+  readonly canonicalName: string;
+  readonly defaultCategory: string | null;
+  readonly archivedAt: string | null;
+  readonly aliases: readonly { readonly id: string; readonly rawPattern: string }[];
+}
+
+export interface GroupMembershipDetail {
+  readonly id: string;
+  readonly personId: string;
+  readonly displayName: string;
+  readonly joinedAt: string;
+  readonly leftAt: string | null;
+}
+
+export interface GroupDetail {
+  readonly id: string;
+  readonly name: string;
+  readonly type: string | null;
+  readonly archivedAt: string | null;
+  readonly memberships: readonly GroupMembershipDetail[];
+}
+
+/* ------------------------------------------------------------------- expense authoring */
+
+export const EXPENSE_RELATIONSHIP_TYPES = [
+  "personal",
+  "shared",
+  "paid_on_behalf",
+  "gift",
+  "household_shared_flat",
+] as const;
+export type ExpenseRelationshipType = (typeof EXPENSE_RELATIONSHIP_TYPES)[number];
+
+export const ALLOCATION_METHODS = [
+  "equal",
+  "exact",
+  "percentage",
+  "item_based",
+  "quantity_based",
+  "custom",
+] as const;
+export type AllocationMethod = (typeof ALLOCATION_METHODS)[number];
+
+export interface BeneficiaryRef {
+  readonly type: "person" | "group";
+  readonly id: string;
+}
+
+export interface CreateExpenseResult {
+  readonly expenseId: string;
+  readonly state: ExpenseState;
+  readonly fundedByPaymentIds: readonly string[];
+  /** True when nobody's payment in this ledger funded it — somebody else paid (ADR-0006). */
+  readonly externallyFunded: boolean;
+}
+
+export interface ExpenseFundingLink {
+  readonly linkId: string;
+  readonly paymentId: string;
+  readonly amount: string;
+}
+
+/* ------------------------------------------------------------------------ settlements */
+
+export interface SettlementRegisterEntry {
+  readonly id: string;
+  readonly paymentId: string;
+  readonly counterpartyPersonId: string;
+  readonly counterpartyName: string;
+  readonly amount: string;
+  readonly reason: string | null;
+  readonly recordedAt: string;
+  /** From the linked payment, which is what says which way the money actually moved. */
+  readonly direction: PaymentDirection;
+  readonly occurredAt: string;
+  readonly paymentDescription: string;
+}
+
+export interface SettlementRegisterResult {
+  readonly settlements: readonly SettlementRegisterEntry[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+/* --------------------------------------------------------------------------- history */
+
+export interface AllocationVersionLine {
+  readonly beneficiaryType: string;
+  readonly beneficiaryId: string;
+  readonly beneficiaryName: string | null;
+  readonly amount: string;
+  readonly expenseItemId: string | null;
+}
+
+/** The current version is the single row whose `supersededAt` is null. */
+export interface AllocationVersion {
+  readonly allocationId: string;
+  readonly method: string;
+  readonly decidedAt: string;
+  readonly decidedBy: string;
+  readonly supersededAt: string | null;
+  readonly lines: readonly AllocationVersionLine[];
+}
+
+/**
+ * One event from the trail reads (`GET /api/audit/...`, `.../history`).
+ *
+ * Distinct from `AuditEventRecord` because it is a different `SELECT`: the trail reads carry
+ * `source` and the monotonic `sequence` the log is ordered by, and a type that pretended both
+ * shapes were one would have a surface reading a field the API never sent.
+ */
+export interface AuditTrailEvent {
+  readonly entityType: string;
+  readonly entityId: string;
+  readonly action: string;
+  readonly oldValue: unknown;
+  readonly newValue: unknown;
+  readonly actor: string;
+  readonly source: string | null;
+  readonly reason: string | null;
+  readonly occurredAt: string;
+  readonly sequence: string;
+}
+
+export interface ExpenseHistoryResult {
+  readonly expenseId: string;
+  readonly allocationVersions: readonly AllocationVersion[];
+  readonly events: readonly AuditTrailEvent[];
+  readonly sources: {
+    readonly allocationIds: readonly string[];
+    readonly adjustmentIds: readonly string[];
+    readonly evidenceIds: readonly string[];
+    readonly settlementIds: readonly string[];
+  };
+}
+
+/* --------------------------------------------------------------------- evidence library */
+
+export const EVIDENCE_TYPES = [
+  "bank_line",
+  "upi_notification",
+  "receipt_image",
+  "screenshot",
+  "email_receipt",
+  "manual_note",
+] as const;
+export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
+
+/** Everything except `manual_note`, which is typed rather than uploaded. */
+export const EVIDENCE_DOCUMENT_TYPES = EVIDENCE_TYPES.filter((type) => type !== "manual_note");
+
+/** The two shapes the deterministic parser knows how to read (`NOTIFICATION_EVIDENCE_TYPES`). */
+export const NOTIFICATION_EVIDENCE_TYPES = ["bank_line", "upi_notification"] as const;
+export type NotificationEvidenceType = (typeof NOTIFICATION_EVIDENCE_TYPES)[number];
+
+export const EVIDENCE_NOTE_KINDS = ["documentation", "settlement_claim"] as const;
+export type EvidenceNoteKind = (typeof EVIDENCE_NOTE_KINDS)[number];
+
+export interface EvidenceLibraryRow {
+  readonly id: string;
+  readonly type: EvidenceType;
+  readonly noteKind: EvidenceNoteKind | null;
+  readonly storageRef: string | null;
+  readonly mediaType: string | null;
+  readonly byteSize: number | null;
+  readonly rawText: string | null;
+  readonly capturedAt: string;
+  readonly createdAt: string;
+  readonly linkedPaymentId: string | null;
+  readonly linkedExpenseId: string | null;
+  /** Whether a `Receipt` was extracted from it — a flag, never the extraction itself. */
+  readonly hasReceipt: boolean;
+  readonly hasObservation: boolean;
+}
+
+export interface EvidenceLibraryResult {
+  readonly evidence: readonly EvidenceLibraryRow[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+/* ---------------------------------------------------------------------------- session */
+
+export interface SessionIdentity {
+  readonly userId: string;
+  readonly personId: string | null;
+  readonly email: string;
+  readonly actor: string;
+  readonly expiresAt: string;
+}
+
+export interface SessionState {
+  /** `null` means nobody is signed in — an answer, not a failure to answer. */
+  readonly session: SessionIdentity | null;
+  /** Whether a password exists at all. False on a fresh installation. */
+  readonly authenticationConfigured: boolean;
+  /** Whether this API process is enforcing it. A local run may deliberately not be. */
+  readonly authenticationRequired: boolean;
+}
+
+/* --------------------------------------------------------------------- Splitwise sync */
+
+export interface ResyncCandidate {
+  readonly splitwiseExpenseId: string;
+  readonly expenseId: string;
+  readonly externalId: string;
+  readonly syncStatus: string;
+  readonly syncedAt: string;
+  /** What was pushed when it was last synced — the figure Splitwise still holds. */
+  readonly syncedSnapshot: unknown;
+  /** The expense's current net, which is what a re-sync would push. */
+  readonly currentNetAmount: string;
+  readonly description: string | null;
+}
+
+export interface ResyncResult {
+  readonly splitwiseExpenseId: string;
+  readonly syncStatus: "synced";
+  readonly previousSnapshot: unknown;
+  readonly pushedNetAmount: string;
+}
+
+/* -------------------------------------------------------------------------- analytics */
+
+export interface AnalyticsPeriod {
+  readonly start: string;
+  /** Exclusive. */
+  readonly end: string;
+}
+
+/**
+ * What an aggregate deliberately leaves out, carried with every result.
+ *
+ * Not decoration: a total shown without these is asserting more precision than the ledger has.
+ */
+export interface AnalyticsCaveats {
+  readonly pendingRefundExpenseIds: readonly string[];
+  readonly excludes: readonly string[];
+}
+
+export interface CategorySpend {
+  readonly category: string | null;
+  readonly netTotal: string;
+  readonly grossTotal: string;
+  readonly expenseCount: number;
+}
+
+export interface CategorySpendResult {
+  readonly period: AnalyticsPeriod;
+  readonly categories: readonly CategorySpend[];
+  readonly netTotal: string;
+  readonly caveats: AnalyticsCaveats;
+}
+
+export interface MonthlySpend {
+  readonly month: string;
+  readonly netTotal: string;
+  readonly expenseCount: number;
+}
+
+export interface MonthlySpendResult {
+  readonly period: AnalyticsPeriod;
+  readonly months: readonly MonthlySpend[];
+  readonly caveats: AnalyticsCaveats;
+}
+
+export interface OwnSpendResult {
+  readonly period: AnalyticsPeriod;
+  /** The user's own share — what they actually spent, as distinct from what passed through. */
+  readonly ownShare: string;
+  readonly paidByUser: string;
+  readonly frontedForOthers: string;
+  readonly caveats: AnalyticsCaveats;
+}
+
+export interface CounterpartyBalance {
+  readonly personId: string;
+  readonly displayName: string;
+  /** Positive means they owe the user; negative the reverse. Quoted, never derived. */
+  readonly netBalance: string;
+  readonly contributingExpenseCount: number;
+}
+
+export interface OutstandingResult {
+  readonly counterparties: readonly CounterpartyBalance[];
+  readonly totalOwedToUser: string;
+  readonly totalOwedByUser: string;
+  readonly caveats: AnalyticsCaveats;
+}
+
+export interface UnsettledPaidOnBehalf {
+  readonly expenseId: string;
+  readonly description: string | null;
+  readonly occurredAt: string;
+  readonly netAmount: string;
+  readonly owedToUser: string;
+  readonly beneficiaries: readonly { readonly personId: string; readonly displayName: string }[];
+}
+
+export interface UnsettledResult {
+  readonly expenses: readonly UnsettledPaidOnBehalf[];
+  readonly totalOwedToUser: string;
+  readonly caveats: AnalyticsCaveats;
+}
+
+/* ------------------------------------------------------------------------------ rules */
+
+export const RULE_TEXT_OPERATORS = ["contains", "equals", "startsWith"] as const;
+export type RuleTextOperator = (typeof RULE_TEXT_OPERATORS)[number];
+
+export const RULE_EFFECTS = ["propose", "apply"] as const;
+export type RuleEffect = (typeof RULE_EFFECTS)[number];
+
+export interface RuleMatchPattern {
+  readonly descriptionOperator?: RuleTextOperator;
+  readonly description?: string;
+  readonly direction?: PaymentDirection;
+  readonly channel?: PaymentChannel;
+  readonly accountId?: string;
+  readonly amount?: string;
+}
+
+export type RuleAssertion =
+  | { readonly action: "set_counterparty_type"; readonly counterpartyType: PaymentCounterpartyType }
+  | { readonly action: "set_cash_flow_category"; readonly cashFlowCategory: CashFlowCategory }
+  | { readonly action: "set_expense_category"; readonly category: string };
+
+export interface RuleView {
+  readonly id: string;
+  readonly name: string;
+  readonly match: RuleMatchPattern;
+  readonly assertion: RuleAssertion;
+  readonly effect: RuleEffect;
+  readonly active: boolean;
+  readonly origin: string;
+  readonly timesApplied: number;
+  readonly lastAppliedAt: string | null;
+  readonly archivedAt: string | null;
+  readonly createdAt: string;
+}
+
+export interface RuleOutcome {
+  readonly paymentId: string;
+  readonly ruleId: string;
+  readonly ruleName: string;
+  readonly assertion: RuleAssertion;
+  readonly effect: RuleEffect;
+  readonly outcome: "applied" | "proposed" | "skipped";
+  readonly reason?: string;
+}
+
+export interface ApplyRulesResult {
+  readonly outcomes: readonly RuleOutcome[];
+  /** Payments more than one rule matched — a disagreement only a person can settle. */
+  readonly conflicts: readonly {
+    readonly paymentId: string;
+    readonly ruleIds: readonly string[];
+  }[];
+}
+
+/* -------------------------------------------------------------------------- occasions */
+
+export interface OccasionSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly occurredStart: string;
+  readonly occurredEnd: string | null;
+  readonly defaultParticipants: unknown;
+  readonly createdAt: string;
+  /** How many expenses it groups. A count, never a sum of money. */
+  readonly expenseCount: number;
+}
+
+/* ------------------------------------------------------------------------------- jobs */
+
+export const JOB_KINDS = [
+  "import_bank_statement_csv",
+  "normalize_payments",
+  "classify_payments",
+  "extract_receipt",
+  "run_splitwise_audit",
+] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
+
+export const JOB_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
+
+export interface JobRecord {
+  readonly id: string;
+  readonly kind: JobKind;
+  readonly status: JobStatus;
+  readonly payload: Record<string, unknown>;
+  readonly result: unknown;
+  readonly attempts: number;
+  readonly maxAttempts: number;
+  readonly lastError: string | null;
+  readonly actor: string;
+  readonly scheduledFor: string;
+  readonly startedAt: string | null;
+  readonly finishedAt: string | null;
+  readonly createdAt: string;
+}
+
+export interface JobListResult {
+  readonly jobs: readonly JobRecord[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
 }

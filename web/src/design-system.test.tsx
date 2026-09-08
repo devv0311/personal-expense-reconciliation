@@ -7,6 +7,7 @@ import { ShortcutProvider } from "@/components/app-shell/shortcuts";
 import ExpensesPage from "@/app/expenses/page";
 import { ExpenseDetail } from "@/components/expenses/expense-detail";
 import { Money } from "@/components/money";
+import { Table, TableBody, TableCaption, TableCell, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { mockApi } from "@/test-support/api-mock";
 import { EXPENSE, PEOPLE, REFUND_STATE_PENDING, reviewQueue } from "@/test-support/fixtures";
@@ -140,5 +141,48 @@ describe("responsive behaviour", () => {
     const grid = container.querySelector("div.grid")!;
     expect(grid.className).toContain("lg:grid-cols-");
     expect(grid.className).not.toContain("sm:grid-cols-");
+  });
+});
+
+describe("two accessibility rules a browser sweep found, kept as unit tests", () => {
+  it("positions the table scroll container, so an sr-only caption cannot escape it", () => {
+    render(
+      <Table className="min-w-[520px]">
+        <TableCaption>A wide table</TableCaption>
+        <TableBody>
+          <TableRow>
+            <TableCell>A cell</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>,
+    );
+
+    const container = screen.getByRole("table").parentElement!;
+    // `overflow` alone does not make an element the containing block for an absolutely
+    // positioned descendant, so without `relative` an `sr-only` caption inside a table wider
+    // than the viewport resolves against the viewport, lands outside it, and makes the whole
+    // page pan sideways. Found on /setup at 360px; fixed once, here.
+    expect(container.className).toContain("relative");
+    expect(container.className).toContain("overflow-x-auto");
+  });
+
+  it("underlines a text link at rest rather than distinguishing it by colour alone", () => {
+    render(
+      <p>
+        Some surrounding prose{" "}
+        {/* An external href on purpose: the rule under test is about how a link *looks*, and
+            `next/link` would drag routing into a styling assertion. */}
+        <a href="https://example.invalid" className="text-accent underline underline-offset-2">
+          and a link inside it
+        </a>
+        .
+      </p>,
+    );
+
+    const link = screen.getByRole("link");
+    // WCAG 1.4.1, and axe's `link-in-text-block`: a link sitting in a block of text cannot be
+    // told apart by colour alone. `hover:underline` is not enough — it is not there at rest.
+    expect(link.className).toContain("underline");
+    expect(link.className).not.toContain("hover:underline");
   });
 });

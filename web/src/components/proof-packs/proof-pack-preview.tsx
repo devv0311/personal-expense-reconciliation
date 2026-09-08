@@ -128,7 +128,7 @@ function ProofPackPreviewBody({ preview }: { preview: Preview }) {
                 render: (line) => (
                   <Link
                     href={`/expenses/${line.expenseId}`}
-                    className="text-accent underline-offset-2 hover:underline"
+                    className="text-accent underline underline-offset-2"
                   >
                     {line.description}
                   </Link>
@@ -210,7 +210,7 @@ function ProofPackPreviewBody({ preview }: { preview: Preview }) {
               <li key={finding.findingId} className="border-b border-rule py-2 last:border-b-0">
                 <Link
                   href={`/splitwise/findings/${finding.findingId}`}
-                  className="text-body text-accent underline-offset-2 hover:underline"
+                  className="text-body text-accent underline underline-offset-2"
                 >
                   {finding.summary}
                 </Link>
@@ -236,7 +236,7 @@ function ProofPackPreviewBody({ preview }: { preview: Preview }) {
               >
                 <Link
                   href={`/evidence/${reference.evidenceId}`}
-                  className="text-body text-accent underline-offset-2 hover:underline"
+                  className="text-body text-accent underline underline-offset-2"
                 >
                   {reference.label ?? evidenceTypeLabel(reference.type)}
                 </Link>

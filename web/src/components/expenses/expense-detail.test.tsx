@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExpenseDetail } from "@/components/expenses/expense-detail";
 import { mockApi, mockApiFailure, mockApiPending, type ApiMock } from "@/test-support/api-mock";
 import {
+  CREDIT_PAYMENT,
   EXPENSE,
   PEOPLE,
   REFUND_STATE_PENDING,
@@ -22,10 +23,15 @@ afterEach(() => {
 function renderDetail(refundState: unknown = REFUND_STATE_PENDING): ApiMock {
   const api = mockApi({
     "/api/expenses/exp-1/refund-allocation": refundState,
+    "/api/expenses/exp-1/payment-links": { links: [] },
+    "/api/expenses/exp-1/items": { items: [] },
     "/api/expenses/exp-1/adjustments/distribute": { allocationId: "alloc-2" },
     "/api/expenses/exp-1/adjustments": { adjustmentId: "adj-2" },
     "/api/expenses/exp-1": EXPENSE,
     "/api/people": { people: PEOPLE },
+    // The refund form offers unexplained credits as the arrival of the money coming back.
+    "/api/payments": { payments: [], total: 0, filteredTotalIsExact: true, limit: 50, offset: 0 },
+    "/api/occasions": { occasions: [] },
   });
   renderWithQuery(<ExpenseDetail expenseId="exp-1" />);
   return api;
@@ -248,5 +254,58 @@ describe("recording an item-attributed refund", () => {
     const body = api.calls.find((c) => c.method === "POST" && c.url.endsWith("/adjustments"))!
       .body as Record<string, unknown>;
     expect(body).not.toHaveProperty("itemAttributions");
+  });
+});
+
+describe("connecting a refund to the money that came back", () => {
+  it("offers only unexplained credits, and sends the one chosen with the refund", async () => {
+    const api = mockApi({
+      "/api/expenses/exp-1/refund-allocation": REFUND_STATE_PENDING,
+      "/api/expenses/exp-1/payment-links": { links: [] },
+      "/api/expenses/exp-1/items": { items: [] },
+      "/api/expenses/exp-1/adjustments": { adjustmentId: "adj-3" },
+      "/api/expenses/exp-1": EXPENSE,
+      "/api/people": { people: PEOPLE },
+      "/api/payments": {
+        payments: [CREDIT_PAYMENT],
+        total: 1,
+        filteredTotalIsExact: true,
+        limit: 50,
+        offset: 0,
+      },
+    });
+    renderWithQuery(<ExpenseDetail expenseId="exp-1" />);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("The credit it arrived on")).toBeInTheDocument(),
+    );
+    // The picker asks the API for credits with money nothing accounts for — not every payment.
+    // (The funding panel on the same screen asks for unexplained movements in both directions,
+    // so this looks for the credit-only request among them rather than at a fixed position.)
+    const request = api
+      .callsTo("/api/payments")
+      .find((call) => call.url.includes("direction=credit"));
+    expect(request).toBeDefined();
+    expect(request!.url).toContain("onlyUnexplained=true");
+
+    await user.click(screen.getByLabelText(/Say which items this refund gave money back for/));
+    await user.type(screen.getByLabelText("Amount (₹)"), "400");
+    await user.selectOptions(screen.getByLabelText("The credit it arrived on"), CREDIT_PAYMENT.id);
+    await user.click(screen.getByRole("button", { name: "Record this refund" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Record" }));
+
+    await waitFor(() =>
+      expect(
+        api.calls.filter((call) => call.method === "POST" && call.url.endsWith("/adjustments")),
+      ).toHaveLength(1),
+    );
+    const body = api.calls.find(
+      (call) => call.method === "POST" && call.url.endsWith("/adjustments"),
+    )!.body as Record<string, unknown>;
+    expect(body["amount"]).toBe("40000");
+    expect(body["adjustmentPaymentId"]).toBe(CREDIT_PAYMENT.id);
   });
 });

@@ -277,3 +277,32 @@ needed a caller for:
 `src/api` caller. Nothing in this layer computes anything new for Phase 21 — that is the point
 of ADR-0048, and the reason `web/` can be a rendering of the ledger rather than a second opinion
 about it.
+
+## Phase 22 (ADR-0050) — the services an audit found unreachable
+
+A capability audit found eleven capabilities complete here and at the HTTP layer, and absent
+from the browser. Most of Phase 22 was therefore a `web/` phase, but it added the services the
+missing workflows needed and had never had:
+
+- **`master-data-service.ts`** — people, accounts, merchants and their aliases, groups and dated
+  membership stints. Archiving rather than deletion throughout: a person in a past allocation is
+  part of that expense's history forever, and an overlapping membership stint is refused because
+  `domain.expandGroupAllocationLine` would count that person twice (ADR-0009).
+- **`payment-workspace-service.ts`** — the movement list with `domain.explainedAmount`'s own
+  answer per row, hand-entered movements (still written through an `ImportBatch`, because a
+  payment with no provenance is one nobody can later explain), the counterparty editor, and
+  import history. `onlyUnexplained` is applied over the domain's answer rather than in SQL: a
+  `WHERE` clause approximating "explained" would be a second definition of the one concept this
+  system exists to keep honest.
+- **`expense-authoring-service.ts`** — creating an expense in either funding shape, funding
+  links in both many-to-many directions, and replacing a wrong item breakdown (gross unchanged,
+  old rows superseded, refused outright once a refund names one of those items — ADR-0045).
+- **`session-service.ts`**, **`history-service.ts`**, **`analytics-service.ts`**,
+  **`rule-service.ts`**, **`occasion-service.ts`**, **`job-service.ts`** and
+  **`splitwise-resync-service.ts`** — authentication, the evidence library and audit trails, the
+  aggregates (built from `computeObligations`' own output, so an analytics figure cannot
+  disagree with a balance), standing rules, occasion labels, the background queue, and the
+  single-row Splitwise correction ADR-0046 left open.
+
+`getEvidence` gained one field, `receiptId` — a pointer, not an extraction, and the only read
+the phase added anywhere.
