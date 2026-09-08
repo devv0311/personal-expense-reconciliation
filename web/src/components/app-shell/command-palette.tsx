@@ -101,6 +101,14 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         group: "Go to",
         href: "/proof-packs",
       },
+      { id: "go-analytics", label: "Analytics", hint: "g a", group: "Go to", href: "/analytics" },
+      {
+        id: "go-automation",
+        label: "Automation",
+        hint: "g u",
+        group: "Go to",
+        href: "/automation",
+      },
       { id: "go-setup", label: "Setup", hint: "g t", group: "Go to", href: "/setup" },
     ];
 

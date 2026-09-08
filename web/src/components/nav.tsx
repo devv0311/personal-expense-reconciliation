@@ -17,8 +17,9 @@ import type { SessionState } from "@/lib/types";
  * an imported statement line could be seen at all — the audit's first finding. **Evidence** is
  * here for the same reason: a document attached to nothing only ever surfaced if the review
  * queue happened to raise it, and a library is not a work queue. **Setup** sits
- * apart, next to search: master data changes what the ledger can say, never what it says, and
- * a roster editor is not a workflow to return to daily.
+ * apart with **Analytics** and **Automation**, in a quieter second group: none of the three is
+ * a workflow to return to daily. Setup changes what the ledger can say rather than what it
+ * says; analytics only reads; and automation is configuration for the workflows above.
  *
  * The review count is the product's only live figure outside a screen: it is what makes the
  * queue a place you go back to. It is a count, not money, so it is never toned `debit`.
@@ -32,6 +33,13 @@ const SECTIONS = [
   { href: "/balances", label: "Balances" },
   { href: "/splitwise", label: "Splitwise" },
   { href: "/proof-packs", label: "Proof packs" },
+] as const;
+
+/** Reached often enough to belong in the chrome, rarely enough not to be a workflow tab. */
+const UTILITIES = [
+  { href: "/analytics", label: "Analytics" },
+  { href: "/automation", label: "Automation" },
+  { href: "/setup", label: "Setup" },
 ] as const;
 
 export function Nav() {
@@ -90,17 +98,23 @@ export function Nav() {
               </Link>
             );
           })}
-          <Link
-            href="/setup"
-            aria-current={pathname?.startsWith("/setup") === true ? "page" : undefined}
-            className={`border-b-2 pb-1 transition-colors ${
-              pathname?.startsWith("/setup") === true
-                ? "border-accent font-medium text-ink"
-                : "border-transparent text-ink-faint hover:text-ink"
-            }`}
-          >
-            Setup
-          </Link>
+          {UTILITIES.map((utility) => {
+            const active = pathname?.startsWith(utility.href) ?? false;
+            return (
+              <Link
+                key={utility.href}
+                href={utility.href}
+                aria-current={active ? "page" : undefined}
+                className={`border-b-2 pb-1 transition-colors ${
+                  active
+                    ? "border-accent font-medium text-ink"
+                    : "border-transparent text-ink-faint hover:text-ink"
+                }`}
+              >
+                {utility.label}
+              </Link>
+            );
+          })}
         </nav>
       </div>
     </header>

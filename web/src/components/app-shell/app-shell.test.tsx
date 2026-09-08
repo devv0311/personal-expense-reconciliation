@@ -63,6 +63,8 @@ describe("the application shell", () => {
       "/balances",
       "/splitwise",
       "/proof-packs",
+      "/analytics",
+      "/automation",
       "/setup",
     ]);
     expect(within(nav).getByRole("link", { name: "Expenses" })).toHaveAttribute(

@@ -1180,3 +1180,191 @@ export interface ResyncResult {
   readonly previousSnapshot: unknown;
   readonly pushedNetAmount: string;
 }
+
+/* -------------------------------------------------------------------------- analytics */
+
+export interface AnalyticsPeriod {
+  readonly start: string;
+  /** Exclusive. */
+  readonly end: string;
+}
+
+/**
+ * What an aggregate deliberately leaves out, carried with every result.
+ *
+ * Not decoration: a total shown without these is asserting more precision than the ledger has.
+ */
+export interface AnalyticsCaveats {
+  readonly pendingRefundExpenseIds: readonly string[];
+  readonly excludes: readonly string[];
+}
+
+export interface CategorySpend {
+  readonly category: string | null;
+  readonly netTotal: string;
+  readonly grossTotal: string;
+  readonly expenseCount: number;
+}
+
+export interface CategorySpendResult {
+  readonly period: AnalyticsPeriod;
+  readonly categories: readonly CategorySpend[];
+  readonly netTotal: string;
+  readonly caveats: AnalyticsCaveats;
+}
+
+export interface MonthlySpend {
+  readonly month: string;
+  readonly netTotal: string;
+  readonly expenseCount: number;
+}
+
+export interface MonthlySpendResult {
+  readonly period: AnalyticsPeriod;
+  readonly months: readonly MonthlySpend[];
+  readonly caveats: AnalyticsCaveats;
+}
+
+export interface OwnSpendResult {
+  readonly period: AnalyticsPeriod;
+  /** The user's own share — what they actually spent, as distinct from what passed through. */
+  readonly ownShare: string;
+  readonly paidByUser: string;
+  readonly frontedForOthers: string;
+  readonly caveats: AnalyticsCaveats;
+}
+
+export interface CounterpartyBalance {
+  readonly personId: string;
+  readonly displayName: string;
+  /** Positive means they owe the user; negative the reverse. Quoted, never derived. */
+  readonly netBalance: string;
+  readonly contributingExpenseCount: number;
+}
+
+export interface OutstandingResult {
+  readonly counterparties: readonly CounterpartyBalance[];
+  readonly totalOwedToUser: string;
+  readonly totalOwedByUser: string;
+  readonly caveats: AnalyticsCaveats;
+}
+
+export interface UnsettledPaidOnBehalf {
+  readonly expenseId: string;
+  readonly description: string | null;
+  readonly occurredAt: string;
+  readonly netAmount: string;
+  readonly owedToUser: string;
+  readonly beneficiaries: readonly { readonly personId: string; readonly displayName: string }[];
+}
+
+export interface UnsettledResult {
+  readonly expenses: readonly UnsettledPaidOnBehalf[];
+  readonly totalOwedToUser: string;
+  readonly caveats: AnalyticsCaveats;
+}
+
+/* ------------------------------------------------------------------------------ rules */
+
+export const RULE_TEXT_OPERATORS = ["contains", "equals", "startsWith"] as const;
+export type RuleTextOperator = (typeof RULE_TEXT_OPERATORS)[number];
+
+export const RULE_EFFECTS = ["propose", "apply"] as const;
+export type RuleEffect = (typeof RULE_EFFECTS)[number];
+
+export interface RuleMatchPattern {
+  readonly descriptionOperator?: RuleTextOperator;
+  readonly description?: string;
+  readonly direction?: PaymentDirection;
+  readonly channel?: PaymentChannel;
+  readonly accountId?: string;
+  readonly amount?: string;
+}
+
+export type RuleAssertion =
+  | { readonly action: "set_counterparty_type"; readonly counterpartyType: PaymentCounterpartyType }
+  | { readonly action: "set_cash_flow_category"; readonly cashFlowCategory: CashFlowCategory }
+  | { readonly action: "set_expense_category"; readonly category: string };
+
+export interface RuleView {
+  readonly id: string;
+  readonly name: string;
+  readonly match: RuleMatchPattern;
+  readonly assertion: RuleAssertion;
+  readonly effect: RuleEffect;
+  readonly active: boolean;
+  readonly origin: string;
+  readonly timesApplied: number;
+  readonly lastAppliedAt: string | null;
+  readonly archivedAt: string | null;
+  readonly createdAt: string;
+}
+
+export interface RuleOutcome {
+  readonly paymentId: string;
+  readonly ruleId: string;
+  readonly ruleName: string;
+  readonly assertion: RuleAssertion;
+  readonly effect: RuleEffect;
+  readonly outcome: "applied" | "proposed" | "skipped";
+  readonly reason?: string;
+}
+
+export interface ApplyRulesResult {
+  readonly outcomes: readonly RuleOutcome[];
+  /** Payments more than one rule matched — a disagreement only a person can settle. */
+  readonly conflicts: readonly {
+    readonly paymentId: string;
+    readonly ruleIds: readonly string[];
+  }[];
+}
+
+/* -------------------------------------------------------------------------- occasions */
+
+export interface OccasionSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly occurredStart: string;
+  readonly occurredEnd: string | null;
+  readonly defaultParticipants: unknown;
+  readonly createdAt: string;
+  /** How many expenses it groups. A count, never a sum of money. */
+  readonly expenseCount: number;
+}
+
+/* ------------------------------------------------------------------------------- jobs */
+
+export const JOB_KINDS = [
+  "import_bank_statement_csv",
+  "normalize_payments",
+  "classify_payments",
+  "extract_receipt",
+  "run_splitwise_audit",
+] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
+
+export const JOB_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
+
+export interface JobRecord {
+  readonly id: string;
+  readonly kind: JobKind;
+  readonly status: JobStatus;
+  readonly payload: Record<string, unknown>;
+  readonly result: unknown;
+  readonly attempts: number;
+  readonly maxAttempts: number;
+  readonly lastError: string | null;
+  readonly actor: string;
+  readonly scheduledFor: string;
+  readonly startedAt: string | null;
+  readonly finishedAt: string | null;
+  readonly createdAt: string;
+}
+
+export interface JobListResult {
+  readonly jobs: readonly JobRecord[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+}

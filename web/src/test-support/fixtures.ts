@@ -10,7 +10,9 @@
 import type {
   AccountSnapshotsResult,
   AccountSummary,
+  AnalyticsCaveats,
   BalanceResult,
+  CategorySpendResult,
   ClassificationDecisionItem,
   CounterpartyOptions,
   EvidenceLibraryResult,
@@ -20,7 +22,12 @@ import type {
   ExpenseLedgerRow,
   GroupDetail,
   ImportBatchSummary,
+  JobRecord,
   MerchantDetail,
+  MonthlySpendResult,
+  OccasionSummary,
+  OutstandingResult,
+  OwnSpendResult,
   PaymentListResult,
   PaymentWorkspaceItem,
   PersonDetail,
@@ -32,10 +39,12 @@ import type {
   ReconciliationRun,
   RefundAllocationState,
   ReviewQueueResult,
+  RuleView,
   SplitwiseAuditFinding,
   SplitwiseAuditFindingDetail,
   SplitwiseAuditRun,
   UnmatchedEvidenceItem,
+  UnsettledResult,
 } from "@/lib/types";
 
 export const DEV: PersonSummary = {
@@ -865,4 +874,124 @@ export const RECEIPT_VIEW: ReceiptView = {
   itemsSubtotalDiscrepancy: "120000",
   paymentDiscrepancy: null,
   candidateMatches: [],
+};
+
+/* ------------------------------------------------------- analytics, rules, jobs, occasions */
+
+const CAVEATS: AnalyticsCaveats = {
+  pendingRefundExpenseIds: [],
+  excludes: [
+    "rejected expenses (invariants.md #20)",
+    "transfers between own accounts (invariants.md #7)",
+  ],
+};
+
+const PERIOD = { start: "2026-08-01T00:00:00.000Z", end: "2026-09-01T00:00:00.000Z" };
+
+export const OWN_SPEND: OwnSpendResult = {
+  period: PERIOD,
+  ownShare: "240000",
+  paidByUser: "400000",
+  frontedForOthers: "160000",
+  caveats: CAVEATS,
+};
+
+/** One contributing expense has a refund the allocation has not absorbed — a visible caveat. */
+export const OWN_SPEND_WITH_PENDING: OwnSpendResult = {
+  ...OWN_SPEND,
+  caveats: { ...CAVEATS, pendingRefundExpenseIds: ["exp-1"] },
+};
+
+export const CATEGORY_SPEND: CategorySpendResult = {
+  period: PERIOD,
+  categories: [
+    { category: "groceries", netTotal: "180000", grossTotal: "220000", expenseCount: 4 },
+    { category: null, netTotal: "60000", grossTotal: "60000", expenseCount: 1 },
+  ],
+  netTotal: "240000",
+  caveats: CAVEATS,
+};
+
+export const MONTHLY_SPEND: MonthlySpendResult = {
+  period: PERIOD,
+  months: [{ month: "2026-08", netTotal: "240000", expenseCount: 5 }],
+  caveats: CAVEATS,
+};
+
+export const OUTSTANDING: OutstandingResult = {
+  counterparties: [
+    {
+      personId: "p-alex",
+      displayName: "Alex",
+      netBalance: "90000",
+      contributingExpenseCount: 2,
+    },
+  ],
+  totalOwedToUser: "90000",
+  totalOwedByUser: "0",
+  caveats: CAVEATS,
+};
+
+export const UNSETTLED: UnsettledResult = {
+  expenses: [
+    {
+      expenseId: "exp-1",
+      description: "Dinner at Toit",
+      occurredAt: "2026-08-12T19:00:00.000Z",
+      netAmount: "240000",
+      owedToUser: "90000",
+      beneficiaries: [{ personId: "p-alex", displayName: "Alex" }],
+    },
+  ],
+  totalOwedToUser: "90000",
+  caveats: CAVEATS,
+};
+
+export const PROPOSE_RULE: RuleView = {
+  id: "rule-1",
+  name: "Blinkit is a merchant",
+  match: { description: "BLINKIT", descriptionOperator: "contains" },
+  assertion: { action: "set_counterparty_type", counterpartyType: "merchant" },
+  effect: "propose",
+  active: true,
+  origin: "user",
+  timesApplied: 3,
+  lastAppliedAt: "2026-09-01T10:00:00.000Z",
+  archivedAt: null,
+  createdAt: "2026-08-01T10:00:00.000Z",
+};
+
+export const APPLY_RULE: RuleView = {
+  ...PROPOSE_RULE,
+  id: "rule-2",
+  name: "Rent to the landlord",
+  effect: "apply",
+  match: { description: "NEFT-LANDLORD", descriptionOperator: "startsWith", direction: "debit" },
+  assertion: { action: "set_expense_category", category: "rent" },
+};
+
+export const FAILED_JOB: JobRecord = {
+  id: "job-1",
+  kind: "classify_payments",
+  status: "failed",
+  payload: {},
+  result: null,
+  attempts: 2,
+  maxAttempts: 3,
+  lastError: "No model provider is configured.",
+  actor: "user",
+  scheduledFor: "2026-09-01T09:00:00.000Z",
+  startedAt: "2026-09-01T09:00:01.000Z",
+  finishedAt: "2026-09-01T09:00:02.000Z",
+  createdAt: "2026-09-01T08:59:00.000Z",
+};
+
+export const OCCASION: OccasionSummary = {
+  id: "occ-1",
+  name: "Anjali's birthday",
+  occurredStart: "2026-08-12T00:00:00.000Z",
+  occurredEnd: null,
+  defaultParticipants: [],
+  createdAt: "2026-08-13T10:00:00.000Z",
+  expenseCount: 3,
 };

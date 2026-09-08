@@ -11,11 +11,13 @@ import type {
   AccountSummary,
   AccountType,
   ApiErrorBody,
+  ApplyRulesResult,
   BalanceResult,
   BeneficiaryRef,
   CashFlowCategory,
   CashFlowDecisionResult,
   CashFlowState,
+  CategorySpendResult,
   ClassifyPaymentsResult,
   CounterpartyOptions,
   CreateExpenseResult,
@@ -34,12 +36,19 @@ import type {
   ExpenseRelationshipType,
   ExpenseState,
   GroupDetail,
+  JobKind,
+  JobListResult,
+  JobStatus,
   ImportHistoryResult,
   ImportStatementResult,
   MatchEvidenceContextResult,
   MerchantDetail,
+  MonthlySpendResult,
   NormalizePaymentsResult,
   NotificationEvidenceType,
+  OccasionSummary,
+  OutstandingResult,
+  OwnSpendResult,
   PaymentChannel,
   PaymentContextResult,
   PaymentCounterpartyType,
@@ -56,6 +65,10 @@ import type {
   RefundAllocationState,
   ResyncCandidate,
   ResyncResult,
+  RuleAssertion,
+  RuleEffect,
+  RuleMatchPattern,
+  RuleView,
   ReviewItemKind,
   ReviewQueueResult,
   RunReconciliationResult,
@@ -69,6 +82,7 @@ import type {
   SplitwiseAuditReviewStatus,
   SplitwiseAuditRun,
   SplitwiseAuditRunDetail,
+  UnsettledResult,
 } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
@@ -1292,5 +1306,160 @@ export async function resyncExpenseToSplitwise(input: {
   return request<ResyncResult>(`/api/expenses/${input.expenseId}/splitwise-resync`, {
     method: "POST",
     body: JSON.stringify({ actor: ACTOR, reason: input.reason }),
+  });
+}
+
+/* -------------------------------------------------------------------------- analytics */
+
+/** Every analytics read takes the same period, and the API refuses one that runs backwards. */
+export interface AnalyticsRange {
+  readonly from: string;
+  readonly to: string;
+}
+
+function periodQuery(range: AnalyticsRange): string {
+  return `?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
+}
+
+export async function getCategorySpend(range: AnalyticsRange): Promise<CategorySpendResult> {
+  return request<CategorySpendResult>(`/api/analytics/spending${periodQuery(range)}`);
+}
+
+export async function getMonthlySpend(range: AnalyticsRange): Promise<MonthlySpendResult> {
+  return request<MonthlySpendResult>(`/api/analytics/monthly${periodQuery(range)}`);
+}
+
+export async function getOwnSpend(range: AnalyticsRange): Promise<OwnSpendResult> {
+  return request<OwnSpendResult>(`/api/analytics/own-spend${periodQuery(range)}`);
+}
+
+export async function getOutstanding(): Promise<OutstandingResult> {
+  return request<OutstandingResult>("/api/analytics/outstanding");
+}
+
+export async function getUnsettled(): Promise<UnsettledResult> {
+  return request<UnsettledResult>("/api/analytics/unsettled");
+}
+
+/* ------------------------------------------------------------------------------ rules */
+
+export async function listRules(): Promise<readonly RuleView[]> {
+  const { rules } = await request<{ rules: RuleView[] }>("/api/rules");
+  return rules;
+}
+
+/**
+ * Writes a standing rule.
+ *
+ * `effect` is the whole of what makes a rule safe: `propose` records a suggestion for a person,
+ * `apply` writes the fact unattended and is attributed to the rule, never to a person
+ * (`invariants.md` #17). No rule touches an allocation or an amount.
+ */
+export async function createRule(input: {
+  readonly name: string;
+  readonly match: RuleMatchPattern;
+  readonly assertion: RuleAssertion;
+  readonly effect?: RuleEffect;
+  readonly reason?: string;
+}): Promise<{ readonly ruleId: string }> {
+  return request("/api/rules", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...input }),
+  });
+}
+
+export async function updateRule(input: {
+  readonly ruleId: string;
+  readonly active?: boolean;
+  readonly archived?: boolean;
+  readonly effect?: RuleEffect;
+  readonly reason?: string;
+}): Promise<unknown> {
+  const { ruleId, ...rest } = input;
+  return request(`/api/rules/${ruleId}`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined)),
+    }),
+  });
+}
+
+/** `dryRun` previews without writing — the only honest way to see what a rule set would do. */
+export async function applyRules(input: {
+  readonly dryRun?: boolean;
+  readonly importBatchId?: string;
+  readonly limit?: number;
+}): Promise<ApplyRulesResult> {
+  return request<ApplyRulesResult>("/api/rules/apply", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
+  });
+}
+
+/* -------------------------------------------------------------------------- occasions */
+
+export async function listOccasions(): Promise<readonly OccasionSummary[]> {
+  const { occasions } = await request<{ occasions: OccasionSummary[] }>("/api/occasions");
+  return occasions;
+}
+
+export async function createOccasion(input: {
+  readonly name: string;
+  readonly occurredStart: string;
+  readonly occurredEnd?: string;
+}): Promise<{ readonly occasionId: string }> {
+  return request("/api/occasions", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
+  });
+}
+
+/** A label that carries no money: filing an expense under an occasion moves no figure. */
+export async function assignExpenseToOccasion(input: {
+  readonly expenseId: string;
+  readonly occasionId: string | null;
+}): Promise<unknown> {
+  return request(`/api/expenses/${input.expenseId}/occasion`, {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, occasionId: input.occasionId }),
+  });
+}
+
+/* ------------------------------------------------------------------------------- jobs */
+
+export async function listJobs(
+  filter: {
+    readonly status?: JobStatus;
+    readonly kind?: JobKind;
+    readonly limit?: number;
+  } = {},
+): Promise<JobListResult> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filter)) {
+    if (value === undefined) continue;
+    params.set(key, String(value));
+  }
+  const query = params.toString();
+  return request<JobListResult>(`/api/jobs${query.length > 0 ? `?${query}` : ""}`);
+}
+
+export async function retryJob(jobId: string): Promise<unknown> {
+  return request(`/api/jobs/${jobId}/retry`, {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR }),
+  });
+}
+
+export async function cancelJob(input: {
+  readonly jobId: string;
+  readonly reason?: string;
+}): Promise<unknown> {
+  return request(`/api/jobs/${input.jobId}/cancel`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+    }),
   });
 }

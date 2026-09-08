@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "./api";
 import type {
+  AnalyticsRange,
   AuditFindingFilter,
   EvidenceLibraryFilter,
   ListExpensesFilter,
@@ -11,7 +12,7 @@ import type {
   ReviewQueueFilter,
   RunReconciliationInput,
 } from "./api";
-import type { SplitwiseAuditReviewDecision } from "./types";
+import type { JobKind, JobStatus, SplitwiseAuditReviewDecision } from "./types";
 
 export const queryKeys = {
   expenses: (filter: ListExpensesFilter) => ["expenses", filter] as const,
@@ -34,6 +35,14 @@ export const queryKeys = {
   paymentContext: (id: string) => ["payment-context", id] as const,
   splitwiseAuditRuns: (limit?: number) => ["splitwise-audit-runs", limit ?? null] as const,
   resyncCandidates: () => ["resync-candidates"] as const,
+  categorySpend: (range: AnalyticsRange) => ["analytics", "spending", range] as const,
+  monthlySpend: (range: AnalyticsRange) => ["analytics", "monthly", range] as const,
+  ownSpend: (range: AnalyticsRange) => ["analytics", "own-spend", range] as const,
+  outstanding: () => ["analytics", "outstanding"] as const,
+  unsettled: () => ["analytics", "unsettled"] as const,
+  rules: () => ["rules"] as const,
+  occasions: () => ["occasions"] as const,
+  jobs: (filter: { status?: JobStatus; kind?: JobKind }) => ["jobs", filter] as const,
   splitwiseAuditRun: (id: string) => ["splitwise-audit-run", id] as const,
   splitwiseAuditFindings: (filter: AuditFindingFilter) =>
     ["splitwise-audit-findings", filter] as const,
@@ -841,4 +850,125 @@ function invalidateSplitwise(
   void queryClient.invalidateQueries({ queryKey: ["expenses"] });
   void queryClient.invalidateQueries({ queryKey: queryKeys.resyncCandidates() });
   void queryClient.invalidateQueries({ queryKey: ["splitwise-audit-findings"] });
+}
+
+/* -------------------------------------------------------------------------- analytics */
+
+export function useCategorySpend(range: AnalyticsRange) {
+  return useQuery({
+    queryKey: queryKeys.categorySpend(range),
+    queryFn: () => api.getCategorySpend(range),
+  });
+}
+
+export function useMonthlySpend(range: AnalyticsRange) {
+  return useQuery({
+    queryKey: queryKeys.monthlySpend(range),
+    queryFn: () => api.getMonthlySpend(range),
+  });
+}
+
+export function useOwnSpend(range: AnalyticsRange) {
+  return useQuery({
+    queryKey: queryKeys.ownSpend(range),
+    queryFn: () => api.getOwnSpend(range),
+  });
+}
+
+export function useOutstanding() {
+  return useQuery({ queryKey: queryKeys.outstanding(), queryFn: api.getOutstanding });
+}
+
+export function useUnsettled() {
+  return useQuery({ queryKey: queryKeys.unsettled(), queryFn: api.getUnsettled });
+}
+
+/* ------------------------------------------------------------------------------ rules */
+
+export function useRules() {
+  return useQuery({ queryKey: queryKeys.rules(), queryFn: api.listRules });
+}
+
+export function useCreateRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.createRule,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.rules() }),
+  });
+}
+
+export function useUpdateRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.updateRule,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.rules() }),
+  });
+}
+
+/**
+ * Running the rules.
+ *
+ * A dry run writes nothing, so it invalidates nothing: a preview that quietly refreshed the
+ * workspace would look like it had done something.
+ */
+export function useApplyRules() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.applyRules,
+    onSuccess: (_result, input) => {
+      if (input.dryRun === true) return;
+      void queryClient.invalidateQueries({ queryKey: queryKeys.rules() });
+      invalidatePayments(queryClient);
+      void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+    },
+  });
+}
+
+/* -------------------------------------------------------------------------- occasions */
+
+export function useOccasions() {
+  return useQuery({ queryKey: queryKeys.occasions(), queryFn: api.listOccasions });
+}
+
+export function useCreateOccasion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.createOccasion,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.occasions() }),
+  });
+}
+
+/** Filing an expense under an occasion is a label. No figure moves, so no figure is refetched. */
+export function useAssignOccasion(expenseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (occasionId: string | null) =>
+      api.assignExpenseToOccasion({ expenseId, occasionId }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.occasions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.expense(expenseId) });
+    },
+  });
+}
+
+/* ------------------------------------------------------------------------------- jobs */
+
+export function useJobs(filter: { status?: JobStatus; kind?: JobKind } = {}) {
+  return useQuery({ queryKey: queryKeys.jobs(filter), queryFn: () => api.listJobs(filter) });
+}
+
+export function useRetryJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) => api.retryJob(jobId),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+}
+
+export function useCancelJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.cancelJob,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+  });
 }

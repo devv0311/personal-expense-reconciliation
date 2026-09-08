@@ -345,3 +345,53 @@ export const classificationSkipLabel = labelled({
   non_spend_counterparty: "A transfer or investment — never spending",
   credit_out_of_scope: "A credit, which this path does not classify",
 });
+
+/* ------------------------------------------------------------------------------ rules */
+
+export const ruleActionLabel = labelled({
+  set_counterparty_type: "Set the counterparty type",
+  set_cash_flow_category: "Set the cash-flow role",
+  set_expense_category: "Set the expense category",
+});
+
+export const ruleEffectLabel = labelled({
+  propose: "Propose it",
+  apply: "Apply it unattended",
+});
+
+export const ruleEffectDetail = labelled({
+  propose: "Records a suggestion for you to accept or reject. Writes nothing on its own.",
+  apply:
+    "Writes the fact without asking, attributed to the rule rather than to you. Only ever a " +
+    "restatement of a decision you have already made — no rule touches an allocation or an amount.",
+});
+
+export const ruleOutcomeLabel = labelled({
+  applied: "Applied",
+  proposed: "Proposed",
+  skipped: "Skipped",
+});
+
+export const ruleOperatorLabel = labelled({
+  contains: "contains",
+  equals: "is exactly",
+  startsWith: "starts with",
+});
+
+/* ------------------------------------------------------------------------------- jobs */
+
+export const jobKindLabel = labelled({
+  import_bank_statement_csv: "Import a statement",
+  normalize_payments: "Normalize payments",
+  classify_payments: "Classify payments",
+  extract_receipt: "Extract a receipt",
+  run_splitwise_audit: "Run a Splitwise audit",
+});
+
+export const jobStatusLabel = labelled({
+  queued: "Queued",
+  running: "Running",
+  succeeded: "Succeeded",
+  failed: "Failed",
+  cancelled: "Cancelled",
+});

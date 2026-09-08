@@ -5,6 +5,7 @@ import { ExpenseStateTag } from "@/components/expense-state-tag";
 import { AllocationEditor } from "@/components/expenses/allocation-editor";
 import { FundingLinks } from "@/components/expenses/funding-links";
 import { ItemEditor } from "@/components/expenses/item-editor";
+import { OccasionPicker } from "@/components/expenses/occasions";
 import { SplitwiseSyncPanel } from "@/components/expenses/splitwise-sync";
 import {
   DistributionPanel,
@@ -225,6 +226,14 @@ export function ExpenseDetail({ expenseId }: { expenseId: string }) {
         nameFor={nameFor}
         distribute={distribute}
       />
+
+      <Section
+        title="What it was part of"
+        headingId="expense-occasion"
+        description="A dinner, a trip. Filing this under an occasion groups it with the others — it moves no money and changes no share."
+      >
+        <OccasionPicker expenseId={expenseId} />
+      </Section>
 
       <SplitwiseSyncPanel expense={row} />
 

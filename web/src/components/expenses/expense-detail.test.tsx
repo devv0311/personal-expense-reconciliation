@@ -31,6 +31,7 @@ function renderDetail(refundState: unknown = REFUND_STATE_PENDING): ApiMock {
     "/api/people": { people: PEOPLE },
     // The refund form offers unexplained credits as the arrival of the money coming back.
     "/api/payments": { payments: [], total: 0, filteredTotalIsExact: true, limit: 50, offset: 0 },
+    "/api/occasions": { occasions: [] },
   });
   renderWithQuery(<ExpenseDetail expenseId="exp-1" />);
   return api;

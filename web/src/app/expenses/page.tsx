@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { ExpenseStateTag, sentenceCaseState } from "@/components/expense-state-tag";
 import { ExpenseForm } from "@/components/expenses/expense-form";
+import { OccasionList } from "@/components/expenses/occasions";
 import { Money } from "@/components/money";
 import { EmptyBlock, ErrorBlock, LoadingStatus, TableSkeleton } from "@/components/status";
 import { Button } from "@/components/ui/button";
@@ -208,6 +209,8 @@ export default function ExpensesPage() {
           </ul>
         </>
       )}
+
+      <OccasionList />
     </div>
   );
 }
