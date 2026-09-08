@@ -12,18 +12,23 @@ import type {
   AccountType,
   ApiErrorBody,
   BalanceResult,
+  BeneficiaryRef,
   CashFlowCategory,
   CashFlowDecisionResult,
   CashFlowState,
   ClassifyPaymentsResult,
   CounterpartyOptions,
+  CreateExpenseResult,
   DecideEvidenceMatchResult,
   EvidenceMatchesResult,
   EvidenceObservationView,
   EvidenceRecord,
   ExpenseAdjustmentKind,
+  ExpenseFundingLink,
+  ExpenseHistoryResult,
   ExpenseItemRecord,
   ExpenseLedgerRow,
+  ExpenseRelationshipType,
   ExpenseState,
   GroupDetail,
   ImportHistoryResult,
@@ -48,6 +53,7 @@ import type {
   ReviewItemKind,
   ReviewQueueResult,
   RunReconciliationResult,
+  SettlementRegisterResult,
   RunSplitwiseAuditResult,
   SplitwiseAuditFinding,
   SplitwiseAuditFindingDetail,
@@ -771,4 +777,192 @@ function compact(input: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(input).filter(([, value]) => value !== undefined && value !== ""),
   );
+}
+
+/* --------------------------------------------------------------- authoring an expense */
+
+/**
+ * Records an expense a person entered.
+ *
+ * Omitting `funding` is how "somebody else paid" is expressed: this ledger then has no payment
+ * for the expense and must never fabricate one (ADR-0006), so `evidenceId` carries the trail
+ * back to what happened instead.
+ */
+export async function createExpense(input: {
+  readonly description: string;
+  readonly amount: string;
+  readonly occurredAt: string;
+  readonly relationshipType: ExpenseRelationshipType;
+  readonly paidByPersonId: string;
+  readonly category?: string;
+  readonly evidenceId?: string;
+  readonly funding?: readonly { readonly paymentId: string; readonly amount: string }[];
+  readonly state?: "proposed" | "approved";
+  readonly reason?: string;
+}): Promise<CreateExpenseResult> {
+  const { funding, ...rest } = input;
+  return request<CreateExpenseResult>("/api/expenses", {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...compact(rest),
+      ...(funding === undefined || funding.length === 0 ? {} : { funding }),
+    }),
+  });
+}
+
+export async function getExpenseFunding(expenseId: string): Promise<readonly ExpenseFundingLink[]> {
+  const { links } = await request<{ links: ExpenseFundingLink[] }>(
+    `/api/expenses/${expenseId}/payment-links`,
+  );
+  return links;
+}
+
+/** One payment across several expenses, or several payments onto one — both are repeated calls. */
+export async function linkPaymentToExpense(input: {
+  readonly expenseId: string;
+  readonly paymentId: string;
+  readonly amount: string;
+  readonly reason?: string;
+}): Promise<{ readonly linkId: string }> {
+  const { expenseId, ...rest } = input;
+  return request(`/api/expenses/${expenseId}/payment-links`, {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(rest) }),
+  });
+}
+
+export interface ExpenseItemDraft {
+  readonly description: string;
+  readonly amount: string;
+  readonly quantity?: string;
+}
+
+/** The complete breakdown, which must sum to the expense's gross amount. */
+export async function recordExpenseItems(input: {
+  readonly expenseId: string;
+  readonly items: readonly ExpenseItemDraft[];
+  readonly reason?: string;
+}): Promise<{ readonly items: readonly ExpenseItemRecord[] }> {
+  return request(`/api/expenses/${input.expenseId}/items`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      items: input.items,
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+    }),
+  });
+}
+
+/**
+ * Replaces a wrong breakdown. The gross total cannot move — a correction that changes what the
+ * purchase cost is an adjustment, not this — and the reason is required, because a correction
+ * with no account of it is an edit.
+ */
+export async function correctExpenseItems(input: {
+  readonly expenseId: string;
+  readonly items: readonly ExpenseItemDraft[];
+  readonly reason: string;
+}): Promise<{
+  readonly items: readonly ExpenseItemRecord[];
+  readonly supersededItemIds: readonly string[];
+}> {
+  return request(`/api/expenses/${input.expenseId}/items/correct`, {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, items: input.items, reason: input.reason }),
+  });
+}
+
+/* ---------------------------------------------------------------------- allocation */
+
+/**
+ * The six methods, each with the shape the API validates for it.
+ *
+ * `web/` names beneficiaries and states inputs; every amount that results from a division —
+ * an equal split, a percentage, a group expansion, a shared item's units — is the domain's,
+ * computed by the Largest Remainder Method it owns (ADR-0048, `invariants.md` #12).
+ */
+export type AllocationDecisionInput =
+  | { readonly method: "equal"; readonly beneficiaries: readonly BeneficiaryRef[] }
+  | {
+      readonly method: "exact" | "custom";
+      readonly lines: readonly { readonly beneficiary: BeneficiaryRef; readonly amount: string }[];
+    }
+  | {
+      readonly method: "percentage";
+      readonly lines: readonly {
+        readonly beneficiary: BeneficiaryRef;
+        readonly percentage: string;
+      }[];
+    }
+  | {
+      readonly method: "item_based" | "quantity_based";
+      readonly lines: readonly {
+        readonly beneficiary: BeneficiaryRef;
+        readonly expenseItemId: string;
+        readonly amount?: string;
+        readonly units?: string;
+      }[];
+    };
+
+export async function approveAllocation(input: {
+  readonly expenseId: string;
+  readonly decision: AllocationDecisionInput;
+  readonly reason?: string;
+  readonly groupShareOverrides?: readonly {
+    readonly groupId: string;
+    readonly weights: readonly { readonly personId: string; readonly weight: string }[];
+  }[];
+}): Promise<unknown> {
+  return request(`/api/expenses/${input.expenseId}/allocation`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...input.decision,
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+      ...(input.groupShareOverrides === undefined
+        ? {}
+        : { groupShareOverrides: input.groupShareOverrides }),
+    }),
+  });
+}
+
+/* --------------------------------------------------------------------- settlements */
+
+/** Discharges a debt; never creates one. A settlement has no allocation, ever. */
+export async function recordSettlement(input: {
+  readonly paymentId: string;
+  readonly counterpartyPersonId: string;
+  readonly amount: string;
+  readonly reason?: string;
+}): Promise<{ readonly settlementId: string }> {
+  const { paymentId, ...rest } = input;
+  return request(`/api/payments/${paymentId}/settlements`, {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(rest) }),
+  });
+}
+
+export async function listSettlements(
+  options: {
+    readonly counterpartyPersonId?: string;
+    readonly limit?: number;
+    readonly offset?: number;
+  } = {},
+): Promise<SettlementRegisterResult> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) {
+    if (value === undefined) continue;
+    params.set(key, String(value));
+  }
+  const query = params.toString();
+  return request<SettlementRegisterResult>(
+    `/api/settlements${query.length > 0 ? `?${query}` : ""}`,
+  );
+}
+
+/* ------------------------------------------------------------------------- history */
+
+export async function getExpenseHistory(expenseId: string): Promise<ExpenseHistoryResult> {
+  return request<ExpenseHistoryResult>(`/api/expenses/${expenseId}/history`);
 }

@@ -621,6 +621,8 @@ export const BALANCE: BalanceResult = {
   netBalance: "-90000",
   evidenceStatus: "open_unconfirmed",
   contributions: [{ debtorId: "p-alex", creditorId: "p-dev", amount: "90000", expenseId: "exp-1" }],
+  settlements: [],
+  pendingRefundExpenseIds: [],
 };
 
 /* -------------------------------------------------------------------- payment workspace */

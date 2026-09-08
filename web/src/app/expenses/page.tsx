@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ExpenseStateTag, sentenceCaseState } from "@/components/expense-state-tag";
+import { ExpenseForm } from "@/components/expenses/expense-form";
 import { Money } from "@/components/money";
 import { EmptyBlock, ErrorBlock, LoadingStatus, TableSkeleton } from "@/components/status";
 import { Button } from "@/components/ui/button";
@@ -50,6 +51,7 @@ export default function ExpensesPage() {
       <PageHeader
         title="Expenses"
         description="Every expense in the ledger, newest first. Net amount is gross minus any refund or reimbursement recorded against it — open one to see its items, who benefited, and what came back."
+        actions={<ExpenseForm />}
       />
 
       <div className="flex flex-wrap items-end gap-4">

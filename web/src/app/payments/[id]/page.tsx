@@ -1,6 +1,6 @@
 import { BackLink } from "@/components/back-link";
 import { PaymentContext } from "@/components/evidence/payment-context";
-import { CashFlowDecisions } from "@/components/payments/cash-flow-decisions";
+import { PaymentDecisions } from "@/components/payments/payment-decisions";
 
 /**
  * One movement: what the ledger knows about it, and the two interpretations a person records
@@ -15,7 +15,7 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
     <div className="flex flex-col gap-8">
       <BackLink href="/payments">Payments</BackLink>
       <PaymentContext paymentId={id} />
-      <CashFlowDecisions paymentId={id} />
+      <PaymentDecisions paymentId={id} />
     </div>
   );
 }

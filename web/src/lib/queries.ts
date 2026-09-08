@@ -40,6 +40,10 @@ export const queryKeys = {
   counterpartyOptions: () => ["counterparty-options"] as const,
   imports: (limit?: number, offset?: number) => ["imports", limit ?? null, offset ?? null] as const,
   peopleManagement: () => ["people-management"] as const,
+  expenseFunding: (id: string) => ["expense-funding", id] as const,
+  expenseHistory: (id: string) => ["expense-history", id] as const,
+  settlements: (counterpartyPersonId?: string) =>
+    ["settlements", counterpartyPersonId ?? null] as const,
   merchants: () => ["merchants"] as const,
   groups: () => ["groups"] as const,
 };
@@ -538,4 +542,113 @@ function invalidatePeople(queryClient: ReturnType<typeof useQueryClient>): void 
 function invalidateMerchants(queryClient: ReturnType<typeof useQueryClient>): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.merchants() });
   void queryClient.invalidateQueries({ queryKey: queryKeys.counterpartyOptions() });
+}
+
+/* --------------------------------------------------- authoring: expenses, shares, repayments */
+
+export function useExpenseFunding(expenseId: string) {
+  return useQuery({
+    queryKey: queryKeys.expenseFunding(expenseId),
+    queryFn: () => api.getExpenseFunding(expenseId),
+  });
+}
+
+export function useExpenseHistory(expenseId: string) {
+  return useQuery({
+    queryKey: queryKeys.expenseHistory(expenseId),
+    queryFn: () => api.getExpenseHistory(expenseId),
+  });
+}
+
+export function useSettlements(counterpartyPersonId?: string) {
+  return useQuery({
+    queryKey: queryKeys.settlements(counterpartyPersonId),
+    queryFn: () =>
+      api.listSettlements(counterpartyPersonId === undefined ? {} : { counterpartyPersonId }),
+  });
+}
+
+export function useCreateExpense() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.createExpense,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["expenses"] });
+      // Funding an expense from a payment is what explains that payment's money.
+      invalidatePayments(queryClient);
+    },
+  });
+}
+
+export function useLinkPaymentToExpense(expenseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      readonly paymentId: string;
+      readonly amount: string;
+      readonly reason?: string;
+    }) => api.linkPaymentToExpense({ expenseId, ...input }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.expenseFunding(expenseId) });
+      invalidateExpense(queryClient, expenseId);
+      invalidatePayments(queryClient);
+    },
+  });
+}
+
+export function useRecordExpenseItems(expenseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      readonly items: readonly api.ExpenseItemDraft[];
+      readonly reason?: string;
+    }) => api.recordExpenseItems({ expenseId, ...input }),
+    onSuccess: () => invalidateExpense(queryClient, expenseId),
+  });
+}
+
+export function useCorrectExpenseItems(expenseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      readonly items: readonly api.ExpenseItemDraft[];
+      readonly reason: string;
+    }) => api.correctExpenseItems({ expenseId, ...input }),
+    onSuccess: () => invalidateExpense(queryClient, expenseId),
+  });
+}
+
+/**
+ * Approving an allocation moves who owes what, so it invalidates the same set a refund does —
+ * plus the version history, which has just gained a row.
+ */
+export function useApproveAllocation(expenseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      readonly decision: api.AllocationDecisionInput;
+      readonly reason?: string;
+      readonly groupShareOverrides?: readonly {
+        readonly groupId: string;
+        readonly weights: readonly { readonly personId: string; readonly weight: string }[];
+      }[];
+    }) => api.approveAllocation({ expenseId, ...input }),
+    onSuccess: () => {
+      invalidateExpense(queryClient, expenseId);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.expenseHistory(expenseId) });
+    },
+  });
+}
+
+export function useRecordSettlement() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.recordSettlement,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["settlements"] });
+      void queryClient.invalidateQueries({ queryKey: ["balance"] });
+      void queryClient.invalidateQueries({ queryKey: ["proof-pack"] });
+      invalidatePayments(queryClient);
+    },
+  });
 }

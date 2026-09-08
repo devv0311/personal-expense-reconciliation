@@ -18,6 +18,17 @@ const PEOPLE = [
   { id: "p-alex", displayName: "Alex", splitwiseUserId: "sw-alex", isUser: false },
 ];
 
+const EMPTY_REGISTER = { settlements: [], total: 0, limit: 100, offset: 0 };
+
+/** People plus an empty settlement register — what this page reads before a pair is chosen. */
+function mockRoster(): void {
+  global.fetch = vi.fn().mockImplementation((input: string | URL) => {
+    const url = input.toString();
+    if (url.includes("/api/settlements")) return Promise.resolve(jsonResponse(200, EMPTY_REGISTER));
+    return Promise.resolve(jsonResponse(200, { people: PEOPLE }));
+  });
+}
+
 afterEach(() => {
   global.fetch = originalFetch;
   vi.restoreAllMocks();
@@ -25,7 +36,7 @@ afterEach(() => {
 
 describe("BalancesPage", () => {
   it("shows a loading state, then the person pickers once people load", async () => {
-    global.fetch = vi.fn().mockResolvedValue(jsonResponse(200, { people: PEOPLE }));
+    mockRoster();
     renderWithQuery(<BalancesPage />);
 
     expect(screen.getByText(/loading people/i)).toBeInTheDocument();
@@ -47,6 +58,8 @@ describe("BalancesPage", () => {
       const url = input.toString();
       if (url.includes("/api/people"))
         return Promise.resolve(jsonResponse(200, { people: PEOPLE }));
+      if (url.includes("/api/settlements"))
+        return Promise.resolve(jsonResponse(200, EMPTY_REGISTER));
       if (url.includes("/api/balances/")) {
         return Promise.resolve(
           jsonResponse(200, {
@@ -55,6 +68,8 @@ describe("BalancesPage", () => {
             netBalance: "0",
             evidenceStatus: "settled_confirmed",
             contributions: [],
+            settlements: [],
+            pendingRefundExpenseIds: [],
           }),
         );
       }
@@ -73,7 +88,7 @@ describe("BalancesPage", () => {
   });
 
   it("shows a prompt instead of calling the API when both selects name the same person", async () => {
-    global.fetch = vi.fn().mockResolvedValue(jsonResponse(200, { people: PEOPLE }));
+    mockRoster();
     const user = userEvent.setup();
     renderWithQuery(<BalancesPage />);
 

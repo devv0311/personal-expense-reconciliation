@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CashFlowDecisions } from "@/components/payments/cash-flow-decisions";
+import { PaymentDecisions } from "@/components/payments/payment-decisions";
 import { ImportStatementForm } from "@/components/payments/import-statement";
 import { ManualPaymentForm } from "@/components/payments/manual-payment-form";
 import { mockApi, type ApiMock } from "@/test-support/api-mock";
@@ -9,6 +9,7 @@ import {
   ACCOUNT,
   CLASSIFIED_CREDIT,
   COUNTERPARTY_OPTIONS,
+  PEOPLE,
   UNEXPLAINED_PAYMENT,
 } from "@/test-support/fixtures";
 import { renderWithQuery } from "@/test-support/render-with-query";
@@ -126,9 +127,10 @@ describe("interpreting one movement", () => {
         cashFlowCategory: null,
       },
       "/api/payments/counterparty-options": COUNTERPARTY_OPTIONS,
+      "/api/people": { people: PEOPLE },
       [`/api/payments/${payment.id}`]: payment,
     });
-    renderWithQuery(<CashFlowDecisions paymentId={payment.id} />);
+    renderWithQuery(<PaymentDecisions paymentId={payment.id} />);
     return api;
   }
 

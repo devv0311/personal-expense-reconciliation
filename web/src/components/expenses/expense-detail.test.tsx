@@ -22,6 +22,8 @@ afterEach(() => {
 function renderDetail(refundState: unknown = REFUND_STATE_PENDING): ApiMock {
   const api = mockApi({
     "/api/expenses/exp-1/refund-allocation": refundState,
+    "/api/expenses/exp-1/payment-links": { links: [] },
+    "/api/expenses/exp-1/items": { items: [] },
     "/api/expenses/exp-1/adjustments/distribute": { allocationId: "alloc-2" },
     "/api/expenses/exp-1/adjustments": { adjustmentId: "adj-2" },
     "/api/expenses/exp-1": EXPENSE,

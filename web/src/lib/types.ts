@@ -43,12 +43,36 @@ export interface ObligationContribution {
   readonly expenseId: string;
 }
 
+/** One recorded repayment between the two people, as the balance read reports it. */
+export interface BalanceSettlementLine {
+  readonly settlementId: string;
+  readonly paymentId: string;
+  readonly fromPersonId: string;
+  readonly toPersonId: string;
+  readonly amount: string;
+  readonly occurredAt: string;
+  readonly reason: string | null;
+}
+
 export interface BalanceResult {
   readonly personAId: string;
   readonly personBId: string;
   readonly netBalance: string;
   readonly evidenceStatus: ObligationEvidenceStatus;
   readonly contributions: readonly ObligationContribution[];
+  /**
+   * The repayments already netted into `netBalance`.
+   *
+   * Gross obligations minus these settlements **is** the net, so a screen quoting one figure
+   * can show both halves of it rather than leaving the subtraction unexplainable.
+   */
+  readonly settlements: readonly BalanceSettlementLine[];
+  /**
+   * Contributing expenses whose refund is recorded but not yet distributed — a caveat, not a
+   * correction. `netBalance` is exactly what the current allocations say, and these have a
+   * reduction no allocation reflects yet.
+   */
+  readonly pendingRefundExpenseIds: readonly string[];
 }
 
 export interface PersonSummary {
@@ -951,4 +975,119 @@ export interface GroupDetail {
   readonly type: string | null;
   readonly archivedAt: string | null;
   readonly memberships: readonly GroupMembershipDetail[];
+}
+
+/* ------------------------------------------------------------------- expense authoring */
+
+export const EXPENSE_RELATIONSHIP_TYPES = [
+  "personal",
+  "shared",
+  "paid_on_behalf",
+  "gift",
+  "household_shared_flat",
+] as const;
+export type ExpenseRelationshipType = (typeof EXPENSE_RELATIONSHIP_TYPES)[number];
+
+export const ALLOCATION_METHODS = [
+  "equal",
+  "exact",
+  "percentage",
+  "item_based",
+  "quantity_based",
+  "custom",
+] as const;
+export type AllocationMethod = (typeof ALLOCATION_METHODS)[number];
+
+export interface BeneficiaryRef {
+  readonly type: "person" | "group";
+  readonly id: string;
+}
+
+export interface CreateExpenseResult {
+  readonly expenseId: string;
+  readonly state: ExpenseState;
+  readonly fundedByPaymentIds: readonly string[];
+  /** True when nobody's payment in this ledger funded it — somebody else paid (ADR-0006). */
+  readonly externallyFunded: boolean;
+}
+
+export interface ExpenseFundingLink {
+  readonly linkId: string;
+  readonly paymentId: string;
+  readonly amount: string;
+}
+
+/* ------------------------------------------------------------------------ settlements */
+
+export interface SettlementRegisterEntry {
+  readonly id: string;
+  readonly paymentId: string;
+  readonly counterpartyPersonId: string;
+  readonly counterpartyName: string;
+  readonly amount: string;
+  readonly reason: string | null;
+  readonly recordedAt: string;
+  /** From the linked payment, which is what says which way the money actually moved. */
+  readonly direction: PaymentDirection;
+  readonly occurredAt: string;
+  readonly paymentDescription: string;
+}
+
+export interface SettlementRegisterResult {
+  readonly settlements: readonly SettlementRegisterEntry[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+/* --------------------------------------------------------------------------- history */
+
+export interface AllocationVersionLine {
+  readonly beneficiaryType: string;
+  readonly beneficiaryId: string;
+  readonly beneficiaryName: string | null;
+  readonly amount: string;
+  readonly expenseItemId: string | null;
+}
+
+/** The current version is the single row whose `supersededAt` is null. */
+export interface AllocationVersion {
+  readonly allocationId: string;
+  readonly method: string;
+  readonly decidedAt: string;
+  readonly decidedBy: string;
+  readonly supersededAt: string | null;
+  readonly lines: readonly AllocationVersionLine[];
+}
+
+/**
+ * One event from the trail reads (`GET /api/audit/...`, `.../history`).
+ *
+ * Distinct from `AuditEventRecord` because it is a different `SELECT`: the trail reads carry
+ * `source` and the monotonic `sequence` the log is ordered by, and a type that pretended both
+ * shapes were one would have a surface reading a field the API never sent.
+ */
+export interface AuditTrailEvent {
+  readonly entityType: string;
+  readonly entityId: string;
+  readonly action: string;
+  readonly oldValue: unknown;
+  readonly newValue: unknown;
+  readonly actor: string;
+  readonly source: string | null;
+  readonly reason: string | null;
+  readonly occurredAt: string;
+  readonly sequence: string;
+}
+
+export interface ExpenseHistoryResult {
+  readonly expenseId: string;
+  readonly allocationVersions: readonly AllocationVersion[];
+  readonly events: readonly AuditTrailEvent[];
+  readonly sources: {
+    readonly allocationIds: readonly string[];
+    readonly adjustmentIds: readonly string[];
+    readonly evidenceIds: readonly string[];
+    readonly settlementIds: readonly string[];
+  };
 }

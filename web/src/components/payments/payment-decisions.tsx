@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { Fact, Facts, UnknownValue } from "@/components/facts";
+import { Money } from "@/components/money";
 import { Section } from "@/components/page-header";
+import { SettlementForm } from "@/components/settlements/settlement-form";
 import { DecisionDialog } from "@/components/review/decision-dialog";
 import { ErrorBlock, LoadingStatus, TableSkeleton } from "@/components/status";
 import { Button } from "@/components/ui/button";
@@ -33,8 +35,8 @@ import {
 } from "@/lib/types";
 
 /**
- * The two interpretations a person records against one movement: who was on the other side,
- * and what role the money played.
+ * The interpretations a person records against one movement: who was on the other side, what
+ * role the money played, and whether it repaid a debt.
  *
  * They are deliberately separate controls because they are separate questions (ADR-0017,
  * 17.1): `counterpartyType` answers *who*, `cashFlowCategory` answers *what for*. A payment to
@@ -44,7 +46,7 @@ import {
  * Nothing here approves anything on the ledger's behalf. Approval is its own step, its
  * evidence gate is stated before the button, and the service re-checks it regardless.
  */
-export function CashFlowDecisions({ paymentId }: { paymentId: string }) {
+export function PaymentDecisions({ paymentId }: { paymentId: string }) {
   const payment = usePayment(paymentId);
 
   if (payment.isPending) {
@@ -62,6 +64,7 @@ export function CashFlowDecisions({ paymentId }: { paymentId: string }) {
     <div className="flex flex-col gap-8">
       <CounterpartySection payment={payment.data} />
       <CashFlowSection payment={payment.data} />
+      <SettlementSection payment={payment.data} />
     </div>
   );
 }
@@ -405,6 +408,41 @@ function CashFlowSection({ payment }: { payment: PaymentWorkspaceItem }) {
           decide.mutate({ paymentId: payment.id, step: "reject", reason }, { onSuccess: close });
         }}
       />
+    </Section>
+  );
+}
+
+/* ------------------------------------------------------------------------- settlement */
+
+/**
+ * Marking a movement as a repayment.
+ *
+ * Separate from the cash-flow role on purpose, and not a duplicate of it: the category says
+ * what kind of movement this is for cash reconciliation, while a `Settlement` is the record
+ * that discharges a specific balance between two people. Approving `PEER_SETTLEMENT` in fact
+ * *requires* a settlement to already exist — that is the category's evidence gate — so this is
+ * the step that comes first, not a second way of doing the same thing.
+ */
+function SettlementSection({ payment }: { payment: PaymentWorkspaceItem }) {
+  return (
+    <Section
+      title="Did it repay a debt"
+      headingId="settlement"
+      description="A settlement discharges an obligation and never creates one, so it has no beneficiaries and no allocation of its own."
+      actions={<SettlementForm payment={payment} />}
+    >
+      <Facts>
+        <Fact label="Settlements recorded" mono>
+          {payment.settlementCount}
+        </Fact>
+        <Fact label="Total settled against it">
+          {payment.settlementTotal === "0" ? (
+            <UnknownValue>Nothing recorded</UnknownValue>
+          ) : (
+            <Money paise={payment.settlementTotal} />
+          )}
+        </Fact>
+      </Facts>
     </Section>
   );
 }
