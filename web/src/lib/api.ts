@@ -11,6 +11,7 @@ import type {
   AccountSummary,
   AccountType,
   ApiErrorBody,
+  AuditTrailEvent,
   ApplyRulesResult,
   BalanceResult,
   BeneficiaryRef,
@@ -33,6 +34,7 @@ import type {
   ExpenseHistoryResult,
   ExpenseItemRecord,
   ExpenseLedgerRow,
+  ExpensePage,
   ExpenseRelationshipType,
   ExpenseState,
   GroupDetail,
@@ -143,21 +145,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export interface ListExpensesFilter {
   readonly state?: ExpenseState;
   readonly paidBy?: string;
+  readonly beneficiary?: string;
+  readonly search?: string;
+  readonly category?: string;
+  readonly from?: string;
+  readonly to?: string;
+  readonly withoutAllocation?: boolean;
   readonly limit?: number;
+  readonly offset?: number;
 }
 
-export async function listExpenses(
-  filter: ListExpensesFilter = {},
-): Promise<readonly ExpenseLedgerRow[]> {
+/**
+ * A page of the ledger, with how many rows match across the whole of it.
+ *
+ * The `total` is the point: audit row 32 recorded what its absence cost — a page that loaded
+ * the newest rows, searched only those in the browser, and showed a count that meant nothing.
+ * Search, category and period are all applied by the API, over every expense.
+ */
+export async function listExpenses(filter: ListExpensesFilter = {}): Promise<ExpensePage> {
   const params = new URLSearchParams();
-  if (filter.state !== undefined) params.set("state", filter.state);
-  if (filter.paidBy !== undefined) params.set("paidBy", filter.paidBy);
-  if (filter.limit !== undefined) params.set("limit", String(filter.limit));
+  for (const [key, value] of Object.entries(filter)) {
+    if (value === undefined || value === "" || value === false) continue;
+    params.set(key, String(value));
+  }
   const query = params.toString();
-  const { expenses } = await request<{ expenses: ExpenseLedgerRow[] }>(
-    `/api/expenses${query.length > 0 ? `?${query}` : ""}`,
-  );
-  return expenses;
+  return request<ExpensePage>(`/api/expenses${query.length > 0 ? `?${query}` : ""}`);
 }
 
 /* --------------------------------------------------------------------------------- people */
@@ -1462,4 +1474,31 @@ export async function cancelJob(input: {
       ...(input.reason === undefined ? {} : { reason: input.reason }),
     }),
   });
+}
+
+/**
+ * Asks the model again about a payment whose proposal was declined.
+ *
+ * A re-run, not an edit. The declined decision stays on the record — a second proposal does
+ * not erase the first, and nothing about the re-run approves anything: what comes back is
+ * another proposal for the queue (ADR-0030).
+ */
+export async function reclassifyPayment(input: {
+  readonly paymentId: string;
+  readonly reason?: string;
+}): Promise<unknown> {
+  return request(`/api/review/payments/${input.paymentId}/reclassify`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+    }),
+  });
+}
+
+/** Every decision recorded against one movement, oldest first. */
+export async function getPaymentHistory(
+  paymentId: string,
+): Promise<{ readonly events: readonly AuditTrailEvent[] }> {
+  return request(`/api/payments/${paymentId}/history`);
 }

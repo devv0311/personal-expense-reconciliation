@@ -10,10 +10,15 @@ import { Money } from "@/components/money";
 import { PaymentSummary } from "@/components/payment-summary";
 import { DecisionDialog } from "@/components/review/decision-dialog";
 import { Section } from "@/components/page-header";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { evidenceTypeLabel, reviewReasonLabel, sentenceCase } from "@/lib/labels";
-import { useDecideInference, useDecidePaymentDuplicate, useEnrichEvidence } from "@/lib/queries";
+import {
+  useDecideInference,
+  useDecidePaymentDuplicate,
+  useEnrichEvidence,
+  useReclassifyPayment,
+} from "@/lib/queries";
 import type {
   ClassificationDecisionItem,
   PossibleDuplicateItem,
@@ -254,7 +259,19 @@ function DuplicateInspector({ item }: { item: PossibleDuplicateItem }) {
 /* ----------------------------------------------------------- rejected classification */
 
 /** Money with no explanation. There is nothing to approve here — only somewhere to go next. */
+/**
+ * A payment whose proposal was declined, and the two ways forward from there.
+ *
+ * **Ask again** re-runs the model (ADR-0030); the declined decision stays on the record, and
+ * what comes back is another proposal, not an approval. **Classify it yourself** is the
+ * payment workspace, where a person states the counterparty and the cash-flow role directly.
+ * Before this, a declined proposal was a dead end with a visible amount and no way to act on
+ * it (audit row 09).
+ */
 function RejectedInspector({ item }: { item: RejectedClassificationItem }) {
+  const [asking, setAsking] = useState(false);
+  const reclassify = useReclassifyPayment();
+
   return (
     <div className="flex flex-col gap-6">
       <NoteList
@@ -271,6 +288,58 @@ function RejectedInspector({ item }: { item: RejectedClassificationItem }) {
       <Section title="The payment" headingId="inspector-payment">
         <PaymentSummary payment={item.payment} />
       </Section>
+
+      <Section
+        title="What to do about it"
+        headingId="inspector-recovery"
+        description="A declined proposal is not a decision about what this payment was — only about what it was not."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => setAsking(true)}>
+              Ask the model again
+            </Button>
+            <Link
+              href={`/payments/${item.payment.paymentId}`}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              Classify it yourself
+            </Link>
+          </div>
+        }
+      >
+        <p className="max-w-prose text-meta text-ink-muted">
+          Asking again records a fresh proposal for this queue; it approves nothing and does not
+          erase the declined one. Classifying it yourself states the counterparty and the cash-flow
+          role directly, which is the honest path when the model has already been wrong about it
+          once.
+        </p>
+      </Section>
+
+      <DecisionDialog
+        open={asking}
+        onClose={() => {
+          setAsking(false);
+          reclassify.reset();
+        }}
+        title="Ask the model again"
+        consequence={
+          <>
+            This sends the payment to the model for a second opinion and records whatever comes back
+            as a <strong>new proposal</strong> in this queue. It approves nothing, and the declined
+            decision stays on the record.
+          </>
+        }
+        confirmLabel="Ask again"
+        reasonLabel="Why it is worth asking again"
+        pending={reclassify.isPending}
+        error={reclassify.error}
+        onConfirm={(reason) => {
+          reclassify.mutate(
+            { paymentId: item.payment.paymentId, ...(reason === undefined ? {} : { reason }) },
+            { onSuccess: () => setAsking(false) },
+          );
+        }}
+      />
 
       <Section title="The declined decision" headingId="inspector-decision">
         <Facts>

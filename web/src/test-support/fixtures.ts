@@ -19,6 +19,7 @@ import type {
   EvidenceLibraryRow,
   EvidenceMatchCandidateView,
   EvidenceRecord,
+  ExpenseHistoryResult,
   ExpenseLedgerRow,
   GroupDetail,
   ImportBatchSummary,
@@ -38,6 +39,7 @@ import type {
   ReceiptView,
   ReconciliationRun,
   RefundAllocationState,
+  RejectedClassificationItem,
   ReviewQueueResult,
   RuleView,
   SplitwiseAuditFinding,
@@ -994,4 +996,86 @@ export const OCCASION: OccasionSummary = {
   defaultParticipants: [],
   createdAt: "2026-08-13T10:00:00.000Z",
   expenseCount: 3,
+};
+
+/** A proposal a person declined: the payment is left with a visible amount and no explanation. */
+export const REJECTED_ITEM: RejectedClassificationItem = {
+  kind: "rejected_classification",
+  id: "inf-9",
+  amount: "124000",
+  occurredAt: "2026-08-19T13:10:00.000Z",
+  reasons: ["payment_unexplained"],
+  payment: CLASSIFICATION_ITEM.payment,
+  inferenceId: "inf-9",
+  decidedAt: "2026-08-20T09:00:00.000Z",
+  decidedBy: "user",
+  expenseId: null,
+  expenseState: null,
+};
+
+export const EXPENSE_HISTORY: ExpenseHistoryResult = {
+  expenseId: "exp-1",
+  allocationVersions: [
+    {
+      allocationId: "alloc-1",
+      method: "equal",
+      decidedAt: "2026-08-11T20:00:00.000Z",
+      decidedBy: "manual",
+      supersededAt: "2026-08-20T10:00:00.000Z",
+      lines: [
+        {
+          beneficiaryType: "person",
+          beneficiaryId: "p-dev",
+          beneficiaryName: "Dev",
+          amount: "107500",
+          expenseItemId: null,
+        },
+        {
+          beneficiaryType: "person",
+          beneficiaryId: "p-alex",
+          beneficiaryName: "Alex",
+          amount: "107500",
+          expenseItemId: null,
+        },
+      ],
+    },
+    {
+      allocationId: "alloc-2",
+      method: "item_based",
+      decidedAt: "2026-08-20T10:00:00.000Z",
+      decidedBy: "manual",
+      supersededAt: null,
+      lines: [
+        {
+          beneficiaryType: "person",
+          beneficiaryId: "p-dev",
+          beneficiaryName: "Dev",
+          amount: "75000",
+          expenseItemId: "item-1",
+        },
+        {
+          beneficiaryType: "person",
+          beneficiaryId: "p-alex",
+          beneficiaryName: "Alex",
+          amount: "75000",
+          expenseItemId: "item-2",
+        },
+      ],
+    },
+  ],
+  events: [
+    {
+      entityType: "allocation",
+      entityId: "alloc-2",
+      action: "supersede",
+      oldValue: { method: "equal" },
+      newValue: { method: "item_based" },
+      actor: "user",
+      source: "api POST /api/expenses/:expenseId/adjustments/distribute",
+      reason: "A refund came back on two items",
+      occurredAt: "2026-08-20T10:00:00.000Z",
+      sequence: "42",
+    },
+  ],
+  sources: { allocationIds: [], adjustmentIds: [], evidenceIds: [], settlementIds: [] },
 };

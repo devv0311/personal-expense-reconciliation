@@ -8,6 +8,7 @@ import { OccasionList } from "@/components/expenses/occasions";
 import { Money } from "@/components/money";
 import { EmptyBlock, ErrorBlock, LoadingStatus, TableSkeleton } from "@/components/status";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import {
@@ -30,14 +31,37 @@ const DATE_FORMAT = new Intl.DateTimeFormat("en-IN", {
   timeZone: "UTC",
 });
 
+const PAGE_SIZE = 50;
+
 export default function ExpensesPage() {
   const [state, setState] = useState<ExpenseState | "">("");
   const [paidBy, setPaidBy] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [withoutAllocation, setWithoutAllocation] = useState(false);
+  const [offset, setOffset] = useState(0);
+
   const peopleQuery = usePeople();
+  // Every filter goes to the API, over the whole ledger. Searching a loaded window in the
+  // browser is what audit row 32 recorded: a result count that meant nothing, and older
+  // expenses that were simply invisible.
   const expensesQuery = useExpenses({
     ...(state === "" ? {} : { state }),
     ...(paidBy === null ? {} : { paidBy }),
+    ...(search.trim() === "" ? {} : { search: search.trim() }),
+    ...(category.trim() === "" ? {} : { category: category.trim() }),
+    ...(withoutAllocation ? { withoutAllocation: true } : {}),
+    limit: PAGE_SIZE,
+    offset,
   });
+
+  /** Every control resets the page: staying on page 4 of a different filter shows nothing. */
+  const onFilterChange = <T,>(set: (value: T) => void) => {
+    return (value: T) => {
+      set(value);
+      setOffset(0);
+    };
+  };
 
   // Falls back to a short, clearly-a-placeholder form rather than a raw UUID when the people
   // list hasn't loaded (or failed) — a person's own database id is not something to show them.
@@ -57,11 +81,33 @@ export default function ExpensesPage() {
 
       <div className="flex flex-wrap items-end gap-4">
         <div className="flex flex-col gap-1.5">
+          <Label htmlFor="expense-search">Search</Label>
+          <Input
+            id="expense-search"
+            value={search}
+            placeholder="Description"
+            onChange={(event) => onFilterChange(setSearch)(event.target.value)}
+            className="w-56"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="category-filter">Category</Label>
+          <Input
+            id="category-filter"
+            value={category}
+            placeholder="dining"
+            onChange={(event) => onFilterChange(setCategory)(event.target.value)}
+            className="w-40"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="state-filter">State</Label>
           <Select
             id="state-filter"
             value={state}
-            onChange={(event) => setState(event.target.value as ExpenseState | "")}
+            onChange={(event) => onFilterChange(setState)(event.target.value as ExpenseState | "")}
             className="min-w-[160px]"
           >
             <option value="">All states</option>
@@ -79,7 +125,9 @@ export default function ExpensesPage() {
             <Select
               id="paid-by-filter"
               value={paidBy ?? ""}
-              onChange={(event) => setPaidBy(event.target.value === "" ? null : event.target.value)}
+              onChange={(event) =>
+                onFilterChange(setPaidBy)(event.target.value === "" ? null : event.target.value)
+              }
               className="min-w-[160px]"
             >
               <option value="">Anyone</option>
@@ -92,6 +140,16 @@ export default function ExpensesPage() {
             </Select>
           </div>
         )}
+        <label className="flex items-center gap-2 pb-2 text-body text-ink">
+          <input
+            type="checkbox"
+            checked={withoutAllocation}
+            onChange={(event) => onFilterChange(setWithoutAllocation)(event.target.checked)}
+            className="size-4 accent-[var(--color-accent)]"
+          />
+          Nobody named a beneficiary yet
+        </label>
+
         {peopleQuery.isError && (
           <p className="text-meta text-debit">
             Couldn&apos;t load people.{" "}
@@ -124,10 +182,10 @@ export default function ExpensesPage() {
           }}
         />
       )}
-      {expensesQuery.isSuccess && expensesQuery.data.length === 0 && (
-        <EmptyBlock>No expenses match these filters.</EmptyBlock>
+      {expensesQuery.isSuccess && expensesQuery.data.expenses.length === 0 && (
+        <EmptyBlock>No expenses match these filters, anywhere in the ledger.</EmptyBlock>
       )}
-      {expensesQuery.isSuccess && expensesQuery.data.length > 0 && (
+      {expensesQuery.isSuccess && expensesQuery.data.expenses.length > 0 && (
         <>
           <Table className="hidden min-w-[560px] sm:table">
             <TableCaption>Expense ledger</TableCaption>
@@ -142,7 +200,7 @@ export default function ExpensesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {expensesQuery.data.map((expense) => {
+              {expensesQuery.data.expenses.map((expense) => {
                 const hasAdjustment = expense.netAmount !== expense.grossAmount;
                 return (
                   <TableRow key={expense.id} className="align-top">
@@ -176,7 +234,7 @@ export default function ExpensesPage() {
           </Table>
 
           <ul className="flex flex-col gap-3 sm:hidden">
-            {expensesQuery.data.map((expense) => {
+            {expensesQuery.data.expenses.map((expense) => {
               const hasAdjustment = expense.netAmount !== expense.grossAmount;
               return (
                 <li key={expense.id} className="border-b border-rule pb-3 last:border-b-0">
@@ -207,6 +265,32 @@ export default function ExpensesPage() {
               );
             })}
           </ul>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-3">
+            <p className="text-meta text-ink-muted">
+              Showing {offset + 1}–{offset + expensesQuery.data.expenses.length} of{" "}
+              <span className="tabular font-mono">{expensesQuery.data.total}</span> matching
+              expenses in the whole ledger.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={offset === 0}
+                onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={offset + expensesQuery.data.expenses.length >= expensesQuery.data.total}
+                onClick={() => setOffset(offset + PAGE_SIZE)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
         </>
       )}
 

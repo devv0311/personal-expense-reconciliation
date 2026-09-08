@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { NoteList } from "@/components/annotations";
 import { ExpenseStateTag } from "@/components/expense-state-tag";
 import { AllocationEditor } from "@/components/expenses/allocation-editor";
@@ -76,6 +77,14 @@ export function ExpenseDetail({ expenseId }: { expenseId: string }) {
             {formatDate(row.occurredAt)} · {sentenceCase(row.relationshipType)} · paid by{" "}
             {personName(people.data ?? [], row.paidByPersonId)}
           </>
+        }
+        actions={
+          <Link
+            href={`/expenses/${expenseId}/history`}
+            className="text-meta text-accent underline-offset-2 hover:underline"
+          >
+            Every split it has had
+          </Link>
         }
       />
 

@@ -33,6 +33,14 @@ export interface ExpenseLedgerRow {
   readonly state: ExpenseState;
 }
 
+export interface ExpensePage {
+  readonly expenses: readonly ExpenseLedgerRow[];
+  /** How many match across the whole ledger, not how many were returned (audit row 32). */
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+}
+
 export type ObligationEvidenceStatus =
   "open_unconfirmed" | "believed_settled_unconfirmed_by_ledger" | "settled_confirmed";
 

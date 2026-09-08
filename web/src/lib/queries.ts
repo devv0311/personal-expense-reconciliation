@@ -55,6 +55,7 @@ export const queryKeys = {
   peopleManagement: () => ["people-management"] as const,
   expenseFunding: (id: string) => ["expense-funding", id] as const,
   expenseHistory: (id: string) => ["expense-history", id] as const,
+  paymentHistory: (id: string) => ["payment-history", id] as const,
   settlements: (counterpartyPersonId?: string) =>
     ["settlements", counterpartyPersonId ?? null] as const,
   merchants: () => ["merchants"] as const,
@@ -229,6 +230,19 @@ export function useDecideInference() {
     mutationFn: api.decideInference,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      void queryClient.invalidateQueries({ queryKey: ["expenses"] });
+    },
+  });
+}
+
+/** Asks the model again. What comes back is a proposal, so the queue is what changes. */
+export function useReclassifyPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.reclassifyPayment,
+    onSuccess: (_result, input) => {
+      void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.payment(input.paymentId) });
       void queryClient.invalidateQueries({ queryKey: ["expenses"] });
     },
   });
@@ -571,6 +585,13 @@ export function useExpenseHistory(expenseId: string) {
   return useQuery({
     queryKey: queryKeys.expenseHistory(expenseId),
     queryFn: () => api.getExpenseHistory(expenseId),
+  });
+}
+
+export function usePaymentHistory(paymentId: string) {
+  return useQuery({
+    queryKey: queryKeys.paymentHistory(paymentId),
+    queryFn: () => api.getPaymentHistory(paymentId),
   });
 }
 
