@@ -50,11 +50,13 @@ describe("the application shell", () => {
     const links = within(nav).getAllByRole("link");
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
       "/review",
+      "/payments",
       "/reconciliation",
       "/expenses",
       "/balances",
       "/splitwise",
       "/proof-packs",
+      "/setup",
     ]);
     expect(within(nav).getByRole("link", { name: "Expenses" })).toHaveAttribute(
       "aria-current",
@@ -107,7 +109,7 @@ describe("the command palette", () => {
     await screen.findByRole("listbox");
     await user.keyboard("{ArrowDown}{Enter}");
 
-    await waitFor(() => expect(pushedRoutes).toEqual(["/reconciliation"]));
+    await waitFor(() => expect(pushedRoutes).toEqual(["/payments"]));
     // Nothing the palette does is a POST.
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(
       0,

@@ -9,8 +9,14 @@ import type {
   AccountBoundaryDraft,
   AccountSnapshotsResult,
   AccountSummary,
+  AccountType,
   ApiErrorBody,
   BalanceResult,
+  CashFlowCategory,
+  CashFlowDecisionResult,
+  CashFlowState,
+  ClassifyPaymentsResult,
+  CounterpartyOptions,
   DecideEvidenceMatchResult,
   EvidenceMatchesResult,
   EvidenceObservationView,
@@ -19,8 +25,21 @@ import type {
   ExpenseItemRecord,
   ExpenseLedgerRow,
   ExpenseState,
+  GroupDetail,
+  ImportHistoryResult,
+  ImportStatementResult,
   MatchEvidenceContextResult,
+  MerchantDetail,
+  NormalizePaymentsResult,
+  PaymentChannel,
   PaymentContextResult,
+  PaymentCounterpartyType,
+  PaymentDirection,
+  PaymentListResult,
+  PaymentReferenceType,
+  PaymentState,
+  PaymentWorkspaceItem,
+  PersonDetail,
   PersonSummary,
   ProofPackPreview,
   ReceiptView,
@@ -435,4 +454,321 @@ export async function getProofPack(
 ): Promise<ProofPackPreview> {
   const query = asOf === undefined ? "" : `?asOf=${encodeURIComponent(asOf)}`;
   return request<ProofPackPreview>(`/api/proof-packs/${recipientPersonId}${query}`);
+}
+
+/* --------------------------------------------------------------- the payment workspace */
+
+export interface ListPaymentsFilter {
+  readonly accountId?: string;
+  readonly importBatchId?: string;
+  readonly direction?: PaymentDirection;
+  readonly state?: PaymentState;
+  readonly cashFlowState?: CashFlowState;
+  readonly cashFlowCategory?: CashFlowCategory;
+  readonly counterpartyType?: PaymentCounterpartyType;
+  readonly search?: string;
+  readonly from?: string;
+  readonly to?: string;
+  /** The "payments with no explanation" list the review queue never was (audit row 36). */
+  readonly onlyUnexplained?: boolean;
+  readonly limit?: number;
+  readonly offset?: number;
+}
+
+export async function listPayments(filter: ListPaymentsFilter = {}): Promise<PaymentListResult> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filter)) {
+    if (value === undefined || value === "" || value === false) continue;
+    params.set(key, String(value));
+  }
+  const query = params.toString();
+  return request<PaymentListResult>(`/api/payments${query.length > 0 ? `?${query}` : ""}`);
+}
+
+export async function getPayment(paymentId: string): Promise<PaymentWorkspaceItem> {
+  return request<PaymentWorkspaceItem>(`/api/payments/${paymentId}`);
+}
+
+export async function getCounterpartyOptions(): Promise<CounterpartyOptions> {
+  return request<CounterpartyOptions>("/api/payments/counterparty-options");
+}
+
+/**
+ * Records a movement nobody exported — cash handed over, a transfer no statement shows yet.
+ *
+ * `amount` is a magnitude in paise; which way the money went is `direction`, never a sign.
+ */
+export async function recordManualPayment(input: {
+  readonly accountId: string;
+  readonly amount: string;
+  readonly direction: PaymentDirection;
+  readonly occurredAt: string;
+  readonly description: string;
+  readonly channel?: PaymentChannel;
+  readonly externalReference?: string;
+  readonly referenceType?: PaymentReferenceType;
+}): Promise<{ readonly paymentId: string; readonly importBatchId: string }> {
+  return request("/api/payments", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
+  });
+}
+
+export async function setPaymentCounterparty(input: {
+  readonly paymentId: string;
+  readonly counterpartyType: PaymentCounterpartyType;
+  readonly counterpartyId?: string;
+  readonly reason?: string;
+}): Promise<unknown> {
+  const { paymentId, ...rest } = input;
+  return request(`/api/payments/${paymentId}/counterparty`, {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(rest) }),
+  });
+}
+
+/** Deterministic, idempotent-by-state: acts on `imported` payments only, and guesses nothing. */
+export async function normalizePayments(importBatchId?: string): Promise<NormalizePaymentsResult> {
+  return request<NormalizePaymentsResult>("/api/payments/normalize", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact({ importBatchId }) }),
+  });
+}
+
+/** Asks the model what each normalized payment was. Every answer is a proposal, never state. */
+export async function classifyPayments(importBatchId?: string): Promise<ClassifyPaymentsResult> {
+  return request<ClassifyPaymentsResult>("/api/payments/classify", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact({ importBatchId }) }),
+  });
+}
+
+/**
+ * One step of ADR-0017's cash-flow lifecycle per call.
+ *
+ * Four steps rather than one PATCH, because each is a different decision with a different
+ * consequence — and lumping them together is how "approved" becomes a side effect of
+ * "classified". `reject` requires a reason; the API refuses without one.
+ */
+export async function decidePaymentCashFlow(input: {
+  readonly paymentId: string;
+  readonly step: "normalize" | "classify" | "approve" | "reject";
+  readonly category?: CashFlowCategory;
+  readonly counterLegPaymentId?: string;
+  readonly reason?: string;
+}): Promise<CashFlowDecisionResult> {
+  const { paymentId, step, ...rest } = input;
+  return request<CashFlowDecisionResult>(`/api/payments/${paymentId}/cash-flow/${step}`, {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(rest) }),
+  });
+}
+
+/* ----------------------------------------------------------------- statement imports */
+
+/**
+ * All-or-nothing: a file with any unreadable row imports nothing and names every bad row,
+ * because a partially imported statement leaves the ledger quietly missing movements.
+ */
+export async function importBankCsv(input: {
+  readonly accountId: string;
+  readonly sourceSystem: string;
+  readonly fileContent: string;
+  readonly fileReference?: string;
+}): Promise<ImportStatementResult> {
+  return request<ImportStatementResult>("/api/imports/bank-csv", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
+  });
+}
+
+export async function listImports(options: {
+  readonly limit?: number;
+  readonly offset?: number;
+}): Promise<ImportHistoryResult> {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  if (options.offset !== undefined) params.set("offset", String(options.offset));
+  const query = params.toString();
+  return request<ImportHistoryResult>(`/api/imports${query.length > 0 ? `?${query}` : ""}`);
+}
+
+/* ---------------------------------------------------------------------- master data */
+
+export async function listPeopleForManagement(): Promise<readonly PersonDetail[]> {
+  const { people } = await request<{ people: PersonDetail[] }>("/api/people/manage");
+  return people;
+}
+
+export async function createPerson(input: {
+  readonly displayName: string;
+  readonly splitwiseUserId?: string;
+  readonly notes?: string;
+}): Promise<{ readonly person: PersonDetail }> {
+  return request("/api/people", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
+  });
+}
+
+/**
+ * `null` and absent mean different things here, deliberately: a present `null` clears the
+ * field (unmapping someone from Splitwise), an absent one leaves it alone. `compact` would
+ * erase that distinction, so this one builds its body explicitly.
+ */
+export async function updatePerson(input: {
+  readonly personId: string;
+  readonly displayName?: string;
+  readonly splitwiseUserId?: string | null;
+  readonly notes?: string | null;
+  readonly archived?: boolean;
+}): Promise<{ readonly person: PersonDetail }> {
+  const { personId, ...rest } = input;
+  return request(`/api/people/${personId}`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined)),
+    }),
+  });
+}
+
+export async function createAccount(input: {
+  readonly name: string;
+  readonly type: AccountType;
+  readonly institution?: string;
+  readonly last4?: string;
+  readonly currency?: string;
+}): Promise<{ readonly accountId: string }> {
+  return request("/api/accounts", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
+  });
+}
+
+export async function updateAccount(input: {
+  readonly accountId: string;
+  readonly name?: string;
+  readonly institution?: string | null;
+  readonly isActive?: boolean;
+}): Promise<unknown> {
+  const { accountId, ...rest } = input;
+  return request(`/api/accounts/${accountId}`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined)),
+    }),
+  });
+}
+
+export async function listMerchants(): Promise<readonly MerchantDetail[]> {
+  const { merchants } = await request<{ merchants: MerchantDetail[] }>("/api/merchants");
+  return merchants;
+}
+
+export async function createMerchant(input: {
+  readonly canonicalName: string;
+  readonly defaultCategory?: string;
+  readonly aliases?: readonly string[];
+}): Promise<{ readonly merchantId: string }> {
+  return request("/api/merchants", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
+  });
+}
+
+/** Teaches normalization one more narration. Matching is exact, so this is the whole fix. */
+export async function addMerchantAlias(input: {
+  readonly merchantId: string;
+  readonly rawPattern: string;
+}): Promise<unknown> {
+  return request(`/api/merchants/${input.merchantId}/aliases`, {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, rawPattern: input.rawPattern }),
+  });
+}
+
+export async function updateMerchant(input: {
+  readonly merchantId: string;
+  readonly canonicalName?: string;
+  readonly defaultCategory?: string | null;
+  readonly archived?: boolean;
+}): Promise<unknown> {
+  const { merchantId, ...rest } = input;
+  return request(`/api/merchants/${merchantId}`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined)),
+    }),
+  });
+}
+
+export async function listGroups(): Promise<readonly GroupDetail[]> {
+  const { groups } = await request<{ groups: GroupDetail[] }>("/api/groups");
+  return groups;
+}
+
+export async function createGroup(input: {
+  readonly name: string;
+  readonly type?: string;
+  readonly members?: readonly string[];
+  readonly joinedAt?: string;
+}): Promise<{ readonly groupId: string }> {
+  return request("/api/groups", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
+  });
+}
+
+export async function updateGroup(input: {
+  readonly groupId: string;
+  readonly name?: string;
+  readonly archived?: boolean;
+}): Promise<unknown> {
+  const { groupId, ...rest } = input;
+  return request(`/api/groups/${groupId}`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      ...Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined)),
+    }),
+  });
+}
+
+/**
+ * Starts a membership stint, dated.
+ *
+ * The date is the point: `domain.expandGroupAllocationLine` counts who was a member **as of an
+ * expense's date** (ADR-0009), so joining a group does not retroactively put someone into last
+ * month's dinner.
+ */
+export async function addGroupMember(input: {
+  readonly groupId: string;
+  readonly personId: string;
+  readonly joinedAt: string;
+}): Promise<{ readonly membershipId: string }> {
+  const { groupId, ...rest } = input;
+  return request(`/api/groups/${groupId}/members`, {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...rest }),
+  });
+}
+
+export async function endGroupMembership(input: {
+  readonly membershipId: string;
+  readonly leftAt: string | null;
+}): Promise<unknown> {
+  return request(`/api/group-memberships/${input.membershipId}/end`, {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, leftAt: input.leftAt }),
+  });
+}
+
+/** Drops `undefined` and empty strings from a request body — an omitted field, not a blank one. */
+function compact(input: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined && value !== ""),
+  );
 }

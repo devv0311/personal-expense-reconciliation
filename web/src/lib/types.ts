@@ -715,3 +715,240 @@ export interface ProofPackPreview {
   readonly warnings: readonly ProofPackWarning[];
   readonly pack: ProofPack;
 }
+
+/* ------------------------------------------------------------------ the payment workspace */
+
+export const PAYMENT_DIRECTIONS = ["debit", "credit"] as const;
+export type PaymentDirection = (typeof PAYMENT_DIRECTIONS)[number];
+
+export const PAYMENT_CHANNELS = ["upi", "bank_transfer", "card", "cash", "other"] as const;
+export type PaymentChannel = (typeof PAYMENT_CHANNELS)[number];
+
+export const PAYMENT_COUNTERPARTY_TYPES = [
+  "merchant",
+  "person",
+  "internal_account",
+  "investment_instrument",
+  "unknown",
+] as const;
+export type PaymentCounterpartyType = (typeof PAYMENT_COUNTERPARTY_TYPES)[number];
+
+export const PAYMENT_REFERENCE_TYPES = [
+  "upi_utr",
+  "upi_rrn",
+  "bank_reference",
+  "card_reference",
+  "merchant_order_id",
+  "cheque_number",
+  "other",
+] as const;
+export type PaymentReferenceType = (typeof PAYMENT_REFERENCE_TYPES)[number];
+
+export const PAYMENT_STATES = ["imported", "normalized", "linked", "ignored"] as const;
+export type PaymentState = (typeof PAYMENT_STATES)[number];
+
+/**
+ * ADR-0017's cash-flow lifecycle, which runs beside the older `imported → normalized → linked`
+ * one rather than replacing it. A payment has a position in both at once.
+ */
+export const CASH_FLOW_STATES = [
+  "imported",
+  "normalized",
+  "cash_flow_classified",
+  "approved",
+] as const;
+export type CashFlowState = (typeof CASH_FLOW_STATES)[number];
+
+export const CASH_FLOW_CATEGORIES = [
+  "PEER_SETTLEMENT",
+  "REFUND",
+  "INTERNAL_TRANSFER",
+  "EXTERNAL_INFLOW",
+] as const;
+export type CashFlowCategory = (typeof CASH_FLOW_CATEGORIES)[number];
+
+/** The two the schema's `CHECK` allows only on a credit (ADR-0017 (cash balance), 17.2). */
+export const CREDIT_ONLY_CASH_FLOW_CATEGORIES: readonly CashFlowCategory[] = [
+  "REFUND",
+  "EXTERNAL_INFLOW",
+];
+
+export const ACCOUNT_TYPES = ["bank", "upi", "card", "cash", "wallet"] as const;
+export type AccountType = (typeof ACCOUNT_TYPES)[number];
+
+/**
+ * One movement, with everything the ledger can say about what explains it.
+ *
+ * `explainedTotal` and `unexplainedTotal` are `domain.explainedAmount`'s own answers, computed
+ * by the service and quoted here — this package subtracts nothing (ADR-0048). A zero
+ * `unexplainedTotal` on a movement nobody has classified is not a verified zero, which is why
+ * the state fields travel beside the figure rather than being collapsed into it.
+ */
+export interface PaymentWorkspaceItem {
+  readonly id: string;
+  readonly accountId: string;
+  readonly accountName: string;
+  readonly importBatchId: string;
+  readonly amount: string;
+  readonly currency: string;
+  readonly direction: PaymentDirection;
+  readonly occurredAt: string;
+  readonly rawDescription: string;
+  readonly channel: string;
+  readonly counterpartyType: PaymentCounterpartyType;
+  readonly counterpartyId: string | null;
+  readonly counterpartyName: string | null;
+  readonly externalReference: string | null;
+  readonly referenceType: string | null;
+  readonly sourceSystem: string | null;
+  readonly state: PaymentState;
+  readonly ignoredReason: string | null;
+  readonly cashFlowCategory: CashFlowCategory | null;
+  readonly cashFlowState: CashFlowState;
+  readonly cashFlowApprovedAt: string | null;
+  readonly cashFlowApprovedBy: string | null;
+  readonly expenseLinkTotal: string;
+  readonly settlementTotal: string;
+  readonly adjustmentTotal: string;
+  readonly evidenceCount: number;
+  readonly expenseLinkCount: number;
+  readonly settlementCount: number;
+  readonly explainedTotal: string;
+  readonly unexplainedTotal: string;
+  readonly isDuplicateRepresentation: boolean;
+}
+
+export interface PaymentListResult {
+  readonly payments: readonly PaymentWorkspaceItem[];
+  /** Matching rows in the whole ledger, not on this page (audit row 32). */
+  readonly total: number;
+  /** False when `onlyUnexplained` narrowed the page after the count — say "at least", not "of". */
+  readonly filteredTotalIsExact: boolean;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+export interface CounterpartyOptions {
+  readonly merchants: readonly { readonly id: string; readonly canonicalName: string }[];
+  readonly people: readonly { readonly id: string; readonly displayName: string }[];
+  readonly accounts: readonly { readonly id: string; readonly name: string }[];
+}
+
+export interface CashFlowDecisionResult {
+  readonly paymentId: string;
+  readonly cashFlowState: CashFlowState;
+  readonly cashFlowCategory: CashFlowCategory | null;
+}
+
+/* -------------------------------------------------------------------- statement imports */
+
+export interface ImportBatchSummary {
+  readonly id: string;
+  readonly sourceChannel: string;
+  readonly fileReference: string | null;
+  readonly contentHash: string | null;
+  readonly parserVersion: string | null;
+  readonly rowCount: number | null;
+  readonly importedAt: string;
+  readonly paymentCount: number;
+  readonly ignoredCount: number;
+}
+
+export interface ImportHistoryResult {
+  readonly batches: readonly ImportBatchSummary[];
+  readonly total: number;
+}
+
+export interface ImportedDuplicate {
+  readonly paymentId: string;
+  readonly duplicateOfPaymentId: string;
+  readonly externalReference: string;
+}
+
+/**
+ * `already_imported` is a recognised no-op, not a failure: the file's content hash matched a
+ * batch already on record, so nothing was written twice (`invariants.md` #10).
+ */
+export type ImportStatementResult =
+  | {
+      readonly outcome: "imported";
+      readonly importBatchId: string;
+      readonly contentHash: string;
+      readonly paymentIds: readonly string[];
+      readonly duplicates: readonly ImportedDuplicate[];
+    }
+  | {
+      readonly outcome: "already_imported";
+      readonly importBatchId: string;
+      readonly contentHash: string;
+      readonly previouslyImportedAt: string;
+    };
+
+export interface NormalizePaymentsResult {
+  readonly normalizedPaymentIds: readonly string[];
+  readonly channelRefinedCount: number;
+  readonly merchantResolvedCount: number;
+}
+
+/** One entry per payment offered. A rejected answer is a fact about that payment, not the run. */
+export type ClassificationOutcome =
+  | { readonly outcome: "skipped"; readonly paymentId: string; readonly reason: string }
+  | {
+      readonly outcome: "internal_transfer";
+      readonly paymentId: string;
+      readonly counterLegPaymentId: string;
+    }
+  | {
+      readonly outcome: "proposed";
+      readonly paymentId: string;
+      readonly inferenceId: string;
+      readonly proposedKind: string;
+      readonly confidence: string;
+      readonly expenseId: string | null;
+      readonly expenseState: ExpenseState | null;
+    }
+  | {
+      readonly outcome: "rejected";
+      readonly paymentId: string;
+      readonly reason: string;
+      readonly code: string;
+    };
+
+export interface ClassifyPaymentsResult {
+  readonly outcomes: readonly ClassificationOutcome[];
+}
+
+/* ------------------------------------------------------------------------- master data */
+
+export interface PersonDetail {
+  readonly id: string;
+  readonly displayName: string;
+  readonly splitwiseUserId: string | null;
+  readonly notes: string | null;
+  readonly archivedAt: string | null;
+  readonly isUser: boolean;
+}
+
+export interface MerchantDetail {
+  readonly id: string;
+  readonly canonicalName: string;
+  readonly defaultCategory: string | null;
+  readonly archivedAt: string | null;
+  readonly aliases: readonly { readonly id: string; readonly rawPattern: string }[];
+}
+
+export interface GroupMembershipDetail {
+  readonly id: string;
+  readonly personId: string;
+  readonly displayName: string;
+  readonly joinedAt: string;
+  readonly leftAt: string | null;
+}
+
+export interface GroupDetail {
+  readonly id: string;
+  readonly name: string;
+  readonly type: string | null;
+  readonly archivedAt: string | null;
+  readonly memberships: readonly GroupMembershipDetail[];
+}

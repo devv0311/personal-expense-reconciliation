@@ -6,16 +6,22 @@ import { useShortcuts } from "@/components/app-shell/shortcuts";
 import { useReviewQueue } from "@/lib/queries";
 
 /**
- * One row, one entry per workflow — six, matching `CLAUDE.md`'s six pillars, with evidence and
- * receipts reached from the queue and the ledger rather than given a seventh tab of their own
- * (a document is always about a payment or an expense; a list of loose documents is not a
- * workflow).
+ * One row, one entry per workflow, with evidence and receipts reached from the queue and the
+ * ledger rather than given tabs of their own (a document is always about a payment or an
+ * expense; a list of loose documents is not a workflow).
+ *
+ * Phase 21 shipped six, matching `CLAUDE.md`'s six pillars. **Payments** joins them because the
+ * pillars all start from a cash movement, and until this row existed there was no screen where
+ * an imported statement line could be seen at all — the audit's first finding. **Setup** sits
+ * apart, next to search: master data changes what the ledger can say, never what it says, and
+ * a roster editor is not a workflow to return to daily.
  *
  * The review count is the product's only live figure outside a screen: it is what makes the
  * queue a place you go back to. It is a count, not money, so it is never toned `debit`.
  */
 const SECTIONS = [
   { href: "/review", label: "Review" },
+  { href: "/payments", label: "Payments" },
   { href: "/reconciliation", label: "Reconciliation" },
   { href: "/expenses", label: "Expenses" },
   { href: "/balances", label: "Balances" },
@@ -72,6 +78,17 @@ export function Nav() {
               </Link>
             );
           })}
+          <Link
+            href="/setup"
+            aria-current={pathname?.startsWith("/setup") === true ? "page" : undefined}
+            className={`border-b-2 pb-1 transition-colors ${
+              pathname?.startsWith("/setup") === true
+                ? "border-accent font-medium text-ink"
+                : "border-transparent text-ink-faint hover:text-ink"
+            }`}
+          >
+            Setup
+          </Link>
         </nav>
       </div>
     </header>

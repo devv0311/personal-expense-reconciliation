@@ -12,9 +12,16 @@ import type {
   AccountSummary,
   BalanceResult,
   ClassificationDecisionItem,
+  CounterpartyOptions,
   EvidenceMatchCandidateView,
   EvidenceRecord,
   ExpenseLedgerRow,
+  GroupDetail,
+  ImportBatchSummary,
+  MerchantDetail,
+  PaymentListResult,
+  PaymentWorkspaceItem,
+  PersonDetail,
   PersonSummary,
   PossibleDuplicateItem,
   ProofPackPreview,
@@ -614,4 +621,161 @@ export const BALANCE: BalanceResult = {
   netBalance: "-90000",
   evidenceStatus: "open_unconfirmed",
   contributions: [{ debtorId: "p-alex", creditorId: "p-dev", amount: "90000", expenseId: "exp-1" }],
+};
+
+/* -------------------------------------------------------------------- payment workspace */
+
+/** An unexplained debit: nothing links to it, and nobody has said what it was for. */
+export const UNEXPLAINED_PAYMENT: PaymentWorkspaceItem = {
+  id: "pay-1",
+  accountId: ACCOUNT.id,
+  accountName: ACCOUNT.name,
+  importBatchId: "batch-1",
+  amount: "184000",
+  currency: "INR",
+  direction: "debit",
+  occurredAt: "2026-08-05T09:15:00.000Z",
+  rawDescription: "UPI-BLINKIT-PAYU@AXIS-517290",
+  channel: "upi",
+  counterpartyType: "unknown",
+  counterpartyId: null,
+  counterpartyName: null,
+  externalReference: "517290",
+  referenceType: "upi_utr",
+  sourceSystem: "hdfc-savings-export",
+  state: "imported",
+  ignoredReason: null,
+  cashFlowCategory: null,
+  cashFlowState: "imported",
+  cashFlowApprovedAt: null,
+  cashFlowApprovedBy: null,
+  expenseLinkTotal: "0",
+  settlementTotal: "0",
+  adjustmentTotal: "0",
+  evidenceCount: 0,
+  expenseLinkCount: 0,
+  settlementCount: 0,
+  explainedTotal: "0",
+  unexplainedTotal: "184000",
+  isDuplicateRepresentation: false,
+};
+
+/** A credit with a proposed refund role, waiting on the approval step and its evidence gate. */
+export const CLASSIFIED_CREDIT: PaymentWorkspaceItem = {
+  ...UNEXPLAINED_PAYMENT,
+  id: "pay-2",
+  amount: "40000",
+  direction: "credit",
+  rawDescription: "REFUND BLINKIT ORDER 8842",
+  state: "normalized",
+  cashFlowState: "cash_flow_classified",
+  cashFlowCategory: "REFUND",
+  unexplainedTotal: "40000",
+};
+
+/** Explained by an expense link — the case that must never read as an unverified zero. */
+export const EXPLAINED_PAYMENT: PaymentWorkspaceItem = {
+  ...UNEXPLAINED_PAYMENT,
+  id: "pay-3",
+  rawDescription: "UPI-SWIGGY-8817",
+  state: "linked",
+  expenseLinkTotal: "184000",
+  expenseLinkCount: 1,
+  explainedTotal: "184000",
+  unexplainedTotal: "0",
+};
+
+export function paymentPage(
+  payments: readonly PaymentWorkspaceItem[],
+  overrides: Partial<PaymentListResult> = {},
+): PaymentListResult {
+  return {
+    payments,
+    total: payments.length,
+    filteredTotalIsExact: true,
+    limit: 50,
+    offset: 0,
+    ...overrides,
+  };
+}
+
+export const COUNTERPARTY_OPTIONS: CounterpartyOptions = {
+  merchants: [{ id: "m-blinkit", canonicalName: "Blinkit" }],
+  people: [
+    { id: DEV.id, displayName: DEV.displayName },
+    { id: ALEX.id, displayName: ALEX.displayName },
+  ],
+  accounts: [{ id: ACCOUNT.id, name: ACCOUNT.name }],
+};
+
+export const IMPORT_BATCH: ImportBatchSummary = {
+  id: "batch-1",
+  sourceChannel: "bank_statement",
+  fileReference: "august.csv",
+  contentHash: "b1a2c3",
+  parserVersion: "bank-csv/1",
+  rowCount: 42,
+  importedAt: "2026-09-01T04:30:00.000Z",
+  paymentCount: 42,
+  ignoredCount: 2,
+};
+
+/* ------------------------------------------------------------------------- master data */
+
+export const PERSON_DETAILS: readonly PersonDetail[] = [
+  {
+    id: DEV.id,
+    displayName: DEV.displayName,
+    splitwiseUserId: DEV.splitwiseUserId,
+    notes: null,
+    archivedAt: null,
+    isUser: true,
+  },
+  {
+    id: ALEX.id,
+    displayName: ALEX.displayName,
+    splitwiseUserId: null,
+    notes: "Flatmate",
+    archivedAt: null,
+    isUser: false,
+  },
+];
+
+export const MERCHANT: MerchantDetail = {
+  id: "m-blinkit",
+  canonicalName: "Blinkit",
+  defaultCategory: "groceries",
+  archivedAt: null,
+  aliases: [{ id: "al-1", rawPattern: "UPI-BLINKIT-PAYU@AXIS" }],
+};
+
+export const MERCHANT_WITHOUT_ALIAS: MerchantDetail = {
+  id: "m-swiggy",
+  canonicalName: "Swiggy",
+  defaultCategory: null,
+  archivedAt: null,
+  aliases: [],
+};
+
+export const GROUP: GroupDetail = {
+  id: "g-flat",
+  name: "Flat 402",
+  type: "flatmates",
+  archivedAt: null,
+  memberships: [
+    {
+      id: "gm-1",
+      personId: DEV.id,
+      displayName: DEV.displayName,
+      joinedAt: "2026-01-01T00:00:00.000Z",
+      leftAt: null,
+    },
+    {
+      id: "gm-2",
+      personId: ALEX.id,
+      displayName: ALEX.displayName,
+      joinedAt: "2026-03-01T00:00:00.000Z",
+      leftAt: "2026-08-01T00:00:00.000Z",
+    },
+  ],
 };

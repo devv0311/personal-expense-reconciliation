@@ -49,6 +49,21 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const commands = useMemo<readonly Command[]>(() => {
     const sections: Command[] = [
       { id: "go-review", label: "Review queue", hint: "g v", group: "Go to", href: "/review" },
+      { id: "go-payments", label: "Payments", hint: "g m", group: "Go to", href: "/payments" },
+      {
+        id: "go-unexplained",
+        label: "Payments with no explanation",
+        hint: "Every unexplained movement",
+        group: "Go to",
+        href: "/payments?onlyUnexplained=true",
+      },
+      {
+        id: "go-import",
+        label: "Import a statement",
+        hint: "CSV",
+        group: "Go to",
+        href: "/payments/import",
+      },
       {
         id: "go-reconciliation",
         label: "Reconciliation",
@@ -72,6 +87,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         group: "Go to",
         href: "/proof-packs",
       },
+      { id: "go-setup", label: "Setup", hint: "g t", group: "Go to", href: "/setup" },
     ];
 
     for (const person of people.data ?? []) {

@@ -5,6 +5,7 @@ import * as api from "./api";
 import type {
   AuditFindingFilter,
   ListExpensesFilter,
+  ListPaymentsFilter,
   RecordAdjustmentInput,
   ReviewQueueFilter,
   RunReconciliationInput,
@@ -34,6 +35,13 @@ export const queryKeys = {
     ["splitwise-audit-findings", filter] as const,
   splitwiseAuditFinding: (id: string) => ["splitwise-audit-finding", id] as const,
   proofPack: (recipientPersonId: string) => ["proof-pack", recipientPersonId] as const,
+  payments: (filter: ListPaymentsFilter) => ["payments", filter] as const,
+  payment: (id: string) => ["payment", id] as const,
+  counterpartyOptions: () => ["counterparty-options"] as const,
+  imports: (limit?: number, offset?: number) => ["imports", limit ?? null, offset ?? null] as const,
+  peopleManagement: () => ["people-management"] as const,
+  merchants: () => ["merchants"] as const,
+  groups: () => ["groups"] as const,
 };
 
 /* ------------------------------------------------------------------------------ reads */
@@ -313,4 +321,221 @@ function invalidateExpense(
   void queryClient.invalidateQueries({ queryKey: ["expenses"] });
   void queryClient.invalidateQueries({ queryKey: ["balance"] });
   void queryClient.invalidateQueries({ queryKey: ["proof-pack"] });
+}
+
+/* ------------------------------------------------- the payment workspace and its writes */
+
+export function usePayments(filter: ListPaymentsFilter) {
+  return useQuery({
+    queryKey: queryKeys.payments(filter),
+    queryFn: () => api.listPayments(filter),
+  });
+}
+
+export function usePayment(id: string) {
+  return useQuery({ queryKey: queryKeys.payment(id), queryFn: () => api.getPayment(id) });
+}
+
+export function useCounterpartyOptions() {
+  return useQuery({
+    queryKey: queryKeys.counterpartyOptions(),
+    queryFn: api.getCounterpartyOptions,
+  });
+}
+
+export function useImports(options: { limit?: number; offset?: number } = {}) {
+  return useQuery({
+    queryKey: queryKeys.imports(options.limit, options.offset),
+    queryFn: () => api.listImports(options),
+  });
+}
+
+export function useImportBankCsv() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.importBankCsv,
+    // A statement lands as payments, so the workspace, the counts and the history all move.
+    onSuccess: () => invalidatePayments(queryClient),
+  });
+}
+
+export function useRecordManualPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.recordManualPayment,
+    onSuccess: () => invalidatePayments(queryClient),
+  });
+}
+
+export function useNormalizePayments() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (importBatchId?: string) => api.normalizePayments(importBatchId),
+    onSuccess: () => invalidatePayments(queryClient),
+  });
+}
+
+export function useClassifyPayments() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (importBatchId?: string) => api.classifyPayments(importBatchId),
+    onSuccess: () => {
+      invalidatePayments(queryClient);
+      // Every proposal it recorded is a queue item somebody now has to decide.
+      void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      void queryClient.invalidateQueries({ queryKey: ["expenses"] });
+    },
+  });
+}
+
+export function useSetPaymentCounterparty() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.setPaymentCounterparty,
+    onSuccess: (_result, input) => {
+      invalidatePayments(queryClient);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.payment(input.paymentId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.paymentContext(input.paymentId) });
+    },
+  });
+}
+
+export function useDecidePaymentCashFlow() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.decidePaymentCashFlow,
+    onSuccess: (_result, input) => {
+      invalidatePayments(queryClient);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.payment(input.paymentId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.paymentContext(input.paymentId) });
+      // A cash-flow category is an input to every account's cash identity (ADR-0017), so a
+      // stored reconciliation run's figures are what this changes next.
+      void queryClient.invalidateQueries({ queryKey: ["reconciliation-runs"] });
+    },
+  });
+}
+
+/* ----------------------------------------------------------- master data and its writes */
+
+export function usePeopleManagement() {
+  return useQuery({
+    queryKey: queryKeys.peopleManagement(),
+    queryFn: api.listPeopleForManagement,
+  });
+}
+
+export function useMerchants() {
+  return useQuery({ queryKey: queryKeys.merchants(), queryFn: api.listMerchants });
+}
+
+export function useGroups() {
+  return useQuery({ queryKey: queryKeys.groups(), queryFn: api.listGroups });
+}
+
+export function useCreatePerson() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.createPerson,
+    onSuccess: () => invalidatePeople(queryClient),
+  });
+}
+
+export function useUpdatePerson() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.updatePerson,
+    onSuccess: () => invalidatePeople(queryClient),
+  });
+}
+
+export function useCreateAccount() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.createAccount,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.accounts() }),
+  });
+}
+
+export function useUpdateAccount() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.updateAccount,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.accounts() }),
+  });
+}
+
+export function useCreateMerchant() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.createMerchant,
+    onSuccess: () => invalidateMerchants(queryClient),
+  });
+}
+
+export function useUpdateMerchant() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.updateMerchant,
+    onSuccess: () => invalidateMerchants(queryClient),
+  });
+}
+
+export function useAddMerchantAlias() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.addMerchantAlias,
+    onSuccess: () => invalidateMerchants(queryClient),
+  });
+}
+
+export function useCreateGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.createGroup,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.groups() }),
+  });
+}
+
+export function useUpdateGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.updateGroup,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.groups() }),
+  });
+}
+
+export function useAddGroupMember() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.addGroupMember,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.groups() }),
+  });
+}
+
+export function useEndGroupMembership() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.endGroupMembership,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.groups() }),
+  });
+}
+
+/** Everything a write against a payment can move: the list, its totals, and the import history. */
+function invalidatePayments(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: ["payments"] });
+  void queryClient.invalidateQueries({ queryKey: ["payment"] });
+  void queryClient.invalidateQueries({ queryKey: ["imports"] });
+}
+
+/** A person's name is rendered from `people` on half the screens in the product. */
+function invalidatePeople(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.peopleManagement() });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.people() });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.counterpartyOptions() });
+}
+
+/** An alias changes what the next normalization run resolves, so the workspace goes stale too. */
+function invalidateMerchants(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.merchants() });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.counterpartyOptions() });
 }
