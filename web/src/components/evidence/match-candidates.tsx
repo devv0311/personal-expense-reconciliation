@@ -81,7 +81,7 @@ export function EvidenceMatchCandidates({
                   >
                     <Link
                       href={`/payments/${candidate.paymentId}`}
-                      className="font-mono text-accent underline-offset-2 hover:underline"
+                      className="font-mono text-accent underline underline-offset-2"
                     >
                       {candidate.paymentId.slice(0, 8)}
                     </Link>
@@ -164,7 +164,7 @@ function CandidateCard({
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <Link
           href={`/payments/${candidate.paymentId}`}
-          className="font-mono text-body text-accent underline-offset-2 hover:underline"
+          className="font-mono text-body text-accent underline underline-offset-2"
         >
           Payment {candidate.paymentId.slice(0, 8)}
         </Link>

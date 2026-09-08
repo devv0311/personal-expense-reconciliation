@@ -52,7 +52,7 @@ export function SettlementRegister({ counterpartyPersonId }: { counterpartyPerso
               render: (entry) => (
                 <Link
                   href={`/payments/${entry.paymentId}`}
-                  className="text-accent underline-offset-2 hover:underline"
+                  className="text-accent underline underline-offset-2"
                 >
                   {formatDate(entry.occurredAt)}
                 </Link>

@@ -226,11 +226,16 @@ openingBalanceEvidenceId?, closingBalance?, closingBalanceEvidenceId? }]`. Balan
   a number somebody typed"), and **two entries for one account** is a 400. Omit an account and
   its snapshot comes back honestly `incomplete` rather than closing at a cosmetic zero.
 
-**Not implemented:** auth, and re-sync routes for a `stale`
-`SplitwiseExpense`/`SplitwiseSettlement` (deliberately deferred past phases 14, 15, 19 and 21 —
-ADR-0040/0041/0046: drift is now detected, attributed, reviewable and reviewed through a real
-UI; acting on it against Splitwise is a separate write capability). Resolving a
-`ReconciliationDiscrepancy` on a `ReconciliationRun` also has no route; phase 19's reviewable
-record is the audit finding. A proof pack still has no send route: Phase 21 added the deliberate
-copy/export review as a UI step, and copying text to a clipboard reaches no external system
-(ADR-0047).
+**Phase 22 (ADR-0050) added the routes an audit found missing**, and one read: `receiptId` on
+`GET /api/evidence/:evidenceId`, a pointer to the extraction a document produced, so an
+inspector reached from the evidence library can open the receipt at all. Everything else added
+in that phase — master data, statement import, the payment workspace, expense authoring and
+funding links, history, sessions, rules, analytics, occasions and jobs — is documented in its
+own route file's header comment, and all of it is a caller of services that already existed.
+
+**Still not implemented:** a send route for a proof pack (Phase 21 made the copy/export review a
+deliberate UI step, and copying text to a clipboard reaches no external system — ADR-0047), a
+delete route against Splitwise (nothing in this system can delete a row there, and a route that
+appeared to would be a lie), and resolving a `ReconciliationDiscrepancy` on a
+`ReconciliationRun` (phase 19's reviewable record is the audit finding). Authentication and the
+single-row Splitwise re-sync, both listed here as missing through phase 21, now exist.

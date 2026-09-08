@@ -64,11 +64,11 @@ export function ReconciliationRunDetail({ id }: { id: string }) {
         <ReconciliationTotals totals={run.totals} />
         <p className="mt-4 text-meta text-ink-muted">
           Drill through:{" "}
-          <Link href="/review" className="text-accent underline-offset-2 hover:underline">
+          <Link href="/review" className="text-accent underline underline-offset-2">
             payments with no explanation
           </Link>
           {" · "}
-          <Link href="/expenses" className="text-accent underline-offset-2 hover:underline">
+          <Link href="/expenses" className="text-accent underline underline-offset-2">
             the expense ledger
           </Link>
         </p>
@@ -91,10 +91,7 @@ export function ReconciliationRunDetail({ id }: { id: string }) {
         headingId="discrepancies-heading"
         description="What the external ledger reported when this run happened, and where it disagreed with this one."
         actions={
-          <Link
-            href="/splitwise"
-            className="text-meta text-accent underline-offset-2 hover:underline"
-          >
+          <Link href="/splitwise" className="text-meta text-accent underline underline-offset-2">
             Audit findings
           </Link>
         }

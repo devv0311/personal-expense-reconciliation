@@ -41,7 +41,7 @@ export function PaymentSummary({
         <Fact label="Re-attached context">
           <Link
             href={`/payments/${payment.paymentId}`}
-            className="text-accent underline-offset-2 hover:underline"
+            className="text-accent underline underline-offset-2"
           >
             What the evidence says
           </Link>

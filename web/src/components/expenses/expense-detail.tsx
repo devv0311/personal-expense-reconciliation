@@ -81,7 +81,7 @@ export function ExpenseDetail({ expenseId }: { expenseId: string }) {
         actions={
           <Link
             href={`/expenses/${expenseId}/history`}
-            className="text-meta text-accent underline-offset-2 hover:underline"
+            className="text-meta text-accent underline underline-offset-2"
           >
             Every split it has had
           </Link>

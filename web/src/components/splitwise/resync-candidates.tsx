@@ -63,7 +63,7 @@ export function ResyncCandidates() {
               render: (candidate) => (
                 <Link
                   href={`/expenses/${candidate.expenseId}`}
-                  className="text-accent underline-offset-2 hover:underline"
+                  className="text-accent underline underline-offset-2"
                 >
                   {candidate.description ?? "Untitled expense"}
                 </Link>

@@ -91,7 +91,7 @@ export default function ImportPage() {
                     <TableCell>
                       <Link
                         href={`/payments?importBatchId=${batch.id}`}
-                        className="text-accent underline-offset-2 hover:underline"
+                        className="text-accent underline underline-offset-2"
                       >
                         {formatDateTime(batch.importedAt)}
                       </Link>

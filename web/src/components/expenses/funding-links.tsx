@@ -80,7 +80,7 @@ export function FundingLinks({ expense }: { expense: ExpenseLedgerRow }) {
             >
               <Link
                 href={`/payments/${line.paymentId}`}
-                className="text-accent underline-offset-2 hover:underline"
+                className="text-accent underline underline-offset-2"
               >
                 View the movement
               </Link>

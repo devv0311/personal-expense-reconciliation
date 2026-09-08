@@ -77,14 +77,14 @@ export function EvidenceInspector({ evidenceId }: { evidenceId: string }) {
             {record.linkedPaymentId !== null ? (
               <Link
                 href={`/payments/${record.linkedPaymentId}`}
-                className="text-accent underline-offset-2 hover:underline"
+                className="text-accent underline underline-offset-2"
               >
                 A payment
               </Link>
             ) : record.linkedExpenseId !== null ? (
               <Link
                 href={`/expenses/${record.linkedExpenseId}`}
-                className="text-accent underline-offset-2 hover:underline"
+                className="text-accent underline underline-offset-2"
               >
                 An expense
               </Link>
@@ -96,7 +96,7 @@ export function EvidenceInspector({ evidenceId }: { evidenceId: string }) {
             <Fact label="Stored document">
               <a
                 href={`${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000"}/api/evidence/${record.id}/content`}
-                className="text-accent underline-offset-2 hover:underline"
+                className="text-accent underline underline-offset-2"
                 target="_blank"
                 rel="noreferrer"
               >

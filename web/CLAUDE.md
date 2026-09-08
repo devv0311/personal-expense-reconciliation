@@ -7,6 +7,14 @@ typography, component principles, layout/responsive/accessibility rules, and two
 pitfalls (a `tailwind-merge` custom-token gotcha, a Tailwind v4 font-size-namespace mistake) worth
 not re-making. See `README.md` for how to run this package and what phase 15 built.
 
+**Phase 22 (ADR-0050) roughly doubled this package**, closing the capability audit's finding
+that phases 1–21 completed their own scopes without ever making the workflows reachable from a
+browser. New here: the payment workspace and statement import, the evidence library and its
+intake forms, the allocation editor, item entry/correction, funding links, settlements, the
+session gate, Splitwise connection and re-sync, analytics, rules, jobs, occasions, and the
+audit-trail screens. None of it widened what this package may do — the rules below held without
+exception, and `receiptId` on `GET /api/evidence/:evidenceId` is the only read that was added.
+
 The short version, if you only read one paragraph: this is a ledger, not a dashboard. One hero
 figure per screen, sized `text-display`/`text-figure`; every other number stays quiet. Color is
 semantic and single-purpose (`debit`/`credit`/`accent`/`attention` each mean exactly one thing —

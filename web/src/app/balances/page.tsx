@@ -62,7 +62,7 @@ function BalancesContent() {
           personBId !== null && personBId !== userPersonId ? (
             <Link
               href={`/proof-packs?recipient=${personBId}`}
-              className="text-meta text-accent underline-offset-2 hover:underline"
+              className="text-meta text-accent underline underline-offset-2"
             >
               Preview a proof pack for this person
             </Link>

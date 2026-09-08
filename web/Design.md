@@ -158,6 +158,25 @@ p-5` purely for visual tidiness, that's the old pattern this pass moved away fro
 - No `box-shadow` anywhere. Elevation is communicated by type weight and whitespace, not by
   simulating physical depth — consistent with "no card exists just to exist" above.
 
+### Links
+
+**A text link is underlined at rest**, `text-accent underline underline-offset-2`. Colour alone
+is not enough: WCAG 1.4.1 and axe's `link-in-text-block` both require a link inside a block of
+text to be distinguishable without it, and a browser sweep after phase 21 found the product
+failing that on three screens — the payment workspace, the evidence library and the
+reconciliation history on mobile. `hover:underline` does not satisfy it, because it is not there
+at rest.
+
+Two deliberate exceptions:
+
+- **A link wrapping a figure** (`underline-offset-2 hover:underline`, no `text-accent`) inherits
+  the surrounding tone so a `debit`/`credit` amount keeps its own colour, and underlining every
+  amount in a table would fight the tabular alignment the mono face exists for. These are whole
+  table cells rather than links inside prose, and the sweep confirms axe does not flag them.
+- **`Button variant="link"`** keeps `hover:underline`. It is a button — an inline action like
+  "Try again" or "Edit" — not a link in a text block, and underlining every one of them would
+  make each screen's ordinary controls read as a wall of links.
+
 ### Icons
 
 There is no icon library dependency, and none is needed yet: the only glyphs in the product are
@@ -275,6 +294,13 @@ One breakpoint is used throughout: `sm` (640px). Below it:
   future one like it) rely on the `Table` primitive's automatic horizontal-scroll wrapper instead
   of a second stacked-list markup — a deliberate scope line, not an oversight: at two columns and
   a handful of rows, horizontal scroll is not a degraded experience.
+- **The scroll container is `relative`, and that is load-bearing.** `overflow` does not make an
+  element the containing block for an absolutely positioned descendant, so an `sr-only` caption
+  or header label inside a table wider than the viewport resolves against the **viewport**,
+  lands outside it, and makes the whole page pan sideways — the one thing this rule forbids.
+  Found on `/setup` at 360px after phase 22, where an `sr-only` "Actions" column header widened
+  the document by 184px while every visible element was correctly clipped. Fixed once, in the
+  primitive; `src/design-system.test.tsx` asserts the class rather than trusting it.
 - **A scroll container a mouse can pan and a keyboard cannot reach is a WCAG failure**
   (axe's `scrollable-region-focusable`), and phase 21's denser tables started tripping it at
   360px. `Table` now measures itself and, **only when it actually overflows**, becomes
@@ -291,8 +317,10 @@ One breakpoint is used throughout: `sm` (640px). Below it:
 ### Accessibility expectations
 
 - **axe-core: 0 violations on every screen**, in desktop light, desktop dark and mobile —
-  re-verified across all eleven screens in phase 21, and a regression is a shipped bug, not a
-  nitpick. That sweep is what caught the `ink-faint` contrast defect and the unreachable scroll
+  re-verified across all **eighteen** screens after phase 22 (twelve list screens and six detail
+  screens, 72 screen states in all), and a regression is a shipped bug, not a nitpick. That
+  sweep is what caught the two defects recorded above and under "Links": neither was visible to
+  a component test, and neither would have survived a screenshot review either. That sweep is what caught the `ink-faint` contrast defect and the unreachable scroll
   containers, both of which had been shipping since earlier phases and neither of which a
   screenshot review would ever have surfaced. Run it against a live app; the frontend suite
   covers roles, labels, focus and the token contrast, but only a browser catches the rest.
@@ -377,6 +405,13 @@ which is still the one place a request leaves this package. Two conventions are 
 - ~~`review/evidence/receipts` screens and frontend CI~~ — **both shipped in phase 21.** The
   review queue, the evidence inspector, the payment-context screen and the receipt view all
   exist, and CI has a `web` job running typecheck, lint, format, test and build.
+- **Phase 22 closed the audit's gaps** (ADR-0050) and roughly doubled the surface: the payment
+  workspace and its import screen, the evidence library and its three intake forms, the
+  allocation editor, item entry and correction, funding links, settlements, the session gate,
+  Splitwise connection and single-row re-sync, analytics, standing rules, the job queue,
+  occasions and the audit-trail screens. Every one of them consumes a read that already existed
+  — `receiptId` on `GET /api/evidence/:evidenceId` is the only addition — and every write goes
+  through `DecisionDialog`.
 - **`web/` performs no financial arithmetic, and that is not negotiable** (ADR-0048). If a screen
   needs a number that does not exist over HTTP, add the _read_ to the API — do not compute it
   here, however trivial the subtraction looks. The two exceptions are parsing what a person typed

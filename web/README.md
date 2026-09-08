@@ -5,8 +5,15 @@ A standalone Next.js (App Router) application: the production frontend for this 
 own `tsconfig.json`/`eslint.config.mjs`/`.prettierrc.json` — deliberately isolated from the root
 repository's own gate. See `docs/decisions/0042-frontend-stack-and-server-bridge.md` for why.
 
-**Since phase 21 this covers all six of `CLAUDE.md`'s pillars**, across six sections and five
-detail screens. The one rule that shapes all of it: `web/` renders financial figures and never
+**Since phase 21 this covers all six of `CLAUDE.md`'s pillars**, and since phase 22 it covers
+every workflow the API supports — eighteen screens in all. Phase 22 closed a capability audit
+that found eleven capabilities complete at the service and HTTP layers and absent from the
+browser: master data, statement import and the payment workspace, expense and item authoring,
+allocation, settlements, evidence intake and receipt review, authentication, Splitwise
+connection and re-sync, analytics, rules, jobs and occasions
+(`docs/decisions/0050-closing-the-audit-gaps-a-workflow-is-not-shipped-until-it-is-reachable.md`).
+
+The one rule that shapes all of it, and did not move: `web/` renders financial figures and never
 derives them — see `docs/decisions/0048-phase-21-ui-reads-the-ledger-and-never-recomputes-it.md`.
 
 **See `Design.md` before making a visual or component change** — it's the authoritative design

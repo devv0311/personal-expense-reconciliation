@@ -70,6 +70,7 @@ before the ones before it are solid; see `CLAUDE.md`, "Development workflow."
 | 19  | Splitwise Drift & Ghost-Debt Auditing Engine               | **Done (2026-09-06)** — migration `0009_phase19_splitwise_auditing.sql`, additive: two tables plus two more values on `audit_events_entity_type_check` ([ADR-0046](decisions/0046-splitwise-audit-findings-and-external-read-completeness.md)). Phase 15's aggregate comparison is extended, not rebuilt: `compareSplitwiseBalance`, `detectSplitwiseDrift`, the `drifted` marking rule and the existing `ReconciliationDiscrepancy` entries are unchanged, and `detectSplitwiseDrift` now hands its fetched balances to the audit so one reconciliation still makes one `fetchBalances` call. New: an **optional** `SplitwisePort.fetchLedgerEntries` (read-only, per-entry, with a `complete` flag), `domain.auditSplitwisePair` / `auditUnobservablePairs` / `assessExternalListingCompleteness`, `services.runSplitwiseAudit` / `reviewSplitwiseAuditFinding` and their reads, and six routes under `/api/splitwise/audits`. Each finding carries both compared snapshots, evidence pointers, amount, suspected cause, confidence, the identifiers it actually knows, its run provenance and its review state; `balanceImpact` makes attribution checkable, so whatever no record explains is reported as `unattributed_balance_mismatch` at `unknown` confidence rather than pinned on whichever record would have balanced the totals. `stale` (our side) stays distinct from `drifted` (theirs), and an item-attributed refund is named as its own cause (`unreflected_item_refund`). A failed, partial, unsupported or unreported read is an **incomplete** finding, never agreement: absence is evidence only under a complete read, and no finding is retired by a read that could not be made. Review records actor/time/reason with an append-only `audit_events` history and supersedes rather than rewrites; it authorizes no external write. 102 new tests (1,697 backend, from 1,595). Deliberately **not** done: Splitwise re-sync/update/delete (still unbuilt, third phase running), proof packs (Phase 20) and any UI (Phase 21).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 20  | Derived Proof Packs                                        | **Done (2026-09-06)** — no migration and no table ([ADR-0047](decisions/0047-proof-packs-are-a-derived-read-not-a-second-ledger.md)): a proof pack is a pure derived read, like `getBalance` / `getRefundAllocationState` / `getPaymentContext`, none of which persist. `domain.buildProofPack` arranges already-derived facts — the pair balance and its `ObligationEvidenceStatus` from `getBalance`, each expense's recipient share from its `contributions`, the net-after-refund and pending state from `getRefundAllocationState`, prior settlements from `listSettlementsForAudit`, open Phase 19 findings, and `getPaymentContext`'s conflict flag — into a structured pack and a deterministic WhatsApp-ready `generatedText`. It quotes every figure; it re-divides, re-nets and re-derives nothing (a pack that recomputes a share is a bug). **Recipient isolation is structural**: the assembler is only ever handed the recipient's own share and the pair's settlements, so no third party is named. **Redaction reuses Phase 17**: every free-text field goes through `redactReceiptText` with a local, never-returned map, and `services.assertProofPackExportable` walks the finished pack through `findResidualIdentifiers` and throws `SanitizationError` rather than return an unredacted pack (`http.ts` maps it to `500 PAYLOAD_NOT_SANITIZED`). **Uncertainty is carried, never smoothed** — an unresolved audit finding, a pending or review-blocked refund distribution, a believed-settled-but-unconfirmed status, a reverse balance after a settlement, a mixed adjustment basis, conflicting or missing evidence each become a visible `ProofPackWarning` and a `PLEASE NOTE` line, and the pack always states its figures are "not yet confirmed by you". `asOf` is an explicit snapshot label, not a historical filter (that would need a second balance engine); a fixed `asOf` over an unchanged ledger is byte-identical. One route, `GET /api/proof-packs/:recipientPersonId`, a read. 51 new tests (24 `src/domain/proof-pack.test.ts`, 20 `tests/scenarios/proof-packs.test.ts`, 7 `tests/integration/proof-pack-api.test.ts`) — 1,748 backend, from 1,697. Deliberately **not** done: any WhatsApp/messaging transport, a persisted-pack table, a "record that this was shared" event, and all UI (Phase 21).                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 21  | Modern UI/UX Overhaul in `web/`                            | **Done (2026-09-07)** — no migration ([ADR-0048](decisions/0048-phase-21-ui-reads-the-ledger-and-never-recomputes-it.md), [ADR-0049](decisions/0049-keyboard-first-navigation-never-completes-a-decision.md)). All six pillars are reachable through end-to-end flows across six sections — Review, Reconciliation, Expenses, Balances, Splitwise and Proof packs — plus evidence, payment-context and finding detail screens reached from them. **`web/` performs no financial arithmetic**: where a figure did not exist over HTTP the _read_ was added, never the calculation, so phase 21's whole backend footprint is four reads (`GET /api/accounts`, `GET /api/expenses/:expenseId`, `GET /api/reconciliation/runs/:id/account-snapshots`, `GET /api/evidence/:evidenceId/observation`) and one request field (`accountBoundaries` on `POST /api/reconciliation/runs`, signed minor units, each balance refused without its statement evidence per 17.5). The account waterfall renders ADR-0017's second identity term by term and **never shows a verified zero over incomplete evidence** — a missing balance reads "not evidenced", `verificationStatus` comes from the database `CHECK`, and a zero delta over unexplained debits renders in `debit` under the word "Unreconciled". `Cmd+K`/`Ctrl+K` opens a `combobox`/`listbox` command palette, `?` lists every shortcut, `g`-prefixed pairs navigate, and `j`/`k`/`Enter` triage the queue — all navigation, because **no shortcut completes a decision** (ADR-0049): every consequential act is a button behind a dialog that states its consequence and requires a reason where the service does. The item-refund splitter validates its own entry total and then offers the server's `projectedLines` for approval; a refund the ledger cannot allocate shows `REFUND_ITEM_OWNERSHIP_REQUIRED` instead of a button. The proof-pack preview gates copying behind an explicit recipient/content/evidence review, and copying still sends nothing. One hand-built `Dialog` primitive was added (focus containment, restoration, Escape) and no dependency; `--ink-faint` was darkened to meet AA in both themes and `Table` makes an overflowing scroll container keyboard-reachable, named by its caption. 122 new frontend tests (159 total, from 37) and 14 new backend tests (1,762, from 1,748); axe reports **0 violations** across all eleven screens in desktop light, desktop dark and mobile, and 42 rendered figures were compared against live API responses in a driven browser. CI gained a `web` job. Deliberately **not** done: WhatsApp/message sending, Splitwise re-sync or repair, rule learning or auto-approval, a `modify` editor for AI proposals, and any new financial engine. |
+| 22  | Closing the capability audit's gaps                        | **Done (2026-09-08)** — no migration ([ADR-0050](decisions/0050-closing-the-audit-gaps-a-workflow-is-not-shipped-until-it-is-reachable.md)). Every capability the 7 September audit found reachable only over HTTP now has a screen, and the six unimplemented `ai-boundary.md` operations exist. See "Phase 22" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 ## What "done" means for the current phase (1–5)
 
@@ -438,24 +439,73 @@ figure` hero number per screen (previously every figure sat in the same narrow 1
 
 ## Recommended next phase
 
-**There is no next numbered phase.** Phases 1–21 are complete: the ledger has a domain, a
-service layer, an API and — since Phase 21 — a product surface over all six of `CLAUDE.md`'s
-pillars. What remains is the unnumbered later work listed under "Later work without assigned
-phase numbers" below, and none of it is a prerequisite for anything already shipped.
+**There is no next numbered phase.** Phases 1–22 are complete: the ledger has a domain, a
+service layer, an API, and — since Phase 22 closed the capability audit's gaps — a browser
+surface over every workflow either of them supports.
 
-Two of those are the natural next pieces, and both are **write** capabilities the current system
-deliberately stops short of:
+What remains is genuinely unbuilt rather than merely unreachable, which is a shorter and more
+honest list than the one Phase 21 left behind. Each needs its own decision record before it
+starts:
 
-- **Stale Splitwise re-sync.** Phase 19 detects drift, attributes it where the evidence supports
-  it, and makes each finding reviewable; Phase 21 makes reviewing one a real workflow. Acting on
-  a finding against Splitwise — updating or deleting a `stale` row — is still unbuilt, and
-  ADR-0046 is explicit that reviewing authorizes it not at all. That is the first thing a reader
-  of the Splitwise screen will want, and the first thing that needs its own decision record.
-- **Rules and learning.** Every approval in the product is now a recorded decision with an
-  actor, a reason and a proposal beside it. Turning repeated identical decisions into a manual
-  rule (and, later, into an AI-proposed one) is the capability that would make the review queue
-  shorter — and `invariants.md` #16's "no auto-approval may be inferred from confidence" is the
-  constraint it has to be designed inside.
+- **A message transport for proof packs.** A pack is derived, redacted and reviewed; copying it
+  prepares text for somebody to paste elsewhere. Sending it — packaging attachments, addressing
+  a recipient, recording that it went — is unbuilt, and `CLAUDE.md`'s fifth pillar is careful
+  that generating a pack authorizes none of it.
+- **Live bank and card balance adapters.** The waterfall compares statement boundaries a person
+  entered as evidence. Fetching a current balance from an institution is a real external
+  integration with real credentials, and `security-model.md` is explicit that it is wired
+  deliberately and late.
+- **Bidirectional Splitwise sync.** Phase 22 shipped the single-row correction ADR-0046 left
+  open, one row at a time behind a required reason. Deleting a row, and reconciling changes made
+  _in_ Splitwise back into this ledger, are still unbuilt — and the second is the harder one,
+  because it means deciding when an external ledger may change a local figure at all.
+- **The natural-language interface.** `ai-boundary.md` names it; nothing implements it. Every
+  constraint that governs the other nine AI operations governs it too.
+
+### Phase 22 — Closing the capability audit's gaps (delivered)
+
+Read [ADR-0050](decisions/0050-closing-the-audit-gaps-a-workflow-is-not-shipped-until-it-is-reachable.md)
+and the report in `audit-results/`, which is kept in the repository because it is the clearest
+statement of what "complete" did and did not mean at the end of Phase 21.
+
+The audit's verdict was that the financial engine was real and the website was not a complete
+application: every phase had closed against its own scope, no phase's scope had been "a person
+can do this from a browser", and the gaps fell between them. Its sharpest finding was that
+approving an expense in the review queue led nowhere, because no screen could allocate one.
+
+**What this phase built, in the order the audit recommended.** The input-to-ledger path first:
+`/setup` (people, accounts, merchants and their aliases, groups with dated membership stints),
+`/payments` with statement import, manual entry, the normalization and classification runs, the
+counterparty and cash-flow decisions, and the exhaustive unexplained list the review queue never
+was. Then financial authoring: the allocation editor across all six methods, item entry and
+correction, funding links in both many-to-many directions, manual settlements and the settlement
+register. Then evidence and refunds: the evidence library with upload/note/notification intake,
+the receipt review that had existed as an unmounted component, observation correction, the
+refund's link to the credit it arrived on, custom distribution weights, and waterfall
+drill-through. Then protection and integration: the session gate, Splitwise connection, and the
+single-row re-sync ADR-0046 left open. Finally the reads that had no surface: analytics,
+standing rules, the job queue, occasions, the audit trail, and ledger-wide search with real
+paging.
+
+Underneath, six AI operations that `ai-boundary.md` had promised and nothing implemented —
+`normalizeMerchant`, `suggestBeneficiaries`, `suggestAllocation`, `groupIntoOccasion`,
+`explainAnomaly`, `proposeRule` — now exist as contracts, redactors, operations and prompts.
+Fixing them turned up a real defect in the shipped Anthropic prompts: they described a flat
+response object while `ai/contract.ts` requires the `{confidence, proposedOutput}` envelope, so
+every live classification would have been rejected as a contract breach — and the failure would
+have read as "the model is bad at this" rather than "we asked for the wrong shape".
+
+**Two rules did not move.** `web/` still performs no financial arithmetic (ADR-0048): the only
+read added for the whole phase is `receiptId` on `GET /api/evidence/:evidenceId`. And no
+keyboard shortcut completes a decision (ADR-0049): every write added here goes through
+`DecisionDialog`, which gained exactly one prop so a form inside a dialog can block its own
+confirm without weakening the required-reason rule.
+
+**A browser sweep found what the tests could not.** Re-running axe across all eighteen screens
+in light, dark, desktop and mobile — 72 screen states — surfaced two real defects: an `sr-only`
+caption escaping a table's scroll container and making the page pan sideways at 360px, and text
+links distinguished from surrounding prose by colour alone. Both are fixed and both are now unit
+tests. The sweep ends at 0 violations and no horizontal overflow anywhere.
 
 ### Phase 20 — Derived proof packs (delivered)
 

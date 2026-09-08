@@ -109,7 +109,7 @@ function ClassificationInspector({ item }: { item: ClassificationDecisionItem })
             <Fact label="Description">
               <Link
                 href={`/expenses/${item.expense.expenseId}`}
-                className="text-accent underline-offset-2 hover:underline"
+                className="text-accent underline underline-offset-2"
               >
                 {item.expense.description ?? "Untitled expense"}
               </Link>
@@ -355,7 +355,7 @@ function RejectedInspector({ item }: { item: RejectedClassificationItem }) {
             <Fact label="Expense produced">
               <Link
                 href={`/expenses/${item.expenseId}`}
-                className="text-accent underline-offset-2 hover:underline"
+                className="text-accent underline underline-offset-2"
               >
                 {item.expenseState === null ? "Open expense" : sentenceCase(item.expenseState)}
               </Link>
@@ -388,7 +388,7 @@ function UnmatchedEvidenceInspector({ item }: { item: UnmatchedEvidenceItem }) {
         actions={
           <Link
             href={`/evidence/${item.evidenceId}`}
-            className="text-meta text-accent underline-offset-2 hover:underline"
+            className="text-meta text-accent underline underline-offset-2"
           >
             Open full inspector
           </Link>
@@ -458,7 +458,7 @@ function UnmatchedEvidenceInspector({ item }: { item: UnmatchedEvidenceItem }) {
               >
                 <Link
                   href={`/payments/${candidate.paymentId}`}
-                  className="font-mono text-meta text-accent underline-offset-2 hover:underline"
+                  className="font-mono text-meta text-accent underline underline-offset-2"
                 >
                   {candidate.description}
                 </Link>

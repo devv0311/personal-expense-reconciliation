@@ -152,7 +152,7 @@ function EvidenceLibrary() {
                   <>
                     <Link
                       href={`/evidence/${row.id}`}
-                      className="text-accent underline-offset-2 hover:underline"
+                      className="text-accent underline underline-offset-2"
                     >
                       {evidenceTypeLabel(row.type)}
                       {row.noteKind === null ? "" : ` · ${noteKindLabel(row.noteKind)}`}
@@ -193,14 +193,14 @@ function EvidenceLibrary() {
                   row.linkedPaymentId !== null ? (
                     <Link
                       href={`/payments/${row.linkedPaymentId}`}
-                      className="text-accent underline-offset-2 hover:underline"
+                      className="text-accent underline underline-offset-2"
                     >
                       A movement
                     </Link>
                   ) : row.linkedExpenseId !== null ? (
                     <Link
                       href={`/expenses/${row.linkedExpenseId}`}
-                      className="text-accent underline-offset-2 hover:underline"
+                      className="text-accent underline underline-offset-2"
                     >
                       An expense
                     </Link>

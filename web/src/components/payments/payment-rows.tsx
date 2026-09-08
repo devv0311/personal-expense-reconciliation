@@ -98,10 +98,7 @@ export function PaymentRows({ payments }: { payments: readonly PaymentWorkspaceI
 
 function PaymentLink({ payment }: { payment: PaymentWorkspaceItem }) {
   return (
-    <Link
-      href={`/payments/${payment.id}`}
-      className="text-accent underline-offset-2 hover:underline"
-    >
+    <Link href={`/payments/${payment.id}`} className="text-accent underline underline-offset-2">
       {payment.rawDescription}
     </Link>
   );

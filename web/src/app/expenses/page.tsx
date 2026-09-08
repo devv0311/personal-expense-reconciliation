@@ -207,7 +207,7 @@ export default function ExpensesPage() {
                     <TableCell>
                       <Link
                         href={`/expenses/${expense.id}`}
-                        className="text-accent underline-offset-2 hover:underline"
+                        className="text-accent underline underline-offset-2"
                       >
                         {expense.description ?? "Untitled expense"}
                       </Link>
@@ -241,7 +241,7 @@ export default function ExpensesPage() {
                   <div className="flex items-baseline justify-between gap-3">
                     <Link
                       href={`/expenses/${expense.id}`}
-                      className="text-accent underline-offset-2 hover:underline"
+                      className="text-accent underline underline-offset-2"
                     >
                       {expense.description ?? "Untitled expense"}
                     </Link>

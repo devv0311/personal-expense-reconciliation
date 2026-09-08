@@ -187,7 +187,7 @@ export default function AnalyticsPage() {
                   render: (entry) => (
                     <Link
                       href={`/balances?with=${entry.personId}`}
-                      className="text-accent underline-offset-2 hover:underline"
+                      className="text-accent underline underline-offset-2"
                     >
                       {entry.displayName}
                     </Link>
@@ -267,7 +267,7 @@ export default function AnalyticsPage() {
                   <>
                     <Link
                       href={`/expenses/${entry.expenseId}`}
-                      className="text-accent underline-offset-2 hover:underline"
+                      className="text-accent underline underline-offset-2"
                     >
                       {entry.description ?? "Untitled expense"}
                     </Link>
