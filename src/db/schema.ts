@@ -47,6 +47,7 @@ import {
   CASH_FLOW_CATEGORIES,
   CASH_FLOW_STATES,
   CONFIDENCE_LEVELS,
+  DOCUMENT_TEXT_SOURCES,
   EVIDENCE_MATCH_SIGNALS,
   EVIDENCE_MATCH_STATUSES,
   EVIDENCE_MATCH_STRENGTHS,
@@ -663,6 +664,21 @@ export const receipts = pgTable(
     extractionConfidence: text('extraction_confidence'),
     extractedAt: timestamp('extracted_at', { withTimezone: true }),
     confirmedByUser: boolean('confirmed_by_user').notNull().default(false),
+    /**
+     * Where the text this extraction read actually came from (audit row 14, ADR-0051).
+     *
+     * `evidence_raw_text` — the record already carried text, typed or forwarded.
+     * `pdf_text_layer` — lifted locally off a generated PDF; nothing left the machine.
+     * `model_vision` — a multimodal model transcribed the document's bytes, which is the one
+     * path on which a document crosses the local boundary and is off unless configured.
+     *
+     * Recorded rather than inferred, because "the receipt says ₹1,240" and "a model reading a
+     * photograph of the receipt says ₹1,240" are different claims, and the person confirming
+     * the extraction is entitled to know which one is in front of them.
+     */
+    textSource: text('text_source'),
+    /** Which model transcribed it, when one did. Null on every local path. */
+    textModel: text('text_model'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -671,6 +687,20 @@ export const receipts = pgTable(
     check(
       'receipts_extraction_confidence_check',
       sql`${table.extractionConfidence} is null or ${oneOf('extraction_confidence', CONFIDENCE_LEVELS)}`,
+    ),
+    check(
+      'receipts_text_source_check',
+      sql`${table.textSource} is null or ${oneOf('text_source', DOCUMENT_TEXT_SOURCES)}`,
+    ),
+    // A model name without a model-read source, or a `model_vision` source with no model
+    // named, would each be a provenance record that does not describe anything.
+    // `is distinct from` rather than `=`, so the rule also holds for a row whose `text_source`
+    // is null (every receipt written before ADR-0051): plain `=` yields NULL there, and a
+    // NULL check passes, which would have let a model name sit on a row that never named a
+    // model-read source.
+    check(
+      'receipts_text_model_check',
+      sql`(${table.textSource} is distinct from 'model_vision') = (${table.textModel} is null)`,
     ),
   ],
 );
@@ -1149,7 +1179,7 @@ export const auditEvents = pgTable(
     action: text('action').notNull(),
     oldValue: jsonb('old_value'),
     newValue: jsonb('new_value').notNull(),
-    /** `'user'`, `'rule:<rule_id>'`, or `'system'`. */
+    /** `'user'`, `'user:<id>'`, `'rule:<rule_id>'`, `'forwarder'`, or `'system'`. */
     actor: text('actor').notNull(),
     source: text('source'),
     reason: text('reason'),

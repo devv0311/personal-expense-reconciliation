@@ -55,6 +55,8 @@ export async function postReceiptExtraction(
   const outcome = await extractReceipt(deps.db, {
     evidenceId,
     ai: deps.ai,
+    evidenceStore: deps.evidenceStore,
+    ...(deps.documentText === undefined ? {} : { documentText: deps.documentText }),
     audit: {
       actor,
       source: 'api POST /api/evidence/:evidenceId/receipt',

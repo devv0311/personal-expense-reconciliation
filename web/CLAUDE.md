@@ -36,3 +36,30 @@ Three rules that outrank any visual preference (phase 21 — ADR-0048, ADR-0049)
 3. **No keyboard shortcut completes a decision.** Shortcuts navigate and open. Every
    consequential act goes through `DecisionDialog`, which requires the caller to state what the
    button will do.
+
+## The Design Standard — Tier-1 UI/UX
+
+The quality bar is **Linear / Mercury / Ramp / Raycast-level craft**. This is a mandatory
+product standard, not optional decoration. Build high-density information architecture with
+clear hierarchy, exact amounts, aligned numeric columns, accessible contrast and progressive
+disclosure. Preserve room to think without hiding financially important information.
+
+`web/` must support keyboard-first navigation: `Cmd+K` (and `Ctrl+K`) command search,
+discoverable triage shortcuts, predictable focus, selection and escape behavior. Consequential
+approval remains explicit; a shortcut must not silently approve an ambiguous decision. Use
+visual reconciliation waterfalls from evidenced opening cash through credits/debits to actual
+closing cash and the signed delta, with drill-through to contributing records. Show account
+completeness and unexplained amounts alongside the number. Use zero-clutter inspectors for
+source evidence, interpretation, decision and audit history, plus refined micro-interactions
+that communicate selection, progress and completion. Honor reduced motion, loading/error/empty
+states, responsive layouts and keyboard accessibility. Test rendered flows with synthetic data.
+
+`web/Design.md` is authoritative for how this is realised, and ADRs 0042/0043/0048/0049 record
+the decisions behind it. **Phase 21 delivered this standard across all six pillars**: six
+sections plus five detail screens, a `Cmd+K` command palette, `j`/`k`/`Enter` triage, the
+account-level cash waterfall, the interactive item-refund splitter, the evidence inspector with
+per-signal match verdicts, the Splitwise finding review, and the proof-pack export review. It
+holds a hard bar — axe reports 0 violations on every screen in desktop light, desktop dark and
+mobile — and closed two accessibility defects inherited from earlier phases (a contrast failure
+in the `ink-faint` token, and scroll containers no keyboard could reach). A change to `web/`
+starts by reading `Design.md`.

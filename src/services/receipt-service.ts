@@ -33,7 +33,9 @@ import {
 } from '../domain/index.js';
 import type {
   ConfidenceLevel,
+  DocumentTextSource,
   EvidenceId,
+  EvidenceMediaType,
   MerchantId,
   Paise,
   PaymentId,
@@ -41,6 +43,8 @@ import type {
 } from '../domain/index.js';
 import { isAiContractError } from '../ai/index.js';
 import type { AiService, Inference, ReceiptDraft, ReceiptItemDraft } from '../ai/index.js';
+import type { DocumentTextExtractor } from '../integrations/document-text/index.js';
+import type { EvidenceStore } from '../integrations/evidence-store/index.js';
 import {
   attachAiInferenceRecord,
   findMerchantByAliasKey,
@@ -68,6 +72,16 @@ import { ServiceError } from './errors.js';
 export interface ExtractReceiptInput {
   readonly evidenceId: EvidenceId;
   readonly ai: AiService;
+  /**
+   * Where the document's bytes live, so a receipt with no typed text can still be read
+   * (audit row 14).
+   *
+   * Optional so an existing caller that only ever extracts from `rawText` keeps working
+   * unchanged — and so a test can exercise the text path without a store.
+   */
+  readonly evidenceStore?: EvidenceStore;
+  /** Turns those bytes into text. Local for a PDF; a model, if configured, for a photograph. */
+  readonly documentText?: DocumentTextExtractor;
   readonly audit: AuditMeta;
 }
 
@@ -143,12 +157,25 @@ export async function extractReceipt(
     );
   }
 
+  // Guaranteed non-null: every receipt-extractable type carries a stored document
+  // (`domain.validateEvidencePayload`), unlike a manual note.
+  const mediaType = evidence.mediaType!;
+  const text = await resolveDocumentText(evidence, mediaType, input);
+  if (text.text === null) {
+    // Not an error and not an empty extraction: the document could not be read, and saying so
+    // is the whole difference between "this receipt is blank" and "nothing here can read a
+    // photograph" (audit row 14).
+    return {
+      outcome: 'rejected',
+      reason: text.reason,
+      code: 'DOCUMENT_UNREADABLE',
+    };
+  }
+
   const evidenceInput = {
     evidenceType: evidence.type,
-    // Guaranteed non-null: every receipt-extractable type carries a stored document
-    // (`domain.validateEvidencePayload`), unlike a manual note.
-    mediaType: evidence.mediaType!,
-    rawText: evidence.rawText,
+    mediaType,
+    rawText: text.text,
     capturedAt: evidence.capturedAt,
   };
 
@@ -167,6 +194,8 @@ export async function extractReceipt(
         draft: parsed.proposedOutput,
         items: extracted.proposedOutput,
         confidence,
+        textSource: text.source,
+        textModel: text.model,
       });
       await storeInference(ctx, evidence.id, receiptId, parsed, input.audit);
       await storeInference(ctx, evidence.id, receiptId, extracted, input.audit);
@@ -189,13 +218,15 @@ interface WriteReceiptRowsInput {
   readonly draft: ReceiptDraft;
   readonly items: readonly ReceiptItemDraft[];
   readonly confidence: ConfidenceLevel;
+  readonly textSource: DocumentTextSource;
+  readonly textModel: string | null;
 }
 
 async function writeReceiptRows(
   ctx: AuditContext,
   input: WriteReceiptRowsInput,
 ): Promise<ReceiptId> {
-  const { evidence, draft, items, confidence } = input;
+  const { evidence, draft, items, confidence, textSource, textModel } = input;
   const merchantId =
     draft.merchantHint === null ? null : await resolveMerchant(ctx.exec, draft.merchantHint);
 
@@ -208,6 +239,8 @@ async function writeReceiptRows(
     currency: draft.currency,
     extractionConfidence: confidence,
     extractedAt: new Date(),
+    textSource,
+    textModel,
   });
   await insertReceiptItems(ctx.exec, receiptId, items);
   await ctx.record({
@@ -223,9 +256,99 @@ async function writeReceiptRows(
       currency: draft.currency,
       extractionConfidence: confidence,
       itemCount: items.length,
+      textSource,
+      textModel,
     },
   });
   return receiptId;
+}
+
+/* ------------------------------------------------------- reading the document's bytes */
+
+interface ResolvedDocumentText {
+  readonly text: string | null;
+  readonly source: DocumentTextSource;
+  readonly model: string | null;
+  readonly reason: string;
+}
+
+/**
+ * The text an extraction actually reads, and where it came from.
+ *
+ * The order is the privacy order, and it is not an optimisation: text the evidence record
+ * already carries is used as-is; otherwise a **local** read of a PDF's own text layer is
+ * tried; only a document with no text of its own is considered for optical extraction, and
+ * only where ADR-0051's opt-in is configured. A document that can be read locally never
+ * reaches a provider even on an installation that has opted in.
+ *
+ * A failure returns `text: null` with a reason naming the missing capability, which
+ * `extractReceipt` reports as a rejected extraction. Nothing is written, and — the point of
+ * the whole path — an unreadable receipt never becomes an empty one.
+ */
+async function resolveDocumentText(
+  evidence: EvidenceRow,
+  mediaType: string,
+  input: ExtractReceiptInput,
+): Promise<ResolvedDocumentText> {
+  if (evidence.rawText !== null && evidence.rawText.trim() !== '') {
+    return { text: evidence.rawText, source: 'evidence_raw_text', model: null, reason: '' };
+  }
+
+  if (evidence.storageRef === null) {
+    return {
+      text: null,
+      source: 'evidence_raw_text',
+      model: null,
+      reason:
+        `Evidence ${evidence.id} carries neither text nor a stored document, so there is ` +
+        'nothing to extract from.',
+    };
+  }
+  if (input.evidenceStore === undefined || input.documentText === undefined) {
+    return {
+      text: null,
+      source: 'evidence_raw_text',
+      model: null,
+      reason:
+        `Evidence ${evidence.id} is a stored ${mediaType} with no transcribed text, and this ` +
+        'caller was given no document reader. Nothing was extracted.',
+    };
+  }
+
+  let bytes: Uint8Array;
+  try {
+    bytes = (await input.evidenceStore.get(evidence.storageRef)).bytes;
+  } catch (error) {
+    return {
+      text: null,
+      source: 'evidence_raw_text',
+      model: null,
+      reason:
+        `The stored document for evidence ${evidence.id} could not be read: ` +
+        `${error instanceof Error ? error.message : 'unknown failure'}.`,
+    };
+  }
+
+  const extracted = await input.documentText.extract({
+    bytes,
+    mediaType: mediaType as EvidenceMediaType,
+  });
+  if (extracted.text === null || extracted.source === null) {
+    return {
+      text: null,
+      source: 'evidence_raw_text',
+      model: extracted.model,
+      reason:
+        extracted.reason ??
+        `No text could be read from the stored document for evidence ${evidence.id}.`,
+    };
+  }
+  return {
+    text: extracted.text,
+    source: extracted.source,
+    model: extracted.model,
+    reason: '',
+  };
 }
 
 async function storeInference(

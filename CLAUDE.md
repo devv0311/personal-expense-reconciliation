@@ -36,57 +36,18 @@
 > `verificationStatus` comes from the database `CHECK`, not the screen. Everything that remains —
 > rules/learning, analytics, the natural-language interface, concrete external adapters and stale
 > Splitwise re-sync — is deliberately unnumbered later work.
-> [Phase 20](docs/roadmap.md) shipped **derived proof packs**
-> ([ADR-0047](docs/decisions/0047-proof-packs-are-a-derived-read-not-a-second-ledger.md)):
-> `domain.buildProofPack` + `services.buildProofPackPreview` +
-> `GET /api/proof-packs/:recipientPersonId` produce a recipient-specific summary — original
-> purchase, attributed item refunds, net expense, the recipient's share, prior settlements and
-> the remaining (or reverse) balance, with selected evidence references and an explicit as-of
-> label. It is a **pure derived read with no table and no migration**: it quotes `getBalance`,
-> `getRefundAllocationState`, `getPaymentContext` and the open Phase 19 findings and recomputes
-> nothing (a pack that re-divides a share is a bug). Recipient isolation is structural (no third
-> party is ever passed to the assembler); free text is redacted through Phase 17's
-> `redactReceiptText` and the finished pack is walked through `findResidualIdentifiers`, throwing
-> `SanitizationError` rather than returning an unredacted pack; open findings, pending/blocked
-> refund distribution, believed-settled-unconfirmed, a reverse balance after a settlement, a
-> mixed adjustment basis and conflicting/missing evidence each become a visible warning. `asOf`
-> is a snapshot label, not a historical filter, and a fixed `asOf` over an unchanged ledger is
-> byte-identical. Generating a pack sends nothing, records no settlement, and writes no row.
-> [Phase 17](docs/roadmap.md) shipped context re-attachment
-> ([ADR-0044](docs/decisions/0044-evidence-observations-and-match-candidates.md)):
-> `EvidenceObservation` records the structured reading of a bank SMS or UPI push notification
-> beside the immutable source, `EvidenceMatchCandidate` records each explained
-> evidence↔payment offer with every signal's verdict, and **nothing auto-links** — ADR-0034's
-> write-once linkage and ADR-0037's candidates-only rule are reused, not relaxed. The
-> sanitization boundary is now fail-closed (`ai.assertPayloadSanitized`) with a local-only
-> reversible mapping. [ADR-0017 (cash balance)](docs/decisions/0017-pragmatic-cash-balance-reconciliation.md)
-> and [ADR-0018 (item refunds)](docs/decisions/0018-item-level-refund-attribution.md) are now
-> **implemented in full at the schema, domain and service layers**: `Payment.cash_flow_category`
-> with its own classification lifecycle, `ReconciliationAccountSnapshot`, and
-> `ExpenseAdjustmentItem` all exist and are enforced. [Phase 18](docs/roadmap.md) shipped
-> ADR-0018's **allocation engine** ([ADR-0045](docs/decisions/0045-item-refund-allocation-is-rebuilt-not-decremented.md)):
-> `domain.buildItemAwareAllocationLines` puts each item's net cost on that item's own
-> beneficiaries and applies any unattributed whole-expense reduction once, afterwards, through
-> ADR-0008's unchanged `distributeAdjustment`. It rebuilds from recorded facts rather than
-> decrementing the current lines, and **refuses rather than guesses** — an allocation that
-> cannot say who owned a refunded item raises `REFUND_ITEM_OWNERSHIP_REQUIRED` instead of
-> falling back to the whole-basket default. These decisions supersede older outflow-only scope
-> restrictions and refine whole-expense refund distribution for item-attributed refunds; the
-> existing engine is preserved alongside them, not replaced.
-> [Phase 19](docs/roadmap.md) shipped the Splitwise **drift and ghost-debt auditing engine**
-> ([ADR-0046](docs/decisions/0046-splitwise-audit-findings-and-external-read-completeness.md)):
-> `domain.auditSplitwisePair` extends phase 15's aggregate `compareSplitwiseBalance` — which is
-> unchanged — with per-record attribution, and every finding is a durable, reviewable
-> `splitwise_audit_findings` row carrying both compared snapshots, its evidence, its amount, its
-> suspected cause and its confidence. Three rules govern it and are not negotiable: attribution
-> is **earned** (a signed `balanceImpact` accounts for part of the gap, and whatever no record
-> explains stays `unattributed_balance_mismatch` at `unknown` confidence, never promoted to a
-> culprit); a failed, partial, unsupported or unreported external read is an **incomplete
-> check, never agreement** (the new `SplitwisePort.fetchLedgerEntries` is deliberately optional
-> so a missing capability is representable); and `stale` (our side changed) stays distinct from
-> `drifted` (theirs did). Reviewing a finding records a person's conclusion with actor, time and
-> reason — it authorizes **no** write to Splitwise, and stale re-sync/update/delete is still
-> unbuilt.
+> Earlier phases are each recorded in their own ADR — read the ADR, not a summary here:
+> **Phase 17** context re-attachment
+> ([ADR-0044](docs/decisions/0044-evidence-observations-and-match-candidates.md)); **Phase 18**
+> the item-refund allocation engine
+> ([ADR-0045](docs/decisions/0045-item-refund-allocation-is-rebuilt-not-decremented.md));
+> **Phase 19** Splitwise drift and ghost-debt auditing
+> ([ADR-0046](docs/decisions/0046-splitwise-audit-findings-and-external-read-completeness.md));
+> **Phase 20** derived proof packs
+> ([ADR-0047](docs/decisions/0047-proof-packs-are-a-derived-read-not-a-second-ledger.md)).
+> [ADR-0017 (cash balance)](docs/decisions/0017-pragmatic-cash-balance-reconciliation.md) and
+> [ADR-0018 (item refunds)](docs/decisions/0018-item-level-refund-attribution.md) are
+> **implemented in full at the schema, domain and service layers**.
 > Read these ADRs and the current roadmap before historical implementation notes.
 >
 > **ADR numbering:** older ADR-0017 (integration tests) and ADR-0018 (manual-note semantics)
@@ -134,30 +95,11 @@ Full entity definitions: `docs/domain/domain-model.md`. Glossary: `docs/domain/t
 
 ## The Design Standard — Tier-1 UI/UX
 
-The quality bar is **Linear / Mercury / Ramp / Raycast-level craft**. This is a mandatory
-product standard, not optional decoration. Build high-density information architecture with
-clear hierarchy, exact amounts, aligned numeric columns, accessible contrast and progressive
-disclosure. Preserve room to think without hiding financially important information.
-
-`web/` must support keyboard-first navigation: `Cmd+K` (and `Ctrl+K`) command search,
-discoverable triage shortcuts, predictable focus, selection and escape behavior. Consequential
-approval remains explicit; a shortcut must not silently approve an ambiguous decision. Use
-visual reconciliation waterfalls from evidenced opening cash through credits/debits to actual
-closing cash and the signed delta, with drill-through to contributing records. Show account
-completeness and unexplained amounts alongside the number. Use zero-clutter inspectors for
-source evidence, interpretation, decision and audit history, plus refined micro-interactions
-that communicate selection, progress and completion. Honor reduced motion, loading/error/empty
-states, responsive layouts and keyboard accessibility. Test rendered flows with synthetic data.
-
-`web/Design.md` is authoritative for how this is realised, and ADRs 0042/0043/0048/0049 record
-the decisions behind it. **Phase 21 delivered this standard across all six pillars**: six
-sections plus five detail screens, a `Cmd+K` command palette, `j`/`k`/`Enter` triage, the
-account-level cash waterfall, the interactive item-refund splitter, the evidence inspector with
-per-signal match verdicts, the Splitwise finding review, and the proof-pack export review. It
-holds a hard bar — axe reports 0 violations on every screen in desktop light, desktop dark and
-mobile — and closed two accessibility defects inherited from earlier phases (a contrast failure
-in the `ink-faint` token, and scroll containers no keyboard could reach). A change to `web/`
-starts by reading `Design.md`.
+The quality bar is **Linear / Mercury / Ramp / Raycast-level craft** — a mandatory product
+standard, not optional decoration. `web/Design.md` is authoritative for how it is realised and
+`web/CLAUDE.md` carries the working rules; ADRs 0042/0043/0048/0049 record the decisions behind
+it. A change to `web/` starts by reading both. The three rules that outrank any visual
+preference are restated under **Development workflow** below, because they bind the API too.
 
 ## The 6 Core Pillars
 
@@ -325,11 +267,9 @@ Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
 
 ## Repository conventions
 
-- **Language/stack**: TypeScript (strict mode), Node.js 20+. See
-  `docs/architecture/system-architecture.md` for the full stack decision and rationale.
-- **Structure**: `src/domain`, `src/services`, `src/ai`, `src/db`, `src/integrations`,
-  `src/api` — each has its own `README.md` describing its responsibility. Domain logic must
-  not import from `api` or `integrations`; dependencies point inward toward `domain`.
+- **Dependency direction**: domain logic must not import from `api` or `integrations`;
+  dependencies point inward toward `domain`. Stack rationale and the responsibility of each
+  `src/*` package: `docs/architecture/system-architecture.md` and each package's `README.md`.
 - **No secrets in Git.** Real bank statements, receipts, UPI identifiers, account numbers,
   card numbers, API keys, tokens, and production credentials must never be committed. Use
   `.env` (gitignored) locally; `.env.example` documents required variables with empty values.
@@ -356,12 +296,8 @@ Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
 ## Development workflow
 
 - This project moves in **incremental vertical slices** — see `docs/roadmap.md` for the
-  phase order (repository foundation → domain model → architecture → database model →
-  fixtures → import → normalization → classification → human review → receipt ingestion →
-  item extraction → beneficiary allocation → expense ledger → Splitwise integration →
-  reconciliation → schema/domain extensions → context re-attachment → item refund allocation
-  → Splitwise auditing → proof packs → UI overhaul → closing the audit's gaps). **All
-  twenty-two are complete.** A message transport for proof packs, live bank/card balance
+  phase order. **All twenty-two are complete.** A message transport for proof packs, live
+  bank/card balance
   adapters, bidirectional Splitwise sync beyond the single-row correction, and the
   natural-language interface remain unnumbered later work; none is a prerequisite for anything
   already shipped, and each needs its own ADR before it starts.
@@ -381,23 +317,3 @@ Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
   figure that does not exist over HTTP, add the read to the API, however trivial the subtraction
   looks; **never render a verified zero over incomplete evidence**; and **no keyboard shortcut
   completes a decision**.
-
-## Where things live
-
-| Topic                         | Doc                                        |
-| ----------------------------- | ------------------------------------------ |
-| Product problem & vision      | `docs/product/overview.md`                 |
-| Detailed requirements         | `docs/product/requirements.md`             |
-| Domain entities               | `docs/domain/domain-model.md`              |
-| Glossary                      | `docs/domain/terminology.md`               |
-| Invariants                    | `docs/domain/invariants.md`                |
-| State lifecycle               | `docs/domain/lifecycle.md`                 |
-| Scenario stress-tests         | `docs/domain/scenario-analysis.md`         |
-| System architecture           | `docs/architecture/system-architecture.md` |
-| Data flow                     | `docs/architecture/data-flow.md`           |
-| AI service boundary           | `docs/architecture/ai-boundary.md`         |
-| Database design               | `docs/architecture/database-design.md`     |
-| Architecture Decision Records | `docs/decisions/`                          |
-| Testing strategy              | `docs/testing/testing-strategy.md`         |
-| Security model                | `docs/security/security-model.md`          |
-| Roadmap / current phase       | `docs/roadmap.md`                          |

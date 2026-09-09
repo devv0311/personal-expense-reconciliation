@@ -24,9 +24,11 @@
  * | `EVIDENCE_STORAGE_PATH` | Where documents are written; default `./local-data/evidence`. |
  * | `ANTHROPIC_API_KEY` | Wires the real model transport. Unset: every AI operation refuses, naming the missing configuration. |
  * | `ANTHROPIC_MODEL` | Overrides the default model. |
+ * | `AI_DOCUMENT_VISION` | `true` lets a multimodal model transcribe a **photographed** receipt whose bytes have no text layer — the one path on which a document leaves this machine (ADR-0051). Unset/false: a photographed receipt is refused by name and can still be itemized by hand. A generated PDF is always read locally, configured or not. |
  * | `SPLITWISE_API_KEY` + `SPLITWISE_USER_ID` | Wires the real Splitwise adapter. Either missing: every Splitwise call refuses, and an audit records an INCOMPLETE check rather than agreement. |
  * | `AUTH_REQUIRED` | `true`/`false`. Defaults to **true** unless `HOST` is loopback, so binding to a network interface is authenticated by default and turning that off is an explicit act. |
  * | `CORS_ORIGIN` | `web/`'s origin; default `http://localhost:3000`. |
+ * | `INTAKE_FORWARDING_TOKEN` | The shared secret a mail rule or phone shortcut sends to `POST /api/intake/messages`. Unset: that endpoint refuses every request rather than standing open. |
  */
 
 import { createServer } from 'node:http';
@@ -37,9 +39,15 @@ import { createApi } from './api/index.js';
 import type { ApiDependencies } from './api/index.js';
 import { createAiService } from './ai/index.js';
 import type { ModelTransport } from './ai/index.js';
+import type { DocumentTextExtractor } from './integrations/document-text/index.js';
 import { createPgliteDatabase, createPostgresDatabase } from './db/index.js';
 import type { DatabaseHandle } from './db/index.js';
 import { createAnthropicTransport } from './integrations/anthropic/index.js';
+import {
+  createDocumentTextExtractor,
+  createVisionDocumentTextExtractor,
+} from './integrations/document-text/index.js';
+import { DEFAULT_ANTHROPIC_MODEL } from './integrations/anthropic/index.js';
 import { createFilesystemEvidenceStore } from './integrations/evidence-store/index.js';
 import { createSplitwiseAdapter } from './integrations/splitwise/index.js';
 import type {
@@ -57,6 +65,19 @@ const EVIDENCE_STORAGE_PATH = process.env.EVIDENCE_STORAGE_PATH ?? './local-data
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000';
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+
+/**
+ * The forwarding token, or `undefined`.
+ *
+ * Undefined closes `POST /api/intake/messages` (`src/api/intake-routes.ts`). That is the
+ * direction this has to fail in: the endpoint appends evidence without a session, so an
+ * installation that never configured forwarding must not have an anonymous write path.
+ */
+const INTAKE_FORWARDING_TOKEN =
+  process.env.INTAKE_FORWARDING_TOKEN === undefined ||
+  process.env.INTAKE_FORWARDING_TOKEN.trim().length === 0
+    ? undefined
+    : process.env.INTAKE_FORWARDING_TOKEN.trim();
 
 /**
  * Whether to enforce authentication.
@@ -172,11 +193,48 @@ function resolveSplitwisePort(): SplitwisePort {
   return createSplitwiseAdapter({ apiKey, connectedSplitwiseUserId });
 }
 
+/**
+ * The document reader: local PDF text always, optical transcription only if opted into.
+ *
+ * Two conditions, both required, and the second one deliberately separate from
+ * `ANTHROPIC_API_KEY`: having a model configured for *classification* is not consent to send
+ * it a photograph of a receipt. `security-model.md` keeps document bytes local by default, and
+ * ADR-0051 makes widening that a typed-out decision rather than a side effect of having a key.
+ */
+function resolveDocumentTextExtractor(): DocumentTextExtractor {
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  const enabled = process.env.AI_DOCUMENT_VISION === 'true';
+
+  if (!enabled) {
+    return createDocumentTextExtractor({
+      visionUnavailableReason:
+        'Optical extraction is off. A generated PDF is still read locally, but a photographed ' +
+        'or scanned receipt cannot be read on this machine — set AI_DOCUMENT_VISION=true (with ' +
+        'ANTHROPIC_API_KEY) to let a multimodal model transcribe it, which sends the document ' +
+        'itself to the provider (ADR-0051), or itemize the receipt by hand.',
+    });
+  }
+  if (apiKey === undefined || apiKey.length === 0) {
+    return createDocumentTextExtractor({
+      visionUnavailableReason:
+        'AI_DOCUMENT_VISION is on but ANTHROPIC_API_KEY is not set, so there is no provider to ' +
+        'transcribe with. A photographed receipt is refused rather than read as an empty one.',
+    });
+  }
+  return createDocumentTextExtractor({
+    vision: createVisionDocumentTextExtractor({
+      apiKey,
+      model: process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_ANTHROPIC_MODEL,
+    }),
+  });
+}
+
 async function main(): Promise<void> {
   const database = await openDevDatabase();
   await database.migrate();
 
   const transport = resolveModelTransport();
+  const documentText = resolveDocumentTextExtractor();
   const splitwise = resolveSplitwisePort();
   const authRequired = resolveAuthRequired();
 
@@ -184,8 +242,12 @@ async function main(): Promise<void> {
     db: database.db,
     ai: createAiService(transport),
     evidenceStore: createFilesystemEvidenceStore({ root: EVIDENCE_STORAGE_PATH }),
+    documentText,
     splitwise,
     authRequired,
+    ...(INTAKE_FORWARDING_TOKEN === undefined
+      ? {}
+      : { intakeForwardingToken: INTAKE_FORWARDING_TOKEN }),
   };
   const api = createApi(deps);
 
@@ -249,6 +311,20 @@ async function main(): Promise<void> {
       `  splitwise:      ${
         process.env.SPLITWISE_API_KEY === undefined || process.env.SPLITWISE_API_KEY.trim() === ''
           ? 'not configured (audits will report an incomplete check)'
+          : 'configured'
+      }`,
+    );
+    console.log(
+      `  document text:  local PDF text layer${
+        documentText.describe().readsImages
+          ? ' + model transcription of images (AI_DOCUMENT_VISION=true)'
+          : ' only (a photographed receipt is refused, not read as empty)'
+      }`,
+    );
+    console.log(
+      `  forwarding:     ${
+        INTAKE_FORWARDING_TOKEN === undefined
+          ? 'not configured (POST /api/intake/messages refuses every request)'
           : 'configured'
       }`,
     );

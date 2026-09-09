@@ -186,6 +186,26 @@ export const EVIDENCE_OBSERVATION_DERIVATIONS = ['caller_supplied', 'parsed_from
 export type EvidenceObservationDerivation = (typeof EVIDENCE_OBSERVATION_DERIVATIONS)[number];
 
 /**
+ * Where the text a `Receipt` extraction read actually came from (audit row 14, ADR-0051).
+ *
+ * `evidence_raw_text` — the evidence record already carried text (typed, or forwarded from a
+ * notification). `pdf_text_layer` — lifted locally off a generated PDF, on this machine, with
+ * nothing leaving it. `model_vision` — a multimodal model transcribed the document's bytes,
+ * which is the one path on which a document crosses the local sanitization boundary and is
+ * therefore off unless explicitly configured.
+ *
+ * Recorded rather than inferred. "The receipt says ₹1,240" and "a model reading a photograph
+ * of the receipt says ₹1,240" are different claims, and the person confirming an extraction is
+ * entitled to know which one is in front of them.
+ */
+export const DOCUMENT_TEXT_SOURCES = [
+  'evidence_raw_text',
+  'pdf_text_layer',
+  'model_vision',
+] as const;
+export type DocumentTextSource = (typeof DOCUMENT_TEXT_SOURCES)[number];
+
+/**
  * The signals context re-attachment compares between one `Evidence` observation and one
  * `Payment` (Phase 17, ADR-0044).
  *

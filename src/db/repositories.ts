@@ -79,6 +79,7 @@ import type {
   UserId,
 } from '../domain/ids.js';
 import type { Paise } from '../domain/money.js';
+import type { DocumentTextSource } from '../domain/enums.js';
 import { netAmount } from '../domain/expense.js';
 import { SETTLEMENT_CLAIM_NOTE_KIND, claimsSettlement } from '../domain/evidence.js';
 import type { BalanceAllocationLine, BalanceExpense, BalanceInput } from '../domain/balance.js';
@@ -3045,6 +3046,9 @@ export interface ReceiptRow {
   readonly extractionConfidence: ConfidenceLevel | null;
   readonly extractedAt: Date | null;
   readonly confirmedByUser: boolean;
+  /** Where the extracted text came from — `null` on rows written before ADR-0051. */
+  readonly textSource: DocumentTextSource | null;
+  readonly textModel: string | null;
   readonly createdAt: Date;
 }
 
@@ -3057,6 +3061,8 @@ export interface InsertReceiptDraft {
   readonly currency: string;
   readonly extractionConfidence: ConfidenceLevel | null;
   readonly extractedAt: Date | null;
+  readonly textSource?: DocumentTextSource | null;
+  readonly textModel?: string | null;
 }
 
 export async function insertReceipt(exec: Executor, draft: InsertReceiptDraft): Promise<ReceiptId> {
@@ -3072,6 +3078,8 @@ export async function insertReceipt(exec: Executor, draft: InsertReceiptDraft): 
       extractionConfidence: draft.extractionConfidence,
       extractedAt: draft.extractedAt,
       confirmedByUser: false,
+      textSource: draft.textSource ?? null,
+      textModel: draft.textModel ?? null,
     })
     .returning({ id: receipts.id });
   return requireRow(row, 'receipts').id as ReceiptId;
@@ -3208,6 +3216,8 @@ function toReceiptRow(row: typeof receipts.$inferSelect): ReceiptRow {
     extractionConfidence: row.extractionConfidence as ConfidenceLevel | null,
     extractedAt: row.extractedAt,
     confirmedByUser: row.confirmedByUser,
+    textSource: row.textSource as DocumentTextSource | null,
+    textModel: row.textModel,
     createdAt: row.createdAt,
   };
 }

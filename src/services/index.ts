@@ -45,6 +45,7 @@ export * from './analytics-service.js';
 export * from './occasion-service.js';
 export * from './splitwise-resync-service.js';
 export * from './job-service.js';
+export * from './intake-service.js';
 
 /**
  * The two handles every service call needs, re-exported so a caller — `src/api`, a future
@@ -54,4 +55,5 @@ export * from './job-service.js';
 export type { Database } from '../db/index.js';
 export type { AiService } from '../ai/index.js';
 export type { EvidenceStore } from '../integrations/evidence-store/index.js';
+export type { DocumentTextExtractor } from '../integrations/document-text/index.js';
 export type { SplitwisePort } from '../integrations/splitwise/index.js';

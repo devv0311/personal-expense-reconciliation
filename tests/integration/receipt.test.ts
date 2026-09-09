@@ -22,6 +22,7 @@ import type { MemoryEvidenceStore } from '../support/evidence-store.js';
 import { addPayment, seedCast } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
 import { scriptedReceiptExtractionTransport } from '../support/ai.js';
+import { createStubDocumentTextExtractor } from '../support/document-text.js';
 
 const AS_USER = { actor: 'user', source: 'tests/integration/receipt' } as const;
 
@@ -49,6 +50,17 @@ beforeEach(async () => {
   ai = createAiService(scriptedReceiptExtractionTransport());
 });
 
+/**
+ * The document reader every extraction here is given.
+ *
+ * Passed explicitly rather than defaulted, because the audit's row 14 was exactly that
+ * extraction had no way to read a stored document: a caller with no reader now gets a refusal
+ * naming that, not a receipt conjured from an evidence row with no text in it.
+ */
+function reader() {
+  return { evidenceStore: store, documentText: createStubDocumentTextExtractor() };
+}
+
 async function ingest(capturedAt: Date, type: 'receipt_image' | 'bank_line' = 'receipt_image') {
   const result = await ingestEvidenceDocument(database.db, {
     type,
@@ -65,7 +77,12 @@ describe('extracting a receipt', () => {
   it('writes a Receipt and its items, unconfirmed', async () => {
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
 
-    const outcome = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const outcome = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
 
     expect(outcome.outcome).toBe('extracted');
     if (outcome.outcome !== 'extracted') throw new Error('unreachable');
@@ -82,7 +99,12 @@ describe('extracting a receipt', () => {
   it('audits the creation, naming the actor', async () => {
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
 
-    const outcome = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const outcome = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
     if (outcome.outcome !== 'extracted') throw new Error('unreachable');
 
     const events = await listAuditEvents(database.db, 'receipt', outcome.view.receipt.id);
@@ -93,7 +115,12 @@ describe('extracting a receipt', () => {
   it('records both AIInferences, pending, attached to the receipt', async () => {
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
 
-    const outcome = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const outcome = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
     if (outcome.outcome !== 'extracted') throw new Error('unreachable');
 
     const inferences = await listAiInferencesByResultingRecord(
@@ -114,7 +141,12 @@ describe('extracting a receipt', () => {
     // nothing today, which is exactly this phase's scope decision to defer ai.normalizeMerchant().
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
 
-    const outcome = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const outcome = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
 
     expect(outcome.outcome).toBe('extracted');
     if (outcome.outcome !== 'extracted') throw new Error('unreachable');
@@ -134,7 +166,12 @@ describe('extracting a receipt', () => {
     });
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
 
-    const outcome = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const outcome = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
 
     expect(outcome.outcome).toBe('extracted');
     if (outcome.outcome !== 'extracted') throw new Error('unreachable');
@@ -147,7 +184,7 @@ describe('what extraction refuses', () => {
     const absent = asId<'evidence'>('00000000-0000-4000-8000-000000000000');
 
     await expect(
-      extractReceipt(database.db, { evidenceId: absent, ai, audit: AS_USER }),
+      extractReceipt(database.db, { evidenceId: absent, ai, ...reader(), audit: AS_USER }),
     ).rejects.toMatchObject({
       code: 'ENTITY_NOT_FOUND',
     });
@@ -157,23 +194,28 @@ describe('what extraction refuses', () => {
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT, 'bank_line');
 
     await expect(
-      extractReceipt(database.db, { evidenceId, ai, audit: AS_USER }),
+      extractReceipt(database.db, { evidenceId, ai, ...reader(), audit: AS_USER }),
     ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
   });
 
   it('refuses a second extraction over the same evidence', async () => {
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
-    await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    await extractReceipt(database.db, { evidenceId, ai, ...reader(), audit: AS_USER });
 
     await expect(
-      extractReceipt(database.db, { evidenceId, ai, audit: AS_USER }),
+      extractReceipt(database.db, { evidenceId, ai, ...reader(), audit: AS_USER }),
     ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
   });
 
   it('rejects a draft naming no figure at all, writing nothing', async () => {
     const evidenceId = await ingest(EMPTY_CAPTURED_AT);
 
-    const outcome = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const outcome = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
 
     expect(outcome).toMatchObject({ outcome: 'rejected', code: 'RECEIPT_DRAFT_INVALID' });
     // Extraction can be retried: nothing was written for this evidence.
@@ -184,7 +226,12 @@ describe('what extraction refuses', () => {
 describe('confirmReceipt', () => {
   it('flips confirmed_by_user and accepts both inferences', async () => {
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
-    const extracted = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const extracted = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
     if (extracted.outcome !== 'extracted') throw new Error('unreachable');
 
     const view = await confirmReceipt(database.db, {
@@ -204,7 +251,12 @@ describe('confirmReceipt', () => {
 
   it('is a no-op the second time, writing no further audit event', async () => {
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
-    const extracted = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const extracted = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
     if (extracted.outcome !== 'extracted') throw new Error('unreachable');
     const receiptId = extracted.view.receipt.id;
 
@@ -220,7 +272,12 @@ describe('confirmReceipt', () => {
 describe('correctReceipt', () => {
   it('overwrites the given fields, replaces items, and confirms', async () => {
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
-    const extracted = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const extracted = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
     if (extracted.outcome !== 'extracted') throw new Error('unreachable');
 
     const view = await correctReceipt(database.db, {
@@ -248,7 +305,12 @@ describe('correctReceipt', () => {
 
   it('marks pending inferences modified', async () => {
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
-    const extracted = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const extracted = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
     if (extracted.outcome !== 'extracted') throw new Error('unreachable');
     const receiptId = extracted.view.receipt.id;
 
@@ -264,7 +326,12 @@ describe('correctReceipt', () => {
 
   it('leaves a field out of the correction untouched, not cleared to null', async () => {
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
-    const extracted = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const extracted = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
     if (extracted.outcome !== 'extracted') throw new Error('unreachable');
     const originalSubtotal = extracted.view.receipt.subtotal;
 
@@ -280,7 +347,12 @@ describe('correctReceipt', () => {
 
   it('leaves an already-decided inference alone when corrected after confirming', async () => {
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
-    const extracted = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const extracted = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
     if (extracted.outcome !== 'extracted') throw new Error('unreachable');
     const receiptId = extracted.view.receipt.id;
 
@@ -302,7 +374,12 @@ describe('correctReceipt', () => {
 describe('discrepancies (scenario-analysis.md §20, ReceiptItem invariant)', () => {
   it('surfaces the items-vs-subtotal gap without touching either figure', async () => {
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
-    const extracted = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const extracted = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
     if (extracted.outcome !== 'extracted') throw new Error('unreachable');
 
     const view = await correctReceipt(database.db, {
@@ -337,7 +414,12 @@ describe('discrepancies (scenario-analysis.md §20, ReceiptItem invariant)', () 
     });
     const evidenceId = await ingestLinked(paymentId);
 
-    const outcome = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const outcome = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
 
     expect(outcome.outcome).toBe('extracted');
     if (outcome.outcome !== 'extracted') throw new Error('unreachable');
@@ -356,7 +438,12 @@ describe('discrepancies (scenario-analysis.md §20, ReceiptItem invariant)', () 
     });
     const evidenceId = await ingest(BLINKIT_CAPTURED_AT);
 
-    const outcome = await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    const outcome = await extractReceipt(database.db, {
+      evidenceId,
+      ai,
+      ...reader(),
+      audit: AS_USER,
+    });
 
     expect(outcome.outcome).toBe('extracted');
     if (outcome.outcome !== 'extracted') throw new Error('unreachable');
