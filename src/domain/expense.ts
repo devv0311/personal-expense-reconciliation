@@ -39,29 +39,29 @@ export function netAmount(grossAmount: Paise, adjustmentAmounts: readonly Paise[
 }
 
 /**
- * How much of an expense's recorded adjustments the current allocation has not yet absorbed.
+ * How far the current allocation is from the expense's net amount — **signed**.
  *
- * An allocation sums to the net amount as of the moment it was decided. Once a later
- * `ExpenseAdjustment` is recorded, the two diverge by exactly the amount still awaiting
- * distribution — so the figure is derived from the ledger's own state rather than tracked
- * per adjustment. Recording two refunds and distributing once therefore gives the same
+ * An allocation sums to the net amount as of the moment it was decided, and drifts from it
+ * whenever the net moves afterwards. The figure is derived from the ledger's own state rather
+ * than tracked per adjustment, so recording two refunds and distributing once gives the same
  * result as distributing after each (`lifecycle.md`, ExpenseAdjustment lifecycle).
+ *
+ * Two directions, and both are real:
+ *
+ *  - **Positive** — the allocation is *ahead* of the net: a refund was recorded and not yet
+ *    distributed. This is the ordinary case and the only one that existed before ADR-0052.
+ *  - **Negative** — the allocation is *behind* the net: an adjustment was reversed as
+ *    erroneous, so the expense costs more than the current shares sum to. This used to be
+ *    unreachable, and the function threw on it, which was correct at the time: nothing could
+ *    make the net amount rise. Reversal can, and a state the ledger can genuinely reach must
+ *    be representable rather than an error (audit row 23, ADR-0052).
+ *
+ * Zero means the allocation is current. Callers asking "is a distribution pending?" therefore
+ * test `!== 0n`, not `> 0n` — an expense whose shares are short by ₹2,000 because a refund was
+ * reversed is exactly as out of date as one ahead by ₹2,000.
  */
 export function undistributedAmount(currentLineTotal: Paise, currentNetAmount: Paise): Paise {
-  const pending = currentLineTotal - currentNetAmount;
-  if (pending < 0n) {
-    throw new DomainError(
-      'ALLOCATION_SUM_MISMATCH',
-      `The current allocation sums to ${currentLineTotal} paise but the expense's net amount ` +
-        `is ${currentNetAmount} paise — the allocation is short, which cannot happen by ` +
-        'recording an adjustment and means the two have drifted (invariants.md #11).',
-      {
-        currentLineTotal: currentLineTotal.toString(),
-        currentNetAmount: currentNetAmount.toString(),
-      },
-    );
-  }
-  return pending as Paise;
+  return (currentLineTotal - currentNetAmount) as Paise;
 }
 
 /**

@@ -35,7 +35,11 @@ REVOKE UPDATE, DELETE ON TABLE import_batches FROM :"app_role";
 -- metadata layered on the same immutable SOURCE row, exactly as `state` is.
 GRANT UPDATE (state, ignored_reason, cash_flow_category, cash_flow_state, cash_flow_approved_at, cash_flow_approved_by)
   ON TABLE payments TO :"app_role";
-GRANT UPDATE (linked_payment_id, linked_expense_id) ON TABLE evidence TO :"app_role";
+-- `superseded_by_evidence_id`/`supersede_reason` join them (ADR-0052). A record whose
+-- write-once link was wrong is replaced by a new row, and the original is *stamped* rather
+-- than edited — everything it says stays exactly as it was written.
+GRANT UPDATE (linked_payment_id, linked_expense_id, superseded_by_evidence_id, supersede_reason)
+  ON TABLE evidence TO :"app_role";
 
 -- Append-only audit log: never edited, never deleted, including for data the user later
 -- corrects — the correction is a new event, not a rewrite of history (invariants.md #22).
@@ -62,7 +66,15 @@ REVOKE UPDATE, DELETE ON TABLE allocation_lines FROM :"app_role";
 
 -- A settlement and an adjustment are both authoritative records of an observed event.
 REVOKE UPDATE, DELETE ON TABLE settlements FROM :"app_role";
+
+-- An adjustment is append-only apart from being stamped as reversed (ADR-0052) — the same
+-- shape `allocations.superseded_at` already has. Reversal says an adjustment was recorded in
+-- error and stops it counting; it does not edit the amount, the kind, the date or the expense
+-- it named, so the erroneous record and the account of why it was wrong both survive
+-- (invariants.md #22).
 REVOKE UPDATE, DELETE ON TABLE expense_adjustments FROM :"app_role";
+GRANT UPDATE (reversed_at, reversal_reason, reversed_by) ON TABLE expense_adjustments
+  TO :"app_role";
 
 -- A reconciliation run is a snapshot; a later run supersedes it rather than editing it.
 REVOKE UPDATE, DELETE ON TABLE reconciliation_runs FROM :"app_role";

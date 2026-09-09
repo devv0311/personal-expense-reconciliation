@@ -196,7 +196,9 @@ async function findPendingRefundExpenses(
     .filter((row) => {
       if (!row.hasCurrentAllocation) return false;
       const net = netAmount(row.grossAmount, [row.adjustmentTotal]);
-      return undistributedAmount(row.currentLineTotal, net) > 0n;
+      // Signed since ADR-0052: a reversed refund leaves the allocation short rather than
+      // ahead, and an out-of-date split is out of date in either direction.
+      return undistributedAmount(row.currentLineTotal, net) !== 0n;
     })
     .map((row) => row.expenseId);
 }

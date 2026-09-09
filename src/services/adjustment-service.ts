@@ -39,6 +39,7 @@ import {
   buildItemAwareAllocationLines,
   deriveItemRefundBases,
   distributeAdjustment as distributeAcrossLines,
+  restoreAllocationToNetAmount,
   isDomainError,
   itemAwareAllocationTotal,
   netAmount as computeNetAmount,
@@ -65,6 +66,7 @@ import type {
   RefundAttributionItemContext,
 } from '../domain/index.js';
 import {
+  getExpenseAdjustmentById,
   getExpenseItemOwner,
   insertAllocationWithLines,
   insertExpenseAdjustment,
@@ -74,7 +76,9 @@ import {
   listExpenseItemsByExpense,
   listGroupMemberships,
   listItemAttributionTotals,
+  listExpenseAdjustmentHistory,
   lockExpenseForAdjustment,
+  markExpenseAdjustmentReversed,
   markSplitwiseExpenseStale,
   sumAdjustmentsAgainstPayment,
   supersedeAllocation,
@@ -364,6 +368,178 @@ async function describeAttributions(
   }));
 }
 
+/* --------------------------------------------------------------------------- history */
+
+/** One adjustment as a history screen sees it, reversed ones included. */
+export interface ExpenseAdjustmentHistoryEntry {
+  readonly adjustmentId: ExpenseAdjustmentId;
+  readonly kind: ExpenseAdjustmentKind;
+  readonly amount: Paise;
+  readonly adjustmentPaymentId: PaymentId | null;
+  readonly reason: string | null;
+  readonly occurredAt: Date;
+  readonly reversedAt: Date | null;
+  readonly reversalReason: string | null;
+  readonly reversedBy: string | null;
+  /** `false` once reversed — the one field a caller needs to know whether it counts. */
+  readonly counts: boolean;
+}
+
+/**
+ * Every adjustment ever recorded against an expense, reversed ones included (ADR-0052).
+ *
+ * The deliberate counterpart to every other adjustment read: those exclude reversed rows
+ * because a reversed refund never reduced anything, and this one includes them because a
+ * ledger that hid its own corrections would be rewriting its past rather than recording it
+ * (`invariants.md` #22).
+ */
+export async function listExpenseAdjustments(
+  db: Database,
+  expenseId: ExpenseId,
+): Promise<readonly ExpenseAdjustmentHistoryEntry[]> {
+  const rows = await listExpenseAdjustmentHistory(db, expenseId);
+  return rows.map((row) => ({
+    adjustmentId: row.id,
+    kind: row.kind,
+    amount: row.amount,
+    adjustmentPaymentId: row.adjustmentPaymentId,
+    reason: row.reason,
+    occurredAt: row.occurredAt,
+    reversedAt: row.reversedAt,
+    reversalReason: row.reversalReason,
+    reversedBy: row.reversedBy,
+    counts: row.reversedAt === null,
+  }));
+}
+
+/* --------------------------------------------------------------------------- reversal */
+
+export interface ReverseExpenseAdjustmentInput {
+  readonly adjustmentId: ExpenseAdjustmentId;
+  /** Why this adjustment was wrong. Required. */
+  readonly reason: string;
+  readonly audit: AuditMeta;
+}
+
+export interface ReverseExpenseAdjustmentResult {
+  readonly adjustmentId: ExpenseAdjustmentId;
+  readonly expenseId: ExpenseId;
+  /** The amount that stops counting. The row itself keeps it. */
+  readonly reversedAmount: Paise;
+  /** The expense's net amount once this adjustment stops counting. */
+  readonly netAmountAfter: Paise;
+  /**
+   * True when the current allocation still sums to the figure the reversed adjustment
+   * produced, and therefore needs re-distributing.
+   *
+   * A reversal does **not** rewrite an approved allocation — the same rule
+   * `recordExpenseAdjustment` follows. Somebody approved those shares, and a correction to
+   * what came back is not permission to silently change what everyone owes
+   * (`invariants.md` #6). `distributeAdjustment` is still the deliberate second act.
+   */
+  readonly pendingRedistribution: boolean;
+}
+
+/**
+ * Reverses an adjustment recorded in error (audit row 23, ADR-0052).
+ *
+ * The audit's finding: *"It cannot edit/remove a recorded adjustment."* Nor should it — an
+ * adjustment is an authoritative record of an observed event and is append-only at the
+ * database (`drizzle/security/immutable-table-grants.sql`). What was missing is the third
+ * option between "edit it" and "live with it": **say it was wrong, and stop counting it**.
+ *
+ * The row is untouched apart from the three reversal columns. Its amount, its kind, its date
+ * and the expense it named all stay exactly as written, so the expense timeline still shows
+ * the refund somebody recorded by mistake and the reversal that undid it. Every read that
+ * *counts* money stops seeing it (`db.ACTIVE_ADJUSTMENT`); the history read still does.
+ *
+ * What it deliberately does not do: rebuild the allocation. A reversal is new information
+ * about what came back, exactly as a new adjustment is, and neither may silently rewrite
+ * shares a person approved. The result says redistribution is pending and
+ * `distributeAdjustment` remains the explicit act.
+ *
+ * @throws ServiceError `PRECONDITION_FAILED` when the reason is blank, or when the adjustment
+ *   has already been reversed — reversing twice would be a second account of one correction.
+ * @throws ServiceError `ENTITY_NOT_FOUND` when no such adjustment exists.
+ */
+export async function reverseExpenseAdjustment(
+  db: Database,
+  input: ReverseExpenseAdjustmentInput,
+): Promise<ReverseExpenseAdjustmentResult> {
+  if (input.reason.trim().length === 0) {
+    throw new ServiceError(
+      'PRECONDITION_FAILED',
+      'Reversing an adjustment records why it was wrong. Without a reason, a net amount ' +
+        'changes and the ledger cannot say what changed it.',
+      { field: 'reason' },
+    );
+  }
+
+  const adjustment = await getExpenseAdjustmentById(db, input.adjustmentId);
+  if (adjustment === null) {
+    throw new ServiceError('ENTITY_NOT_FOUND', `No adjustment with id ${input.adjustmentId}.`, {
+      adjustmentId: input.adjustmentId,
+    });
+  }
+  if (adjustment.reversedAt !== null) {
+    throw new ServiceError(
+      'PRECONDITION_FAILED',
+      `Adjustment ${adjustment.id} was already reversed on ` +
+        `${adjustment.reversedAt.toISOString()}. It already counts for nothing; reversing it ` +
+        'again would be a second account of one correction.',
+      { adjustmentId: adjustment.id },
+    );
+  }
+
+  return runAudited(db, input.audit, async ({ exec, record }) => {
+    const reversedAt = new Date();
+    await markExpenseAdjustmentReversed(exec, adjustment.id, {
+      reason: input.reason,
+      actor: input.audit.actor,
+      reversedAt,
+    });
+
+    await record({
+      entityType: 'expense_adjustment',
+      entityId: adjustment.id,
+      action: 'supersede',
+      oldValue: {
+        amount: adjustment.amount.toString(),
+        kind: adjustment.kind,
+        occurredAt: adjustment.occurredAt.toISOString(),
+        reversedAt: null,
+      },
+      newValue: {
+        // The record itself is unchanged, and shown unchanged deliberately: what moved is
+        // whether it counts, not what it says.
+        amount: adjustment.amount.toString(),
+        kind: adjustment.kind,
+        occurredAt: adjustment.occurredAt.toISOString(),
+        reversedAt: reversedAt.toISOString(),
+        reversedBy: input.audit.actor,
+      },
+      reason: input.reason,
+    });
+
+    // Read *after* the stamp, inside the same transaction, so these figures are the ones the
+    // reversal actually produces rather than the ones it was about to.
+    const expense = await requireExpenseSnapshot(exec, adjustment.originalExpenseId);
+    const allocation = await loadCurrentAllocation(exec, adjustment.originalExpenseId);
+    const allocatedTotal =
+      allocation === null
+        ? null
+        : allocation.lines.reduce<bigint>((sum, line) => sum + line.amount, 0n);
+
+    return {
+      adjustmentId: adjustment.id,
+      expenseId: adjustment.originalExpenseId,
+      reversedAmount: adjustment.amount,
+      netAmountAfter: expense.netAmount,
+      pendingRedistribution: allocatedTotal !== null && allocatedTotal !== expense.netAmount,
+    };
+  });
+}
+
 export interface DistributeAdjustmentInput {
   readonly expenseId: ExpenseId;
   /**
@@ -445,21 +621,33 @@ export async function distributeAdjustment(
     const basis = await loadRefundBasis(exec, expense.id);
     const distributionBasis: RefundDistributionBasis =
       basis.attributedReduction === 0n ? 'whole_expense' : 'item_attributed';
+
+    // `pending < 0` means the net amount *rose* — an adjustment was reversed as erroneous
+    // (ADR-0052) — so there is no reduction to apportion and the lines are re-split to the
+    // new, higher target instead. The item-aware engine already rebuilds from recorded facts
+    // rather than decrementing (ADR-0045), so it needs no special case; only ADR-0008's
+    // subtract-a-reduction path does.
     const newLines =
-      distributionBasis === 'whole_expense'
-        ? // ADR-0008's whole-expense path, untouched: no item ever came back, so there is no
-          // item cost to reduce and the reduction is the current lines' to share.
-          distributeAcrossLines({
-            lines: current.lines,
-            adjustmentAmount: pending,
-            ...(input.customWeights === undefined ? {} : { customWeights: input.customWeights }),
-          })
-        : buildItemAwareAllocationLines({
+      distributionBasis === 'item_attributed'
+        ? buildItemAwareAllocationLines({
             lines: current.lines,
             itemBases: basis.itemBases,
             legacyReduction: basis.unattributedReduction,
             ...(input.customWeights === undefined ? {} : { legacyWeights: input.customWeights }),
-          });
+          })
+        : pending > 0n
+          ? // ADR-0008's whole-expense path, untouched: no item ever came back, so there is
+            // no item cost to reduce and the reduction is the current lines' to share.
+            distributeAcrossLines({
+              lines: current.lines,
+              adjustmentAmount: pending,
+              ...(input.customWeights === undefined ? {} : { customWeights: input.customWeights }),
+            })
+          : restoreAllocationToNetAmount({
+              lines: current.lines,
+              netAmount: expense.netAmount,
+              ...(input.customWeights === undefined ? {} : { customWeights: input.customWeights }),
+            });
 
     validateAllocationLineAmounts(newLines);
     // Invariant #14's tightened form, checkable only while no unattributed reduction is also
@@ -669,7 +857,9 @@ export async function getRefundAllocationState(
     attributedReduction: basis.attributedReduction,
     unattributedReduction: basis.unattributedReduction,
     pendingReduction,
-    pendingDistribution: pendingReduction > 0n,
+    // Signed since ADR-0052: an expense whose shares are short because a refund was
+    // reversed is exactly as out of date as one ahead because a refund was recorded.
+    pendingDistribution: pendingReduction !== 0n,
     obligationsReflectAdjustments: current !== null && pendingReduction === 0n,
     items: basis.itemBases.map((item) => ({
       ...item,

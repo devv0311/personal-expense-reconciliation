@@ -384,6 +384,21 @@ export const evidence = pgTable(
      * (ADR-0018). Required on manual notes, forbidden on every other evidence type.
      */
     noteKind: text('note_kind'),
+    /**
+     * The corrected record that replaces this one (audit row 13, ADR-0052).
+     *
+     * ADR-0034 makes linkage write-once: evidence attached to the wrong payment could never be
+     * moved, and the audit found there was no way to say so either. This is that way, and it
+     * is a **supersession, not an edit**: the wrong row keeps its links, its text and its
+     * place in history, and a new row carrying the same immutable source facts with the
+     * corrected links takes over from it. Nothing is rewritten, so "why did this ledger once
+     * believe that receipt paid for this?" stays answerable.
+     */
+    supersededByEvidenceId: uuid('superseded_by_evidence_id').references(
+      (): AnyPgColumn => evidence.id,
+    ),
+    /** Why. Required whenever a row is superseded — a correction with no account is not one. */
+    supersedeReason: text('supersede_reason'),
     createdAt: createdAt(),
   },
   (table) => [
@@ -408,7 +423,10 @@ export const evidence = pgTable(
       .where(
         sql.raw(
           "(storage_ref is not null or type in ('bank_line', 'upi_notification')) and " +
-            'linked_payment_id is null and linked_expense_id is null',
+            'linked_payment_id is null and linked_expense_id is null and ' +
+            // A superseded row is history, not an open question: offering it in the review
+            // queue would ask a person to re-decide a link they have already corrected.
+            'superseded_by_evidence_id is null',
         ),
       ),
     check('evidence_type_check', oneOf('type', EVIDENCE_TYPES)),
@@ -448,6 +466,19 @@ export const evidence = pgTable(
       'evidence_note_kind_only_on_notes_check',
       sql`(${table.type} = 'manual_note') = (${table.noteKind} is not null)`,
     ),
+    // A supersession names both its replacement and its reason, or neither. A row marked
+    // replaced with no account of why is a correction nobody can review.
+    check(
+      'evidence_supersede_reason_check',
+      sql`(${table.supersededByEvidenceId} is null) = (${table.supersedeReason} is null)`,
+    ),
+    // A row cannot replace itself. Without this the correction path could produce a cycle of
+    // length one, and "follow the chain to the current record" would never terminate.
+    check(
+      'evidence_supersede_self_check',
+      sql`${table.supersededByEvidenceId} is null or ${table.supersededByEvidenceId} <> ${table.id}`,
+    ),
+    index('evidence_superseded_by_idx').on(table.supersededByEvidenceId),
   ],
 );
 
@@ -958,12 +989,41 @@ export const expenseAdjustments = pgTable(
     adjustmentPaymentId: uuid('adjustment_payment_id').references(() => payments.id),
     reason: text('reason'),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    /**
+     * When this adjustment was reversed as erroneous (audit row 23, ADR-0052).
+     *
+     * A refund recorded that never happened — a mis-typed amount, an adjustment against the
+     * wrong expense — had no way out: the row is append-only by design, and every path that
+     * counts money counted it. The three columns here are the same shape `allocations`
+     * already uses for supersession, and the same grant: **everything else on the row stays
+     * immutable**, and the reversal is a stamp rather than an edit, so the erroneous record
+     * and the reason it was wrong both survive (`invariants.md` #22).
+     *
+     * A reversed adjustment is excluded from every read that *counts* it and included in
+     * every read that *recounts* it — the expense timeline still shows it, with its reversal.
+     */
+    reversedAt: timestamp('reversed_at', { withTimezone: true }),
+    /** Why it was wrong. Required whenever a row is reversed. */
+    reversalReason: text('reversal_reason'),
+    /** Who reversed it — `'user'`/`'user:<id>'`, the same actor shape an `AuditEvent` carries. */
+    reversedBy: text('reversed_by'),
     createdAt: createdAt(),
   },
   (table) => [
     index('expense_adjustments_expense_idx').on(table.originalExpenseId),
     check('expense_adjustments_amount_check', sql`${table.amount} > 0`),
     check('expense_adjustments_kind_check', oneOf('kind', EXPENSE_ADJUSTMENT_KINDS)),
+    // All three, or none. A reversal with no reason is a figure that changed with no account
+    // of why, which is the one thing an append-only financial record must never allow.
+    check(
+      'expense_adjustments_reversal_check',
+      sql`(${table.reversedAt} is null) = (${table.reversalReason} is null)
+          and (${table.reversedAt} is null) = (${table.reversedBy} is null)`,
+    ),
+    // The lookup every money read now applies.
+    index('expense_adjustments_active_idx')
+      .on(table.originalExpenseId)
+      .where(sql.raw('reversed_at is null')),
   ],
 );
 

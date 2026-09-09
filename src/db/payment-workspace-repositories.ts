@@ -25,6 +25,7 @@ import type {
 import type { AccountId, ImportBatchId, MerchantId, PaymentId, PersonId } from '../domain/ids.js';
 import type { Paise } from '../domain/money.js';
 
+import { ACTIVE_ADJUSTMENT } from './repositories.js';
 import type { Executor } from './repositories.js';
 import {
   accounts,
@@ -343,7 +344,9 @@ export async function listPaymentsForWorkspace(
         count: sql<number>`count(*)::int`,
       })
       .from(expenseAdjustments)
-      .where(inArray(expenseAdjustments.adjustmentPaymentId, ids))
+      // A reversed refund no longer explains any part of the credit it was recorded against
+      // (ADR-0052), so the payment goes back to being unexplained by it.
+      .where(and(inArray(expenseAdjustments.adjustmentPaymentId, ids), ACTIVE_ADJUSTMENT))
       .groupBy(expenseAdjustments.adjustmentPaymentId),
     exec
       .select({ paymentId: evidence.linkedPaymentId, count: sql<number>`count(*)::int` })

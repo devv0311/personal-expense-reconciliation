@@ -4,6 +4,9 @@
  * ```
  * POST /api/expenses/:expenseId/adjustments             record it
  * POST /api/expenses/:expenseId/adjustments/distribute  fold it into a new Allocation version
+ * GET  /api/expenses/:expenseId/adjustments             every one ever recorded, reversed ones
+ *                                                       included
+ * POST /api/adjustments/:adjustmentId/reverse           say one was wrong; stop counting it
  * GET  /api/expenses/:expenseId/refund-allocation       what came back, per item, and what is
  *                                                       still pending
  * ```
@@ -21,7 +24,9 @@ import type { Paise, RefundAttributionDraft } from '../domain/index.js';
 import {
   distributeAdjustment,
   getRefundAllocationState,
+  listExpenseAdjustments,
   recordExpenseAdjustment,
+  reverseExpenseAdjustment,
 } from '../services/index.js';
 
 import {
@@ -30,6 +35,7 @@ import {
   optionalString,
   optionalTimestamp,
   readJsonObject,
+  requirePersonActor,
   requireMinorUnitsField,
   requireOneOf,
   requireParam,
@@ -58,7 +64,7 @@ export async function postExpenseAdjustment(
 ): Promise<Response> {
   const expenseId = asId<'expense'>(requireUuid(requireParam(params, 'expenseId'), 'expenseId'));
   const body = await readJsonObject(request);
-  const actor = requirePersonActor(body);
+  const actor = requirePersonActor(body, 'record an adjustment');
   const reason = optionalString(body, 'reason');
   const kind = requireOneOf(body, 'kind', EXPENSE_ADJUSTMENT_KINDS);
   const amount = requireMinorUnitsField(body, 'amount') as Paise;
@@ -107,7 +113,7 @@ export async function postDistributeAdjustment(
 ): Promise<Response> {
   const expenseId = asId<'expense'>(requireUuid(requireParam(params, 'expenseId'), 'expenseId'));
   const body = await readJsonObject(request);
-  const actor = requirePersonActor(body);
+  const actor = requirePersonActor(body, 'record or distribute an adjustment');
   const reason = optionalString(body, 'reason');
   const decidedBy = optionalString(body, 'decidedBy');
   const decidedAt = optionalTimestamp(body, 'decidedAt');
@@ -148,18 +154,6 @@ export async function getRefundAllocationRoute(
 
 /* ------------------------------------------------------------------------- validation */
 
-function requirePersonActor(body: Record<string, unknown>): string {
-  const actor = requireString(body, 'actor');
-  if (actor !== 'user' && !actor.startsWith('user:')) {
-    throw new ApiRequestError(
-      `"${actor}" cannot record or distribute an adjustment over HTTP. A request here is a ` +
-        'person\'s act, so the actor is "user" or "user:<id>".',
-      'actor',
-    );
-  }
-  return actor;
-}
-
 /**
  * Parses the complete item attribution set, or `undefined` for a legacy whole-expense refund.
  *
@@ -197,6 +191,68 @@ function parseItemAttributions(
       expenseItemId: asId<'expense_item'>(expenseItemId),
       amount: requireMinorUnitsField(attribution, 'amount') as Paise,
     };
+  });
+}
+
+/**
+ * `GET /api/expenses/:expenseId/adjustments` — every adjustment ever recorded against it.
+ *
+ * Includes reversed ones, deliberately and uniquely: every other adjustment read excludes them
+ * because a reversed refund never reduced anything, and this one includes them because a
+ * ledger that hid its own corrections would be rewriting its past (ADR-0052). Each entry
+ * carries `counts`, so a screen never has to work out for itself whether a row is money.
+ */
+export async function getExpenseAdjustmentsRoute(
+  deps: ApiDependencies,
+  _request: Request,
+  params: RouteParams,
+): Promise<Response> {
+  const expenseId = asId<'expense'>(requireUuid(requireParam(params, 'expenseId'), 'expenseId'));
+  const adjustments = await listExpenseAdjustments(deps.db, expenseId);
+  return jsonResponse(200, {
+    adjustments: adjustments.map((entry) => ({
+      ...entry,
+      amount: entry.amount.toString(),
+      occurredAt: entry.occurredAt.toISOString(),
+      reversedAt: entry.reversedAt?.toISOString() ?? null,
+    })),
+  });
+}
+
+/**
+ * `POST /api/adjustments/:adjustmentId/reverse` — say an adjustment was recorded in error.
+ *
+ * Body: `{ actor, reason }`. The reason is **required** by the service, not merely encouraged:
+ * a net amount that changes with no account of why is the one thing an append-only financial
+ * record must not allow.
+ *
+ * This is not a delete and not an edit. The row keeps its amount, its kind and its date; what
+ * changes is whether it counts. The expense's timeline still shows it, with its reversal
+ * beside it, and the allocation is **not** rebuilt — somebody approved those shares, and
+ * `POST /api/expenses/:expenseId/adjustments/distribute` stays the deliberate second act.
+ */
+export async function postAdjustmentReversal(
+  deps: ApiDependencies,
+  request: Request,
+  params: RouteParams,
+): Promise<Response> {
+  const adjustmentId = asId<'expense_adjustment'>(
+    requireUuid(requireParam(params, 'adjustmentId'), 'adjustmentId'),
+  );
+  const body = await readJsonObject(request);
+  const actor = requirePersonActor(body, 'reverse an adjustment');
+  const reason = requireString(body, 'reason');
+
+  const result = await reverseExpenseAdjustment(deps.db, {
+    adjustmentId,
+    reason,
+    audit: { actor, source: 'api POST /api/adjustments/:adjustmentId/reverse', reason },
+  });
+
+  return jsonResponse(200, {
+    ...result,
+    reversedAmount: result.reversedAmount.toString(),
+    netAmountAfter: result.netAmountAfter.toString(),
   });
 }
 

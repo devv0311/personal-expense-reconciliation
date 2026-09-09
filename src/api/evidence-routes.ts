@@ -32,6 +32,7 @@ import {
   linkEvidence,
   readEvidenceDocument,
   recordManualNote,
+  supersedeEvidence,
 } from '../services/index.js';
 import type { EvidenceDocumentType } from '../services/index.js';
 
@@ -180,6 +181,44 @@ export async function postEvidenceLink(
   });
 
   return jsonResponse(200, evidence);
+}
+
+/**
+ * `POST /api/evidence/:evidenceId/supersede` — replace a record whose link was wrong.
+ *
+ * Body: `{ actor, reason, linkedPaymentId?, linkedExpenseId? }`. The reason is required.
+ *
+ * ADR-0034 keeps linkage write-once and this does not relax it: the original row is not
+ * edited. A **new** record is written carrying the same immutable source facts — the same
+ * document, the same text, the same captured-at — with the corrected links, and the original
+ * is stamped with its replacement and the reason. Both survive, which is what keeps "why did
+ * this ledger once believe that receipt paid for this?" answerable (ADR-0052).
+ *
+ * Passing `null` for a side is meaningful: detaching a document that belongs nowhere yet is a
+ * legitimate correction, and the replacement then reaches the review queue as unmatched
+ * evidence like any other.
+ */
+export async function postEvidenceSupersession(
+  deps: ApiDependencies,
+  request: Request,
+  params: RouteParams,
+): Promise<Response> {
+  const evidenceId = asId<'evidence'>(
+    requireUuid(requireParam(params, 'evidenceId'), 'evidenceId'),
+  );
+  const body = await readJsonObject(request);
+  const actor = requirePersonActor(body);
+  const reason = requireString(body, 'reason');
+  const requested = links(body);
+
+  const result = await supersedeEvidence(deps.db, {
+    evidenceId,
+    ...requested,
+    reason,
+    audit: { actor, source: 'api POST /api/evidence/:evidenceId/supersede', reason },
+  });
+
+  return jsonResponse(201, result);
 }
 
 /* ------------------------------------------------------------------------------ reads */

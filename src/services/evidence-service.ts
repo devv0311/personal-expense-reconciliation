@@ -40,10 +40,13 @@ import type {
 import {
   findEvidenceByStorageRef,
   getEvidenceById,
+  getEvidenceObservationByEvidenceId,
   getExpenseById,
   getPaymentById,
   getReceiptByEvidenceId,
   insertEvidence,
+  insertEvidenceObservation,
+  markEvidenceSuperseded,
   updateEvidenceLinks,
 } from '../db/index.js';
 import type { Database, EvidenceRow, Executor } from '../db/index.js';
@@ -128,7 +131,10 @@ export async function ingestEvidenceDocument(
     (row) =>
       row.type === input.type &&
       row.linkedPaymentId === links.linkedPaymentId &&
-      row.linkedExpenseId === links.linkedExpenseId,
+      row.linkedExpenseId === links.linkedExpenseId &&
+      // A superseded row is a record of a mistake, so re-uploading the same document must not
+      // resolve to it — that would hand the caller back the very row somebody corrected.
+      row.supersededByEvidenceId === null,
   );
   if (existing !== undefined) {
     return {
@@ -343,6 +349,190 @@ export async function requireEvidenceRow(
  * review queue, which carries the id already — an inspector reached any other way had no way
  * to ask for one (audit row 15). A read, added rather than computed anywhere else (ADR-0048).
  */
+/* ------------------------------------------------------------------------ supersession */
+
+export interface SupersedeEvidenceInput {
+  /** The record whose links were wrong. */
+  readonly evidenceId: EvidenceId;
+  /**
+   * The links the corrected record should carry.
+   *
+   * Both may be `null` — detaching a document that was attached to the wrong payment and
+   * belongs nowhere yet is a legitimate correction, and the replacement then reaches the
+   * review queue as unmatched evidence like any other.
+   */
+  readonly linkedPaymentId?: PaymentId | null;
+  readonly linkedExpenseId?: ExpenseId | null;
+  /** Why the original was wrong. Required: a correction with no account is not one. */
+  readonly reason: string;
+  readonly audit: AuditMeta;
+}
+
+export interface SupersedeEvidenceResult {
+  /** The corrected record. Carries the same source facts and the new links. */
+  readonly evidenceId: EvidenceId;
+  readonly supersededEvidenceId: EvidenceId;
+  /** True when the original's structured reading was carried across to the replacement. */
+  readonly observationCopied: boolean;
+}
+
+/**
+ * Replaces an evidence record whose write-once link was wrong (audit row 13, ADR-0052).
+ *
+ * ADR-0034 makes `evidence.linked_payment_id`/`linked_expense_id` write-once, and that rule is
+ * not relaxed here — a link still cannot be moved. What was missing was the other half: a way
+ * to say *this attachment was a mistake* without either mutating the record or leaving the
+ * ledger asserting something false. The audit found it exactly: *"no UI replacement/superseding-
+ * evidence creation when an old write-once link was wrong."*
+ *
+ * What happens is a supersession, not an edit:
+ *
+ *  - The wrong row is **untouched** apart from being stamped with its replacement and the
+ *    reason. Its links, its text and its document stay exactly as they were, so "why did this
+ *    ledger once believe this receipt paid for that?" is still answerable afterwards.
+ *  - A **new** row is written carrying the same immutable source facts — the same type, the
+ *    same `storage_ref` (content-addressed, so the same bytes really are the same document),
+ *    the same raw text and captured-at — with the corrected links.
+ *  - The original's structured reading is carried across, because it was a reading of the
+ *    *document*, not of the link, and re-deriving it would lose a human correction someone
+ *    may have made to it (ADR-0044).
+ *  - Match candidates against the superseded row are left where they are. They record offers
+ *    that were made and decided; rewriting them would be rewriting the history this whole
+ *    mechanism exists to keep.
+ *
+ * @throws ServiceError `PRECONDITION_FAILED` when the reason is blank, when the row was
+ *   already superseded (correct the replacement instead — a chain with two heads has no
+ *   current record), or when the corrected links are identical to the original's, which would
+ *   write a second copy of a record that was never wrong.
+ * @throws ServiceError `ENTITY_NOT_FOUND` when the evidence, or a link target, does not exist.
+ */
+export async function supersedeEvidence(
+  db: Database,
+  input: SupersedeEvidenceInput,
+): Promise<SupersedeEvidenceResult> {
+  if (input.reason.trim().length === 0) {
+    throw new ServiceError(
+      'PRECONDITION_FAILED',
+      'Superseding an evidence record records why the original was wrong. Without a reason, ' +
+        'a later reader sees two rows for one document and no account of which is right.',
+      { field: 'reason' },
+    );
+  }
+
+  const original = await requireEvidence(db, input.evidenceId);
+  if (original.supersededByEvidenceId !== null) {
+    throw new ServiceError(
+      'PRECONDITION_FAILED',
+      `Evidence ${original.id} has already been superseded by ${original.supersededByEvidenceId}. ` +
+        'Correct that record instead: a supersession chain with two heads has no current record.',
+      { evidenceId: original.id, supersededByEvidenceId: original.supersededByEvidenceId },
+    );
+  }
+
+  const links = {
+    linkedPaymentId:
+      input.linkedPaymentId === undefined ? original.linkedPaymentId : input.linkedPaymentId,
+    linkedExpenseId:
+      input.linkedExpenseId === undefined ? original.linkedExpenseId : input.linkedExpenseId,
+  };
+  if (
+    links.linkedPaymentId === original.linkedPaymentId &&
+    links.linkedExpenseId === original.linkedExpenseId
+  ) {
+    throw new ServiceError(
+      'PRECONDITION_FAILED',
+      'The corrected record would carry exactly the same links as the original, so there is ' +
+        'nothing to correct. Superseding it would write a second copy of a record that was ' +
+        'never wrong.',
+      { evidenceId: original.id },
+    );
+  }
+  await assertLinkTargetsExist(db, links);
+
+  const observation = await getEvidenceObservationByEvidenceId(db, original.id);
+
+  const replacementId = await runAudited(db, input.audit, async ({ exec, record }) => {
+    const draft = {
+      type: original.type,
+      noteKind: original.noteKind,
+      storageRef: original.storageRef,
+      mediaType: original.mediaType,
+      byteSize: original.byteSize,
+      rawText: original.rawText,
+      capturedAt: original.capturedAt,
+      ...links,
+    };
+    validateEvidencePayload(draft);
+
+    const id = await insertEvidence(exec, draft);
+    await record({
+      entityType: 'evidence',
+      entityId: id,
+      action: 'create',
+      newValue: {
+        type: draft.type,
+        storageRef: draft.storageRef,
+        capturedAt: draft.capturedAt.toISOString(),
+        linkedPaymentId: draft.linkedPaymentId,
+        linkedExpenseId: draft.linkedExpenseId,
+        supersedes: original.id,
+      },
+      reason: input.reason,
+    });
+
+    if (observation !== null) {
+      await insertEvidenceObservation(exec, {
+        evidenceId: id,
+        observedAmount: observation.observedAmount,
+        observedDirection: observation.observedDirection,
+        observedReference: observation.observedReference,
+        observedReferenceNormalized: observation.observedReferenceNormalized,
+        observedReferenceType: observation.observedReferenceType,
+        observedAccountHint: observation.observedAccountHint,
+        observedMerchantText: observation.observedMerchantText,
+        observedOccurredAt: observation.observedOccurredAt,
+        derivation: observation.derivation,
+        notificationKey: null,
+      });
+      await record({
+        entityType: 'evidence_observation',
+        entityId: id,
+        action: 'create',
+        newValue: { carriedFromEvidenceId: original.id, derivation: observation.derivation },
+        reason: input.reason,
+      });
+    }
+
+    await markEvidenceSuperseded(exec, original.id, { evidenceId: id, reason: input.reason });
+    await record({
+      entityType: 'evidence',
+      entityId: original.id,
+      action: 'supersede',
+      oldValue: {
+        linkedPaymentId: original.linkedPaymentId,
+        linkedExpenseId: original.linkedExpenseId,
+        supersededByEvidenceId: null,
+      },
+      newValue: {
+        // Unchanged, and shown unchanged on purpose: a supersession is not an edit of the
+        // record it replaces.
+        linkedPaymentId: original.linkedPaymentId,
+        linkedExpenseId: original.linkedExpenseId,
+        supersededByEvidenceId: id,
+      },
+      reason: input.reason,
+    });
+
+    return id;
+  });
+
+  return {
+    evidenceId: replacementId,
+    supersededEvidenceId: original.id,
+    observationCopied: observation !== null,
+  };
+}
+
 export interface EvidenceDetail extends EvidenceRow {
   readonly receiptId: ReceiptId | null;
 }

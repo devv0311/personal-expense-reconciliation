@@ -32,7 +32,9 @@ import {
   postForwardedMessages,
 } from './intake-routes.js';
 import {
+  getExpenseAdjustmentsRoute,
   getRefundAllocationRoute,
+  postAdjustmentReversal,
   postDistributeAdjustment,
   postExpenseAdjustment,
 } from './adjustment-routes.js';
@@ -53,6 +55,7 @@ import {
   postEvidenceFile,
   postEvidenceLink,
   postEvidenceNote,
+  postEvidenceSupersession,
 } from './evidence-routes.js';
 import {
   getExpenseFundingRoute,
@@ -271,6 +274,11 @@ export const EVIDENCE_ROUTES: readonly ApiRoute[] = [
     handler: postEvidenceMatchDecision,
   },
   { method: 'POST', path: '/api/evidence/:evidenceId/link', handler: postEvidenceLink },
+  {
+    method: 'POST',
+    path: '/api/evidence/:evidenceId/supersede',
+    handler: postEvidenceSupersession,
+  },
   { method: 'POST', path: '/api/evidence/:evidenceId/receipt', handler: postReceiptExtraction },
   {
     method: 'POST',
@@ -330,8 +338,28 @@ export const ALLOCATION_ROUTES: readonly ApiRoute[] = [
   },
   {
     method: 'GET',
+    path: '/api/expenses/:expenseId/adjustments',
+    handler: getExpenseAdjustmentsRoute,
+  },
+  {
+    method: 'GET',
     path: '/api/expenses/:expenseId/refund-allocation',
     handler: getRefundAllocationRoute,
+  },
+];
+
+/**
+ * Reversing an adjustment recorded in error (audit row 23, ADR-0052).
+ *
+ * Its own collection rather than a child of the expense, because a reversal is about the
+ * adjustment: the caller has the adjustment's id in hand, and routing through the expense
+ * would invite a request that names one expense and an adjustment belonging to another.
+ */
+export const ADJUSTMENT_ROUTES: readonly ApiRoute[] = [
+  {
+    method: 'POST',
+    path: '/api/adjustments/:adjustmentId/reverse',
+    handler: postAdjustmentReversal,
   },
 ];
 
@@ -596,6 +624,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...EVIDENCE_ROUTES,
   ...RECEIPT_ROUTES,
   ...ALLOCATION_ROUTES,
+  ...ADJUSTMENT_ROUTES,
   ...SETTLEMENT_ROUTES,
   ...PAYMENT_CONTEXT_ROUTES,
   ...IMPORT_ROUTES,

@@ -31,6 +31,11 @@ export type DomainErrorCode =
   | 'ALLOCATION_ITEM_SUM_MISMATCH'
   /** An allocation had no lines at all, or a required line was missing. */
   | 'ALLOCATION_SHAPE_INVALID'
+  /**
+   * Rebuilding an allocation to a risen net amount had no proportions to rebuild by
+   * (ADR-0052) — every current line is zero, which is the fully-refunded shape (ADR-0013).
+   */
+  | 'ALLOCATION_WEIGHTS_UNRECOVERABLE'
   /** A `group`-typed line had no fully-distributed expansion (`invariants.md` #2b). */
   | 'GROUP_EXPANSION_MISSING'
   /** A group resolved to no members as of the expense date (`ADR-0009`). */
