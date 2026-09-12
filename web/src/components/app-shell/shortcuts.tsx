@@ -60,6 +60,7 @@ export const GO_TO_DESTINATIONS = [
   { key: "s", href: "/splitwise", label: "Splitwise audit" },
   { key: "p", href: "/proof-packs", label: "Proof packs" },
   { key: "a", href: "/analytics", label: "Analytics" },
+  { key: "k", href: "/ask", label: "Ask" },
   { key: "u", href: "/automation", label: "Automation" },
   { key: "t", href: "/setup", label: "Setup" },
 ] as const;

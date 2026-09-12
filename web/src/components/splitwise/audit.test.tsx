@@ -78,12 +78,15 @@ describe("the Splitwise audit screen", () => {
     );
   });
 
-  it("says out loud that nothing on the screen writes to Splitwise", async () => {
+  it("separates the audit, which writes to nothing, from the sections that do", async () => {
+    // The page-level claim used to be "nothing here writes to Splitwise", which stopped being
+    // true the moment the repair was mounted on the same screen (ADR-0055) and stayed untrue
+    // when change discovery joined it (ADR-0056). Auditing still writes to nothing; saying it
+    // of the whole page would be the kind of reassurance rule 2 exists to forbid.
     renderAuditPage([AUDIT_RUN_COMPLETE]);
 
-    await waitFor(() =>
-      expect(screen.getByText(/Nothing here writes to Splitwise/)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(/Auditing writes to nothing/)).toBeInTheDocument());
+    expect(screen.getByText(/one row at a time/)).toBeInTheDocument();
   });
 
   it("announces a loading state, then a retryable error", async () => {

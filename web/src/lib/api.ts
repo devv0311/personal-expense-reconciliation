@@ -6,13 +6,19 @@
  */
 
 import type {
+  AccountBalanceReading,
   AccountBoundaryDraft,
+  AccountProviderLink,
   AccountSnapshotsResult,
   AccountSummary,
   AccountType,
   ApiErrorBody,
-  AuditTrailEvent,
   ApplyRulesResult,
+  AskCapabilities,
+  AskResult,
+  AuditTrailEvent,
+  BalanceComparisonResult,
+  BalanceProviderStatus,
   BalanceResult,
   BeneficiaryRef,
   CashFlowCategory,
@@ -23,6 +29,7 @@ import type {
   CounterpartyOptions,
   CreateExpenseResult,
   DecideEvidenceMatchResult,
+  DiscoverRemoteChangesResult,
   EvidenceLibraryResult,
   EvidenceMatchesResult,
   EvidenceNoteKind,
@@ -38,13 +45,14 @@ import type {
   ExpenseRelationshipType,
   ExpenseState,
   GroupDetail,
+  ImportHistoryResult,
+  ImportStatementResult,
   JobKind,
   JobListResult,
   JobStatus,
-  ImportHistoryResult,
-  ImportStatementResult,
   MatchEvidenceContextResult,
   MerchantDetail,
+  MessagingStatus,
   MonthlySpendResult,
   NormalizePaymentsResult,
   NotificationEvidenceType,
@@ -61,38 +69,39 @@ import type {
   PaymentWorkspaceItem,
   PersonDetail,
   PersonSummary,
-  AccountBalanceReading,
-  AccountProviderLink,
-  BalanceComparisonResult,
-  BalanceProviderStatus,
-  MessagingStatus,
-  RefreshBalancesResult,
   ProofPackDelivery,
   ProofPackPreview,
   ReceiptView,
-  SendProofPackResult,
   ReconciliationRun,
+  RefreshBalancesResult,
   RefundAllocationState,
+  RemoteChangeDecisionResult,
   ResyncCandidates,
   ResyncResult,
-  SettlementResyncResult,
+  ReviewItemKind,
+  ReviewQueueResult,
   RuleAssertion,
   RuleEffect,
   RuleMatchPattern,
   RuleView,
-  ReviewItemKind,
-  ReviewQueueResult,
   RunReconciliationResult,
+  RunSplitwiseAuditResult,
+  SendProofPackResult,
   SessionIdentity,
   SessionState,
   SettlementRegisterResult,
-  RunSplitwiseAuditResult,
+  SettlementResyncResult,
   SplitwiseAuditFinding,
   SplitwiseAuditFindingDetail,
   SplitwiseAuditReviewDecision,
   SplitwiseAuditReviewStatus,
   SplitwiseAuditRun,
   SplitwiseAuditRunDetail,
+  SplitwiseRemoteChange,
+  SplitwiseRemoteChangeDetail,
+  SplitwiseRemoteChangeKind,
+  SplitwiseRemoteChangeStatus,
+  SplitwiseRemoteRead,
   UnsettledResult,
 } from "./types";
 
@@ -1653,4 +1662,94 @@ export async function getPaymentHistory(
   paymentId: string,
 ): Promise<{ readonly events: readonly AuditTrailEvent[] }> {
   return request(`/api/payments/${paymentId}/history`);
+}
+
+/* ================================ Splitwise remote-to-local change discovery (ADR-0056) */
+
+/**
+ * Reads Splitwise and records what differs, as proposals.
+ *
+ * Safe to call repeatedly: an unchanged re-run re-observes what is already on record rather
+ * than duplicating it, and never reopens a change somebody has already decided about.
+ */
+export async function discoverRemoteChanges(): Promise<DiscoverRemoteChangesResult> {
+  return request<DiscoverRemoteChangesResult>("/api/splitwise/remote-changes/discover", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR }),
+  });
+}
+
+export async function listRemoteChanges(filter: {
+  readonly status?: SplitwiseRemoteChangeStatus;
+  readonly kind?: SplitwiseRemoteChangeKind;
+  readonly includeSuperseded?: boolean;
+  readonly limit?: number;
+}): Promise<{ readonly changes: readonly SplitwiseRemoteChange[] }> {
+  const params = new URLSearchParams();
+  if (filter.status !== undefined) params.set("status", filter.status);
+  if (filter.kind !== undefined) params.set("kind", filter.kind);
+  if (filter.includeSuperseded !== undefined) {
+    params.set("includeSuperseded", String(filter.includeSuperseded));
+  }
+  if (filter.limit !== undefined) params.set("limit", String(filter.limit));
+  const query = params.toString();
+  return request(`/api/splitwise/remote-changes${query === "" ? "" : `?${query}`}`);
+}
+
+export async function getRemoteChange(id: string): Promise<SplitwiseRemoteChangeDetail> {
+  return request<SplitwiseRemoteChangeDetail>(`/api/splitwise/remote-changes/${id}`);
+}
+
+export async function listRemoteReads(
+  limit?: number,
+): Promise<{ readonly reads: readonly SplitwiseRemoteRead[] }> {
+  return request(`/api/splitwise/remote-reads${limit === undefined ? "" : `?limit=${limit}`}`);
+}
+
+/**
+ * Records a person's decision about one change somebody made in Splitwise.
+ *
+ * The reason is required by the API for both decisions, not by this form: accepting changes
+ * what this ledger records about somebody else's edit, and rejecting closes it. `targetId`
+ * names the local record an adoption or a mapping joins to, and the API refuses it for every
+ * other kind.
+ */
+export async function decideRemoteChange(input: {
+  readonly changeId: string;
+  readonly decision: "accept" | "reject";
+  readonly reason: string;
+  readonly targetId?: string;
+}): Promise<RemoteChangeDecisionResult> {
+  return request<RemoteChangeDecisionResult>(
+    `/api/splitwise/remote-changes/${input.changeId}/decision`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        actor: ACTOR,
+        decision: input.decision,
+        reason: input.reason,
+        ...(input.targetId === undefined ? {} : { targetId: input.targetId }),
+      }),
+    },
+  );
+}
+
+/* ================================================ asking the ledger a question (ADR-0057) */
+
+/** What can be asked, and whether asking works at all. A read. */
+export async function getAskCapabilities(): Promise<AskCapabilities> {
+  return request<AskCapabilities>("/api/ask/capabilities");
+}
+
+/**
+ * Asks one question.
+ *
+ * A POST because a question is a body, not because anything changes: it takes no actor, and
+ * writes no row (ADR-0057).
+ */
+export async function askLedger(question: string): Promise<AskResult> {
+  return request<AskResult>("/api/ask", {
+    method: "POST",
+    body: JSON.stringify({ question }),
+  });
 }

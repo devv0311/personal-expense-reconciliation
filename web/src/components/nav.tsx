@@ -35,8 +35,15 @@ const SECTIONS = [
   { href: "/proof-packs", label: "Proof packs" },
 ] as const;
 
-/** Reached often enough to belong in the chrome, rarely enough not to be a workflow tab. */
+/**
+ * Reached often enough to belong in the chrome, rarely enough not to be a workflow tab.
+ *
+ * **Ask** joins them for the same reason Analytics is here rather than in the row above: it
+ * only reads. It answers a question about the ledger from the ledger's own reads and writes
+ * nothing at all (ADR-0057), so it is somewhere you drop in on, never a queue you return to.
+ */
 const UTILITIES = [
+  { href: "/ask", label: "Ask" },
   { href: "/analytics", label: "Analytics" },
   { href: "/automation", label: "Automation" },
   { href: "/setup", label: "Setup" },

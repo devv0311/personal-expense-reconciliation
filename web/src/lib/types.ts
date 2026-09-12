@@ -1571,3 +1571,191 @@ export interface JobListResult {
   readonly limit: number;
   readonly offset: number;
 }
+
+/* ============================ Splitwise remote-to-local change discovery (ADR-0056) */
+
+/** What somebody did in Splitwise that this ledger can see and has to decide about. */
+export type SplitwiseRemoteChangeKind =
+  | "remote_expense_amount_changed"
+  | "remote_settlement_amount_changed"
+  | "remote_expense_deleted"
+  | "remote_settlement_deleted"
+  | "remote_expense_unlinked"
+  | "remote_settlement_unlinked"
+  | "remote_person_unmapped"
+  | "remote_duplicate_candidate";
+
+/**
+ * What accepting a change writes, as the API decided it.
+ *
+ * Quoted here, never derived: which effect a kind carries is the service's own rule, and a
+ * second copy of it in the browser is a copy that can drift (ADR-0048).
+ */
+export type SplitwiseRemoteChangeEffect =
+  | "record_drift"
+  | "record_external_deletion"
+  | "adopt_expense_link"
+  | "adopt_settlement_link"
+  | "map_person"
+  | "none";
+
+export type SplitwiseRemoteChangeStatus = "proposed" | "accepted" | "rejected";
+
+export const SPLITWISE_REMOTE_CHANGE_STATUSES: readonly SplitwiseRemoteChangeStatus[] = [
+  "proposed",
+  "accepted",
+  "rejected",
+];
+
+export interface SplitwiseRemoteChange {
+  readonly id: string;
+  readonly remoteReadId: string;
+  readonly lastObservedReadId: string;
+  readonly kind: SplitwiseRemoteChangeKind;
+  readonly effect: SplitwiseRemoteChangeEffect;
+  readonly summary: string;
+  /** What accepting will do, in words the API composed. */
+  readonly consequence: string;
+  /** How complete the read this was seen under was. `complete` is not the only honest answer. */
+  readonly readStatus: SplitwiseExternalReadStatus;
+  readonly readDetail: string | null;
+  readonly personAId: string | null;
+  readonly personBId: string | null;
+  readonly expenseId: string | null;
+  readonly settlementId: string | null;
+  readonly externalReference: string | null;
+  readonly externalUserReference: string | null;
+  readonly amount: string | null;
+  readonly localSnapshot: unknown;
+  readonly remoteSnapshot: unknown;
+  readonly subjects: unknown;
+  readonly firstObservedAt: string;
+  readonly lastObservedAt: string;
+  readonly status: SplitwiseRemoteChangeStatus;
+  readonly decidedAt: string | null;
+  readonly decidedBy: string | null;
+  readonly decisionReason: string | null;
+  readonly appliedEffect: SplitwiseRemoteChangeEffect | null;
+  readonly appliedTargetId: string | null;
+  readonly supersededAt: string | null;
+  readonly supersededByChangeId: string | null;
+}
+
+export interface SplitwiseRemoteRead {
+  readonly id: string;
+  readonly runAt: string;
+  readonly externalReadStatus: SplitwiseExternalReadStatus;
+  readonly externalReadDetail: string | null;
+  readonly pairsRead: number;
+  readonly pairsUnchecked: number;
+  readonly changesCreated: number;
+  readonly changesReobserved: number;
+  readonly changesSuperseded: number;
+}
+
+export interface SplitwiseRemoteChangeDetail {
+  readonly change: SplitwiseRemoteChange;
+  readonly discoveredBy: SplitwiseRemoteRead | null;
+  readonly lastObservedBy: SplitwiseRemoteRead | null;
+  /** True when accepting must name the local record to join to. */
+  readonly needsTarget: boolean;
+  /** False when this kind has nothing to apply — accepting is refused by name. */
+  readonly acceptable: boolean;
+}
+
+export interface DiscoverRemoteChangesResult extends SplitwiseRemoteRead {
+  readonly remoteReadId: string;
+  readonly changes: readonly SplitwiseRemoteChange[];
+}
+
+export interface RemoteChangeDecisionResult {
+  readonly changeId: string;
+  readonly status: "accepted" | "rejected";
+  readonly appliedEffect: string | null;
+  readonly appliedTargetId: string | null;
+  /** What actually happened, stated by the API so a confirmation quotes rather than guesses. */
+  readonly appliedDescription: string;
+}
+
+/* ================================================ asking the ledger a question (ADR-0057) */
+
+export interface LedgerQueryCapability {
+  readonly kind: string;
+  readonly answers: string;
+  readonly example: string;
+  readonly needsPeriod: boolean;
+  readonly needsPerson: boolean;
+  /** The service read every figure in an answer of this kind comes from. */
+  readonly source: string;
+}
+
+export interface AskCapabilities {
+  readonly model: {
+    readonly provider: string;
+    readonly model: string;
+    readonly configured: boolean;
+    readonly unavailableReason?: string;
+  };
+  readonly queries: readonly LedgerQueryCapability[];
+  readonly knownPeople: readonly string[];
+  readonly knownCategories: readonly string[];
+  /** Always false, and stated because it is the property that makes the surface safe. */
+  readonly writes: false;
+}
+
+/** One figure in an answer. Money is exact paise as a string, formatted only for display. */
+export interface LedgerAnswerFigure {
+  readonly label: string;
+  readonly amount: string | null;
+  readonly count: number | null;
+  readonly note: string | null;
+}
+
+export interface LedgerAnswerRecord {
+  readonly type: "expense" | "payment" | "settlement" | "adjustment" | "person" | "finding" | "run";
+  readonly id: string;
+  readonly label: string;
+  readonly amount: string | null;
+  readonly occurredAt: string | null;
+}
+
+export interface LedgerAnswerLink {
+  readonly label: string;
+  readonly href: string;
+}
+
+export interface LedgerAnswer {
+  readonly kind: string;
+  readonly answered: boolean;
+  /** How the question was read. The sentence that makes a wrong reading visible. */
+  readonly interpretation: string;
+  readonly headline: string;
+  readonly period: { readonly start: string; readonly end: string } | null;
+  readonly scope: string;
+  readonly source: string | null;
+  readonly figures: readonly LedgerAnswerFigure[];
+  readonly records: readonly LedgerAnswerRecord[];
+  readonly caveats: readonly string[];
+  readonly uncertainties: readonly string[];
+  readonly links: readonly LedgerAnswerLink[];
+}
+
+export interface AskResult {
+  readonly question: string;
+  readonly plan: {
+    readonly kind: string;
+    readonly period: { readonly start: string; readonly end: string } | null;
+    readonly personName: string | null;
+    readonly category: string | null;
+    readonly searchTerm: string | null;
+    readonly limit: number;
+    readonly clarification: string | null;
+  };
+  readonly confidence: ConfidenceLevel;
+  readonly modelInfo: {
+    readonly provider: string;
+    readonly model: string;
+    readonly promptVersion: string;
+  };
+  readonly answer: LedgerAnswer;
+}

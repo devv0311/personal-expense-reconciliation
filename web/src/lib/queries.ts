@@ -12,7 +12,13 @@ import type {
   ReviewQueueFilter,
   RunReconciliationInput,
 } from "./api";
-import type { JobKind, JobStatus, SplitwiseAuditReviewDecision } from "./types";
+import type {
+  JobKind,
+  JobStatus,
+  SplitwiseAuditReviewDecision,
+  SplitwiseRemoteChangeKind,
+  SplitwiseRemoteChangeStatus,
+} from "./types";
 
 export const queryKeys = {
   expenses: (filter: ListExpensesFilter) => ["expenses", filter] as const,
@@ -35,6 +41,10 @@ export const queryKeys = {
   paymentContext: (id: string) => ["payment-context", id] as const,
   splitwiseAuditRuns: (limit?: number) => ["splitwise-audit-runs", limit ?? null] as const,
   resyncCandidates: () => ["resync-candidates"] as const,
+  remoteChanges: (filter: RemoteChangeFilter) => ["splitwise-remote-changes", filter] as const,
+  remoteChange: (id: string) => ["splitwise-remote-change", id] as const,
+  remoteReads: (limit?: number) => ["splitwise-remote-reads", limit ?? null] as const,
+  askCapabilities: () => ["ask-capabilities"] as const,
   categorySpend: (range: AnalyticsRange) => ["analytics", "spending", range] as const,
   monthlySpend: (range: AnalyticsRange) => ["analytics", "monthly", range] as const,
   ownSpend: (range: AnalyticsRange) => ["analytics", "own-spend", range] as const,
@@ -1128,4 +1138,76 @@ export function useCancelJob() {
     mutationFn: api.cancelJob,
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["jobs"] }),
   });
+}
+
+/* ============================== Splitwise remote-to-local change discovery (ADR-0056) */
+
+export interface RemoteChangeFilter {
+  readonly status?: SplitwiseRemoteChangeStatus;
+  readonly kind?: SplitwiseRemoteChangeKind;
+  readonly includeSuperseded?: boolean;
+  readonly limit?: number;
+}
+
+export function useRemoteChanges(filter: RemoteChangeFilter = {}) {
+  return useQuery({
+    queryKey: queryKeys.remoteChanges(filter),
+    queryFn: () => api.listRemoteChanges(filter),
+  });
+}
+
+export function useRemoteChange(id: string) {
+  return useQuery({
+    queryKey: queryKeys.remoteChange(id),
+    queryFn: () => api.getRemoteChange(id),
+  });
+}
+
+export function useRemoteReads(limit?: number) {
+  return useQuery({
+    queryKey: queryKeys.remoteReads(limit),
+    queryFn: () => api.listRemoteReads(limit),
+  });
+}
+
+export function useDiscoverRemoteChanges() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.discoverRemoteChanges,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["splitwise-remote-changes"] });
+      void queryClient.invalidateQueries({ queryKey: ["splitwise-remote-reads"] });
+    },
+  });
+}
+
+export function useDecideRemoteChange() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.decideRemoteChange,
+    onSuccess: (_result, input) => {
+      void queryClient.invalidateQueries({ queryKey: ["splitwise-remote-changes"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.remoteChange(input.changeId) });
+      // Accepting can close a sync row or adopt a link, both of which change what the repair
+      // has to offer — and a mapping changes who the next audit can even read.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.resyncCandidates() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.people() });
+    },
+  });
+}
+
+/* ============================================== asking the ledger a question (ADR-0057) */
+
+export function useAskCapabilities() {
+  return useQuery({ queryKey: queryKeys.askCapabilities(), queryFn: api.getAskCapabilities });
+}
+
+/**
+ * Asking is a mutation only in the TanStack sense — it is a POST whose body is a question.
+ *
+ * It writes nothing, so there is no cache to invalidate: an answer is derived on demand from
+ * approved state and filed nowhere (ADR-0057).
+ */
+export function useAskLedger() {
+  return useMutation({ mutationFn: (question: string) => api.askLedger(question) });
 }

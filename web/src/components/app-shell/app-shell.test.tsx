@@ -63,6 +63,7 @@ describe("the application shell", () => {
       "/balances",
       "/splitwise",
       "/proof-packs",
+      "/ask",
       "/analytics",
       "/automation",
       "/setup",

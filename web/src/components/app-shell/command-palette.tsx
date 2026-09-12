@@ -103,6 +103,13 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       },
       { id: "go-analytics", label: "Analytics", hint: "g a", group: "Go to", href: "/analytics" },
       {
+        id: "go-ask",
+        label: "Ask the ledger a question",
+        hint: "g k",
+        group: "Go to",
+        href: "/ask",
+      },
+      {
         id: "go-automation",
         label: "Automation",
         hint: "g u",
