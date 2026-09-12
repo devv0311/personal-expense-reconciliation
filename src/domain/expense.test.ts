@@ -72,8 +72,12 @@ describe('undistributedAmount — what a superseding allocation still has to abs
     expect(undistributedAmount(paise(45000n), paise(0n))).toBe(45000n);
   });
 
-  it('refuses a net amount above the current lines, which would mean money appeared', () => {
-    expect(() => undistributedAmount(paise(75000n), paise(90000n))).toThrow(DomainError);
+  it('reports a net amount above the current lines as a negative figure (ADR-0052)', () => {
+    // This used to throw, correctly: nothing could make the net amount rise. Reversing an
+    // adjustment recorded in error can, so the allocation is legitimately *behind* the net
+    // and the shortfall is a figure rather than an impossibility. The sign is what tells a
+    // caller which way the redistribution goes.
+    expect(undistributedAmount(paise(75000n), paise(90000n))).toBe(-15000n);
   });
 });
 

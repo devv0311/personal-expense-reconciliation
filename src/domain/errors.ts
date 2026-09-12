@@ -31,6 +31,11 @@ export type DomainErrorCode =
   | 'ALLOCATION_ITEM_SUM_MISMATCH'
   /** An allocation had no lines at all, or a required line was missing. */
   | 'ALLOCATION_SHAPE_INVALID'
+  /**
+   * Rebuilding an allocation to a risen net amount had no proportions to rebuild by
+   * (ADR-0052) — every current line is zero, which is the fully-refunded shape (ADR-0013).
+   */
+  | 'ALLOCATION_WEIGHTS_UNRECOVERABLE'
   /** A `group`-typed line had no fully-distributed expansion (`invariants.md` #2b). */
   | 'GROUP_EXPANSION_MISSING'
   /** A group resolved to no members as of the expense date (`ADR-0009`). */
@@ -94,7 +99,21 @@ export type DomainErrorCode =
   /** A standing rule was written with no condition, so it would match every payment. */
   | 'RULE_PATTERN_EMPTY'
   /** A rule asserts a fact its own pattern makes impossible (a REFUND on a debit-only rule). */
-  | 'RULE_ASSERTION_INVALID';
+  | 'RULE_ASSERTION_INVALID'
+  /** A document was proposed as a proof-pack attachment that may never leave this machine. */
+  | 'PROOF_PACK_ATTACHMENT_REFUSED'
+  /** A recipient address was not valid for the channel it was given for. */
+  | 'PROOF_PACK_ADDRESS_INVALID'
+  /** A send was requested before the recipient/content/evidence review was complete. */
+  | 'PROOF_PACK_REVIEW_INCOMPLETE'
+  /** A retry was requested on a delivery that is not failed, or is out of attempts. */
+  | 'PROOF_PACK_DELIVERY_NOT_RETRYABLE'
+  /** A provider reading was taken as a boundary it cannot support (ADR-0053). */
+  | 'BALANCE_READING_NOT_EVIDENCE'
+  /** A remote Splitwise change was applied without an explicit local decision (ADR-0054). */
+  | 'SPLITWISE_CHANGE_UNREVIEWED'
+  /** A proposed remote change no longer matches the remote state it was derived from. */
+  | 'SPLITWISE_CHANGE_STALE';
 
 /** Thrown by `src/domain` when an input violates a documented invariant. */
 export class DomainError extends Error {

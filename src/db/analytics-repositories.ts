@@ -16,6 +16,7 @@ import { and, asc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
 import type { ExpenseId, PersonId } from '../domain/ids.js';
 import type { Paise } from '../domain/money.js';
 
+import { ACTIVE_ADJUSTMENT } from './repositories.js';
 import type { Executor } from './repositories.js';
 import {
   allocationLineGroupExpansions,
@@ -62,7 +63,9 @@ async function adjustmentTotals(
       total: sql<string>`coalesce(sum(${expenseAdjustments.amount}), 0)`,
     })
     .from(expenseAdjustments)
-    .where(inArray(expenseAdjustments.originalExpenseId, [...expenseIds]))
+    // A reversed adjustment never reduced anything, so it must not reduce an analytics
+    // figure either (ADR-0052).
+    .where(and(inArray(expenseAdjustments.originalExpenseId, [...expenseIds]), ACTIVE_ADJUSTMENT))
     .groupBy(expenseAdjustments.originalExpenseId);
   return new Map(rows.map((row) => [row.expenseId, BigInt(row.total)]));
 }

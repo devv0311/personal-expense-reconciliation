@@ -10,6 +10,7 @@ import { createMemoryEvidenceStore, syntheticDocument } from '../support/evidenc
 import type { MemoryEvidenceStore } from '../support/evidence-store.js';
 import { createMockSplitwisePort } from '../support/splitwise.js';
 import { scriptedReceiptExtractionTransport } from '../support/ai.js';
+import { createStubDocumentTextExtractor } from '../support/document-text.js';
 
 const BASE = 'http://localhost';
 const BLINKIT_CAPTURED_AT = new Date('2026-07-01T19:25:00.000Z');
@@ -29,13 +30,18 @@ afterAll(async () => {
 beforeEach(async () => {
   await database.truncateAll();
   store = createMemoryEvidenceStore();
-  api = createApi({
+  api = buildApi(createStubDocumentTextExtractor());
+});
+
+function buildApi(documentText?: ReturnType<typeof createStubDocumentTextExtractor>): Api {
+  return createApi({
     db: database.db,
     ai: createAiService(scriptedReceiptExtractionTransport()),
     evidenceStore: store,
     splitwise: createMockSplitwisePort(),
+    ...(documentText === undefined ? {} : { documentText }),
   });
-});
+}
 
 async function json(response: Response): Promise<Record<string, unknown>> {
   return (await response.json()) as Record<string, unknown>;
@@ -113,6 +119,49 @@ describe('POST /api/evidence/:evidenceId/receipt', () => {
       post(`/api/evidence/${evidenceId}/receipt`, { actor: 'system' }),
     );
     expect(response.status).toBe(400);
+  });
+});
+
+describe('reading a stored document (audit row 14)', () => {
+  it('records where the extracted text came from, and which model read it', async () => {
+    const evidenceId = await ingestEvidence();
+    const response = await api.handle(
+      post(`/api/evidence/${evidenceId}/receipt`, { actor: 'user' }),
+    );
+    expect(response.status).toBe(201);
+    const body = await json(response);
+    const receipt = body['receipt'] as Record<string, unknown>;
+    expect(receipt['textSource']).toBe('model_vision');
+    expect(receipt['textModel']).toBe('stub-vision-model');
+  });
+
+  it('refuses a stored photograph nothing can read, rather than extracting an empty receipt', async () => {
+    api = buildApi(
+      createStubDocumentTextExtractor({
+        text: null,
+        reason: 'Optical extraction is off. Set AI_DOCUMENT_VISION=true.',
+      }),
+    );
+    const evidenceId = await ingestEvidence();
+    const response = await api.handle(
+      post(`/api/evidence/${evidenceId}/receipt`, { actor: 'user' }),
+    );
+    expect(response.status).toBe(422);
+    const body = await json(response);
+    const error = body['error'] as Record<string, unknown>;
+    expect(error['code']).toBe('DOCUMENT_UNREADABLE');
+    expect(String(error['message'])).toContain('AI_DOCUMENT_VISION');
+  });
+
+  it('refuses when the process has no document reader at all', async () => {
+    api = buildApi();
+    const evidenceId = await ingestEvidence();
+    const response = await api.handle(
+      post(`/api/evidence/${evidenceId}/receipt`, { actor: 'user' }),
+    );
+    expect(response.status).toBe(422);
+    const body = await json(response);
+    expect((body['error'] as Record<string, unknown>)['code']).toBe('DOCUMENT_UNREADABLE');
   });
 });
 

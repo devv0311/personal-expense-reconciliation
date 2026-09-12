@@ -79,6 +79,7 @@ import type {
   UserId,
 } from '../domain/ids.js';
 import type { Paise } from '../domain/money.js';
+import type { DocumentTextSource } from '../domain/enums.js';
 import { netAmount } from '../domain/expense.js';
 import { SETTLEMENT_CLAIM_NOTE_KIND, claimsSettlement } from '../domain/evidence.js';
 import type { BalanceAllocationLine, BalanceExpense, BalanceInput } from '../domain/balance.js';
@@ -464,9 +465,12 @@ export async function listExpenses(
     .select({ expenseId: expenseAdjustments.originalExpenseId, amount: expenseAdjustments.amount })
     .from(expenseAdjustments)
     .where(
-      inArray(
-        expenseAdjustments.originalExpenseId,
-        rows.map((row) => row.id),
+      and(
+        inArray(
+          expenseAdjustments.originalExpenseId,
+          rows.map((row) => row.id),
+        ),
+        ACTIVE_ADJUSTMENT,
       ),
     );
   const adjustmentsByExpense = new Map<string, Paise[]>();
@@ -879,6 +883,111 @@ export interface ExpenseAdjustmentDraft {
   readonly occurredAt: Date;
 }
 
+/**
+ * The condition every read that **counts** an adjustment applies (ADR-0052).
+ *
+ * A reversed adjustment is a record of a mistake, not money that moved: it must not reduce a
+ * net amount, feed a refund projection, consume a credit payment's explanation budget, or
+ * appear in a reconciliation total. It must still appear in *history* — `collectExpenseTimeline
+ * Sources` deliberately does not apply this, because "what happened to this expense" includes
+ * the refund somebody recorded by mistake and then reversed.
+ *
+ * One exported condition rather than a repeated `isNull(...)`: the failure mode of forgetting
+ * it at one site is a figure that is quietly wrong, and a named constant is greppable in a way
+ * a scattered predicate is not.
+ */
+export const ACTIVE_ADJUSTMENT = isNull(expenseAdjustments.reversedAt);
+
+/** One adjustment row, including whether it has been reversed. */
+export interface ExpenseAdjustmentRow {
+  readonly id: ExpenseAdjustmentId;
+  readonly originalExpenseId: ExpenseId;
+  readonly kind: 'merchant_refund' | 'third_party_reimbursement';
+  readonly amount: Paise;
+  readonly adjustmentPaymentId: PaymentId | null;
+  readonly reason: string | null;
+  readonly occurredAt: Date;
+  readonly reversedAt: Date | null;
+  readonly reversalReason: string | null;
+  readonly reversedBy: string | null;
+}
+
+export async function getExpenseAdjustmentById(
+  exec: Executor,
+  adjustmentId: ExpenseAdjustmentId,
+): Promise<ExpenseAdjustmentRow | null> {
+  const [row] = await exec
+    .select()
+    .from(expenseAdjustments)
+    .where(eq(expenseAdjustments.id, adjustmentId));
+  if (row === undefined) return null;
+  return {
+    id: row.id as ExpenseAdjustmentId,
+    originalExpenseId: row.originalExpenseId as ExpenseId,
+    kind: row.kind as 'merchant_refund' | 'third_party_reimbursement',
+    amount: row.amount as Paise,
+    adjustmentPaymentId: row.adjustmentPaymentId as PaymentId | null,
+    reason: row.reason,
+    occurredAt: row.occurredAt,
+    reversedAt: row.reversedAt,
+    reversalReason: row.reversalReason,
+    reversedBy: row.reversedBy,
+  };
+}
+
+/**
+ * Every adjustment against one expense, **including reversed ones** — the history read.
+ *
+ * Deliberately the one adjustment query that does not apply {@link ACTIVE_ADJUSTMENT}: a
+ * screen showing what happened to an expense must show the refund somebody recorded by
+ * mistake and the reversal that undid it, or the ledger has quietly rewritten its own past.
+ */
+export async function listExpenseAdjustmentHistory(
+  exec: Executor,
+  expenseId: ExpenseId,
+): Promise<ExpenseAdjustmentRow[]> {
+  const rows = await exec
+    .select()
+    .from(expenseAdjustments)
+    .where(eq(expenseAdjustments.originalExpenseId, expenseId))
+    .orderBy(asc(expenseAdjustments.occurredAt), asc(expenseAdjustments.id));
+  return rows.map((row) => ({
+    id: row.id as ExpenseAdjustmentId,
+    originalExpenseId: row.originalExpenseId as ExpenseId,
+    kind: row.kind as 'merchant_refund' | 'third_party_reimbursement',
+    amount: row.amount as Paise,
+    adjustmentPaymentId: row.adjustmentPaymentId as PaymentId | null,
+    reason: row.reason,
+    occurredAt: row.occurredAt,
+    reversedAt: row.reversedAt,
+    reversalReason: row.reversalReason,
+    reversedBy: row.reversedBy,
+  }));
+}
+
+/**
+ * Stamps one adjustment reversed (ADR-0052).
+ *
+ * The only `UPDATE` this table takes, and it touches only the three reversal columns — the
+ * same shape, and the same role-level grant, `allocations.superseded_at` already has. The
+ * amount, the kind, the date and the expense it was recorded against all stay exactly as they
+ * were written.
+ */
+export async function markExpenseAdjustmentReversed(
+  exec: Executor,
+  adjustmentId: ExpenseAdjustmentId,
+  reversal: { readonly reason: string; readonly actor: string; readonly reversedAt: Date },
+): Promise<void> {
+  await exec
+    .update(expenseAdjustments)
+    .set({
+      reversedAt: reversal.reversedAt,
+      reversalReason: reversal.reason,
+      reversedBy: reversal.actor,
+    })
+    .where(eq(expenseAdjustments.id, adjustmentId));
+}
+
 export async function insertExpenseAdjustment(
   exec: Executor,
   draft: ExpenseAdjustmentDraft,
@@ -904,7 +1013,7 @@ export async function listAdjustmentAmounts(
   const rows = await exec
     .select({ amount: expenseAdjustments.amount })
     .from(expenseAdjustments)
-    .where(eq(expenseAdjustments.originalExpenseId, expenseId))
+    .where(and(eq(expenseAdjustments.originalExpenseId, expenseId), ACTIVE_ADJUSTMENT))
     .orderBy(asc(expenseAdjustments.occurredAt), asc(expenseAdjustments.id));
   return rows.map((row) => row.amount as Paise);
 }
@@ -945,7 +1054,7 @@ export async function listExpenseAdjustmentSummaries(
       occurredAt: expenseAdjustments.occurredAt,
     })
     .from(expenseAdjustments)
-    .where(eq(expenseAdjustments.originalExpenseId, expenseId))
+    .where(and(eq(expenseAdjustments.originalExpenseId, expenseId), ACTIVE_ADJUSTMENT))
     .orderBy(asc(expenseAdjustments.occurredAt), asc(expenseAdjustments.id));
   if (rows.length === 0) return [];
 
@@ -1102,7 +1211,7 @@ export async function listExpenseAdjustmentItems(
       expenseAdjustments,
       eq(expenseAdjustmentItems.expenseAdjustmentId, expenseAdjustments.id),
     )
-    .where(eq(expenseAdjustments.originalExpenseId, expenseId))
+    .where(and(eq(expenseAdjustments.originalExpenseId, expenseId), ACTIVE_ADJUSTMENT))
     .orderBy(asc(expenseAdjustments.occurredAt), asc(expenseAdjustmentItems.id));
 
   return rows.map((row) => ({
@@ -1124,7 +1233,7 @@ export async function sumAdjustmentsAgainstPayment(
   paymentId: PaymentId,
   options: { readonly excludeAdjustmentId?: ExpenseAdjustmentId } = {},
 ): Promise<Paise> {
-  const conditions = [eq(expenseAdjustments.adjustmentPaymentId, paymentId)];
+  const conditions = [eq(expenseAdjustments.adjustmentPaymentId, paymentId), ACTIVE_ADJUSTMENT];
   if (options.excludeAdjustmentId !== undefined) {
     conditions.push(not(eq(expenseAdjustments.id, options.excludeAdjustmentId)));
   }
@@ -1664,7 +1773,7 @@ export async function countAdjustmentsForPayment(
   const rows = await exec
     .select({ id: expenseAdjustments.id })
     .from(expenseAdjustments)
-    .where(eq(expenseAdjustments.adjustmentPaymentId, paymentId));
+    .where(and(eq(expenseAdjustments.adjustmentPaymentId, paymentId), ACTIVE_ADJUSTMENT));
   return rows.length;
 }
 
@@ -2226,7 +2335,7 @@ export async function loadCashReconciliationInput(
       amount: expenseAdjustments.amount,
     })
     .from(expenseAdjustments)
-    .where(inArray(expenseAdjustments.adjustmentPaymentId, paymentIds));
+    .where(and(inArray(expenseAdjustments.adjustmentPaymentId, paymentIds), ACTIVE_ADJUSTMENT));
 
   const totalsFor = (
     rows: Array<{ paymentId: string | null; amount: Paise }>,
@@ -2448,6 +2557,9 @@ export interface EvidenceDraft {
 
 export interface EvidenceRow extends EvidenceDraft {
   readonly id: EvidenceId;
+  /** The corrected record that replaced this one, when one has (ADR-0052). */
+  readonly supersededByEvidenceId: EvidenceId | null;
+  readonly supersedeReason: string | null;
   readonly createdAt: Date;
 }
 
@@ -2569,8 +2681,32 @@ function toEvidenceRow(row: typeof evidence.$inferSelect): EvidenceRow {
     capturedAt: row.capturedAt,
     linkedPaymentId: row.linkedPaymentId as PaymentId | null,
     linkedExpenseId: row.linkedExpenseId as ExpenseId | null,
+    supersededByEvidenceId: row.supersededByEvidenceId as EvidenceId | null,
+    supersedeReason: row.supersedeReason,
     createdAt: row.createdAt,
   };
+}
+
+/**
+ * Marks one evidence row replaced by another (ADR-0052).
+ *
+ * The only `UPDATE` this table takes besides linkage, and it is granted at the role level
+ * alongside it (`drizzle/security/immutable-table-grants.sql`). Nothing about the superseded
+ * row's own content moves: its type, text, document and links stay exactly as they were, which
+ * is what keeps "why did this ledger once believe that?" answerable.
+ */
+export async function markEvidenceSuperseded(
+  exec: Executor,
+  evidenceId: EvidenceId,
+  supersededBy: { readonly evidenceId: EvidenceId; readonly reason: string },
+): Promise<void> {
+  await exec
+    .update(evidence)
+    .set({
+      supersededByEvidenceId: supersededBy.evidenceId,
+      supersedeReason: supersededBy.reason,
+    })
+    .where(eq(evidence.id, evidenceId));
 }
 
 /* =============================================== evidence observations & match candidates */
@@ -3045,6 +3181,9 @@ export interface ReceiptRow {
   readonly extractionConfidence: ConfidenceLevel | null;
   readonly extractedAt: Date | null;
   readonly confirmedByUser: boolean;
+  /** Where the extracted text came from — `null` on rows written before ADR-0051. */
+  readonly textSource: DocumentTextSource | null;
+  readonly textModel: string | null;
   readonly createdAt: Date;
 }
 
@@ -3057,6 +3196,8 @@ export interface InsertReceiptDraft {
   readonly currency: string;
   readonly extractionConfidence: ConfidenceLevel | null;
   readonly extractedAt: Date | null;
+  readonly textSource?: DocumentTextSource | null;
+  readonly textModel?: string | null;
 }
 
 export async function insertReceipt(exec: Executor, draft: InsertReceiptDraft): Promise<ReceiptId> {
@@ -3072,6 +3213,8 @@ export async function insertReceipt(exec: Executor, draft: InsertReceiptDraft): 
       extractionConfidence: draft.extractionConfidence,
       extractedAt: draft.extractedAt,
       confirmedByUser: false,
+      textSource: draft.textSource ?? null,
+      textModel: draft.textModel ?? null,
     })
     .returning({ id: receipts.id });
   return requireRow(row, 'receipts').id as ReceiptId;
@@ -3208,6 +3351,8 @@ function toReceiptRow(row: typeof receipts.$inferSelect): ReceiptRow {
     extractionConfidence: row.extractionConfidence as ConfidenceLevel | null,
     extractedAt: row.extractedAt,
     confirmedByUser: row.confirmedByUser,
+    textSource: row.textSource as DocumentTextSource | null,
+    textModel: row.textModel,
     createdAt: row.createdAt,
   };
 }
@@ -3613,7 +3758,8 @@ export async function loadReconciliationInput(
   // two places, and this copy would not carry the negative-net guard the domain one does.
   const adjustmentRows = await exec
     .select({ expenseId: expenseAdjustments.originalExpenseId, amount: expenseAdjustments.amount })
-    .from(expenseAdjustments);
+    .from(expenseAdjustments)
+    .where(ACTIVE_ADJUSTMENT);
   const adjustmentsByExpense = new Map<string, Paise[]>();
   for (const row of adjustmentRows) {
     const bucket = adjustmentsByExpense.get(row.expenseId) ?? [];
@@ -4087,9 +4233,12 @@ export async function listSplitwiseExpensesPaidByForAudit(
     })
     .from(expenseAdjustments)
     .where(
-      inArray(
-        expenseAdjustments.originalExpenseId,
-        rows.map((row) => row.expenseId),
+      and(
+        inArray(
+          expenseAdjustments.originalExpenseId,
+          rows.map((row) => row.expenseId),
+        ),
+        ACTIVE_ADJUSTMENT,
       ),
     );
 
@@ -4181,7 +4330,7 @@ export async function listExpenseAdjustmentIds(
       originalExpenseId: expenseAdjustments.originalExpenseId,
     })
     .from(expenseAdjustments)
-    .where(inArray(expenseAdjustments.originalExpenseId, [...expenseIds]))
+    .where(and(inArray(expenseAdjustments.originalExpenseId, [...expenseIds]), ACTIVE_ADJUSTMENT))
     .orderBy(asc(expenseAdjustments.occurredAt), asc(expenseAdjustments.id));
 
   for (const row of rows) {
@@ -4218,7 +4367,7 @@ export async function listRefundBasisByExpense(
       expenseAdjustmentItems,
       eq(expenseAdjustmentItems.expenseAdjustmentId, expenseAdjustments.id),
     )
-    .where(inArray(expenseAdjustments.originalExpenseId, [...expenseIds]));
+    .where(and(inArray(expenseAdjustments.originalExpenseId, [...expenseIds]), ACTIVE_ADJUSTMENT));
 
   const attributed = new Map<string, boolean>();
   const whole = new Map<string, boolean>();
@@ -4650,7 +4799,7 @@ export async function loadExpenseDistributionTotals(
         total: sql<string>`coalesce(sum(${expenseAdjustments.amount}), 0)`,
       })
       .from(expenseAdjustments)
-      .where(inArray(expenseAdjustments.originalExpenseId, ids))
+      .where(and(inArray(expenseAdjustments.originalExpenseId, ids), ACTIVE_ADJUSTMENT))
       .groupBy(expenseAdjustments.originalExpenseId),
     exec
       .select({
@@ -4748,9 +4897,12 @@ export async function listResyncableSplitwiseExpenses(exec: Executor): Promise<
     })
     .from(expenseAdjustments)
     .where(
-      inArray(
-        expenseAdjustments.originalExpenseId,
-        rows.map((row) => row.expenseId),
+      and(
+        inArray(
+          expenseAdjustments.originalExpenseId,
+          rows.map((row) => row.expenseId),
+        ),
+        ACTIVE_ADJUSTMENT,
       ),
     )
     .groupBy(expenseAdjustments.originalExpenseId);

@@ -21,6 +21,7 @@ import type { MemoryEvidenceStore } from '../support/evidence-store.js';
 import { addExpense, addPayment, seedCast } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
 import { scriptedReceiptExtractionTransport } from '../support/ai.js';
+import { createStubDocumentTextExtractor } from '../support/document-text.js';
 
 const AS_USER = { actor: 'user', source: 'services.ingestEvidenceDocument' } as const;
 const CAPTURED_AT = new Date('2026-07-12T20:14:00Z');
@@ -70,6 +71,11 @@ function ingest(overrides: Partial<Parameters<typeof ingestEvidenceDocument>[1]>
     audit: AS_USER,
     ...overrides,
   });
+}
+
+/** The document reader an extraction is given — see `receipt.test.ts` for why it is explicit. */
+function reader() {
+  return { evidenceStore: store, documentText: createStubDocumentTextExtractor() };
 }
 
 describe('ingesting a document', () => {
@@ -415,7 +421,7 @@ describe('an unmatched document once extraction has read a Receipt off it', () =
 
   it('carries the receipt total as its amount, no longer zero', async () => {
     const { evidenceId } = await ingest({ capturedAt: BLINKIT_CAPTURED_AT });
-    await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    await extractReceipt(database.db, { evidenceId, ai, ...reader(), audit: AS_USER });
 
     const [item] = (await listReviewQueue(database.db)).items;
 
@@ -434,7 +440,7 @@ describe('an unmatched document once extraction has read a Receipt off it', () =
       channel: 'upi',
     });
     const { evidenceId } = await ingest({ capturedAt: BLINKIT_CAPTURED_AT });
-    await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    await extractReceipt(database.db, { evidenceId, ai, ...reader(), audit: AS_USER });
 
     const item = (await listReviewQueue(database.db)).items.find(
       (entry) => entry.kind === 'unmatched_evidence',
@@ -449,7 +455,7 @@ describe('an unmatched document once extraction has read a Receipt off it', () =
 
   it('carries no candidates when nothing matches the extracted total', async () => {
     const { evidenceId } = await ingest({ capturedAt: BLINKIT_CAPTURED_AT });
-    await extractReceipt(database.db, { evidenceId, ai, audit: AS_USER });
+    await extractReceipt(database.db, { evidenceId, ai, ...reader(), audit: AS_USER });
 
     const item = (await listReviewQueue(database.db)).items.find(
       (entry) => entry.kind === 'unmatched_evidence',

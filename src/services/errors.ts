@@ -48,7 +48,22 @@ export type ServiceErrorCode =
    * sync, but the external call itself failed. No `SplitwiseExpense`/`SplitwiseSettlement` row
    * is ever written in this case, so retrying is simply calling the route again.
    */
-  | 'SPLITWISE_SYNC_FAILED';
+  | 'SPLITWISE_SYNC_FAILED'
+  /**
+   * A message transport refused, or is not configured (`proof-pack-delivery-service.ts`).
+   *
+   * Always accompanied by a `proof_pack_deliveries` row in `failed` state carrying the
+   * reason — a send that failed is recorded rather than lost, because "did that ever go?"
+   * has to be answerable afterwards.
+   */
+  | 'MESSAGE_DELIVERY_FAILED'
+  /**
+   * A balance provider could not be read (`balance-provider-service.ts`).
+   *
+   * Never turned into a zero or a boundary. An unread account is recorded as unread
+   * (ADR-0053).
+   */
+  | 'BALANCE_PROVIDER_UNAVAILABLE';
 
 export class ServiceError extends Error {
   public readonly code: ServiceErrorCode;

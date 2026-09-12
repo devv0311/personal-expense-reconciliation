@@ -21,6 +21,8 @@
  *    (ADR-0044's fail-closed boundary, applied to an export).
  */
 
+import { createHash } from 'node:crypto';
+
 import { buildProofPack, collectProofPackExportableStrings } from '../domain/index.js';
 import type {
   ExpenseId,
@@ -85,6 +87,15 @@ export interface ProofPackPreview {
   readonly asOf: string;
   /** The WhatsApp-ready text. Deterministic for a fixed `asOf` and ledger state. */
   readonly generatedText: string;
+  /**
+   * SHA-256 of `generatedText`, hex.
+   *
+   * A server-derived read, added so a browser can say *which message it reviewed* when it
+   * later asks to send one, without hashing anything itself (ADR-0048: where a screen needs
+   * a value it must not compute, the read is added to the API). `services.sendProofPack`
+   * compares it against the pack it derives at send time and refuses a stale review.
+   */
+  readonly contentDigest: string;
   /** Every supporting evidence record the pack cites, de-duplicated across expenses. */
   readonly evidenceReferences: readonly ProofPackEvidenceRef[];
   /** Uncertainty and pending-state notes — nothing here is smoothed away. */
@@ -197,6 +208,7 @@ export async function buildProofPackPreview(
     intendedRecipient: { id: recipient.id, displayName: recipient.displayName },
     asOf: pack.asOf,
     generatedText: pack.generatedText,
+    contentDigest: createHash('sha256').update(pack.generatedText, 'utf8').digest('hex'),
     evidenceReferences: dedupeEvidenceRefs(pack),
     warnings: pack.warnings,
     pack,

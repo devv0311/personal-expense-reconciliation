@@ -25,7 +25,15 @@ import {
   parseDuplicateOfReason,
   SUPPORTED_CURRENCY,
 } from '../domain/index.js';
-import type { AccountId, ImportBatchId, Paise, PaymentId } from '../domain/index.js';
+import type {
+  AccountId,
+  ImportBatchId,
+  Paise,
+  PaymentChannel,
+  PaymentDirection,
+  PaymentId,
+  PaymentReferenceType,
+} from '../domain/index.js';
 import {
   findImportBatchByContentHash,
   findPaymentsByExternalReference,
@@ -35,7 +43,16 @@ import {
 } from '../db/index.js';
 import type { Database, Executor, PaymentRow } from '../db/index.js';
 import { parseBankStatementCsv } from '../integrations/bank-csv/index.js';
-import type { BankStatementCsvError, BankStatementCsvRow } from '../integrations/bank-csv/index.js';
+import type { BankStatementCsvError } from '../integrations/bank-csv/index.js';
+import {
+  listStatementFormats,
+  parseStatement,
+  STATEMENT_PARSER_VERSION,
+} from '../integrations/statement-formats/index.js';
+import type {
+  StatementFormatDescriptor,
+  StatementWarning,
+} from '../integrations/statement-formats/index.js';
 
 import { runAudited, type AuditMeta } from './audit.js';
 import { ServiceError } from './errors.js';
@@ -137,31 +154,182 @@ export async function importBankStatementCsv(
     throw new ImportSourceError(parsed.errors);
   }
 
-  const contentHash = sha256(input.fileContent);
+  return writeImportedRows(db, {
+    accountId: input.accountId,
+    sourceSystem: input.sourceSystem,
+    sourceChannel: BANK_STATEMENT_SOURCE_CHANNEL,
+    parserVersion: BANK_STATEMENT_PARSER_VERSION,
+    channel: BANK_STATEMENT_CHANNEL,
+    contentHash: sha256Bytes(new TextEncoder().encode(input.fileContent)),
+    fileReference: input.fileReference ?? null,
+    rows: parsed.rows,
+    audit: input.audit,
+  });
+}
 
-  const previous = await findImportBatchByContentHash(db, contentHash);
+/* ================================================================ multi-format import */
+
+/** Every statement format this build reads — for an import screen to name (audit row 02). */
+export function listSupportedStatementFormats(): readonly StatementFormatDescriptor[] {
+  return listStatementFormats();
+}
+
+export interface ImportStatementInput {
+  readonly accountId: AccountId;
+  /** The originating app/institution, e.g. `hdfc_bank`. Never inferred from the file. */
+  readonly sourceSystem: string;
+  /** A declared format id, or `'auto'` to detect one from the file's own columns. */
+  readonly formatId: string;
+  /**
+   * The file's bytes.
+   *
+   * Bytes rather than text because two of the three containers are binary: an `.xlsx` is a
+   * ZIP and a `.pdf` is a binary document, and decoding either as UTF-8 first destroys it.
+   */
+  readonly bytes: Uint8Array;
+  readonly filename?: string | null;
+  readonly fileReference?: string | null;
+  readonly audit: AuditMeta;
+}
+
+export type ImportStatementResult = ImportBankStatementCsvResult & {
+  /** Which declared format actually read the file — the detected one, when `'auto'`. */
+  readonly formatId: string;
+  /** Anything the adapter read but wants the caller to know. Never silently swallowed. */
+  readonly warnings: readonly StatementWarning[];
+  /**
+   * The last row's printed running balance, when the format prints one.
+   *
+   * A **candidate** evidenced closing boundary for ADR-0017's cash waterfall, and nothing
+   * more: importing a statement never writes a boundary. A person still confirms one against
+   * the document, because a boundary is what makes a `verified` ₹0 delta mean anything
+   * (17.5, `services.runReconciliation`).
+   */
+  readonly closingBalanceCandidate: string | null;
+};
+
+/**
+ * Imports one statement in any format this build reads — CSV, XLSX or a generated PDF.
+ *
+ * The audit's row 02 named this gap exactly: *"Bank-specific CSV mapping, UPI exports,
+ * XLSX/PDF transaction extraction … are unbuilt."* This is the transaction-extraction half;
+ * `recordManualPayment` is the cash/manual half and `ingestForwardedMessage` is the
+ * forwarding half.
+ *
+ * Everything that made `importBankStatementCsv` safe is reused rather than reimplemented:
+ * all-or-nothing parsing, the file's content hash as a re-import no-op, per-row deterministic
+ * duplicate detection, and a written-but-`ignored` row for a confirmed duplicate so the
+ * evidence survives while the money is counted once (`invariants.md` #10).
+ *
+ * @throws ImportSourceError when the file could not be read. Nothing is written, and every
+ *   rejected row is reported at once so one pass fixes the file.
+ */
+export async function importStatement(
+  db: Database,
+  input: ImportStatementInput,
+): Promise<ImportStatementResult> {
+  const parsed = parseStatement({
+    bytes: input.bytes,
+    formatId: input.formatId,
+    filename: input.filename ?? null,
+  });
+  if (!parsed.ok) {
+    throw new ImportSourceError(
+      parsed.errors.map((error) => ({
+        lineNumber: error.lineNumber,
+        column: null,
+        rawValue: error.rawValue,
+        message: error.message,
+      })),
+    );
+  }
+
+  const format = listStatementFormats().find((candidate) => candidate.id === parsed.formatId);
+  const written = await writeImportedRows(db, {
+    accountId: input.accountId,
+    sourceSystem: input.sourceSystem,
+    sourceChannel: `statement:${parsed.formatId}`,
+    parserVersion: `${STATEMENT_PARSER_VERSION}:${parsed.formatId}`,
+    channel: format?.channel ?? 'other',
+    contentHash: sha256Bytes(input.bytes),
+    fileReference: input.fileReference ?? null,
+    rows: parsed.rows,
+    audit: input.audit,
+  });
+
+  const lastBalance = [...parsed.rows]
+    .reverse()
+    .find((row) => row.runningBalance !== null)?.runningBalance;
+
+  return {
+    ...written,
+    formatId: parsed.formatId,
+    warnings: parsed.warnings,
+    closingBalanceCandidate:
+      lastBalance === undefined || lastBalance === null ? null : lastBalance.toString(),
+  };
+}
+
+/* ============================================================== the shared write path */
+
+/** The structural shape both parsers produce. Neither can say what a payment was *for*. */
+interface ImportableRow {
+  readonly lineNumber: number;
+  readonly occurredAt: Date;
+  readonly rawDescription: string;
+  readonly amount: Paise;
+  readonly direction: PaymentDirection;
+  readonly externalReference: string | null;
+  readonly referenceType: PaymentReferenceType | null;
+}
+
+interface WriteImportedRowsInput {
+  readonly accountId: AccountId;
+  readonly sourceSystem: string;
+  readonly sourceChannel: string;
+  readonly parserVersion: string;
+  readonly channel: PaymentChannel;
+  readonly contentHash: string;
+  readonly fileReference: string | null;
+  readonly rows: readonly ImportableRow[];
+  readonly audit: AuditMeta;
+}
+
+/**
+ * Turns parsed rows into `Payment`s, once, for every format.
+ *
+ * Extracted when the second format arrived rather than copied: the two protections against
+ * double-counting (the file's hash, and each row's deterministic reference match) are the
+ * part of importing that is actually hard to get right, and a second copy of them is a second
+ * place for them to drift.
+ */
+async function writeImportedRows(
+  db: Database,
+  input: WriteImportedRowsInput,
+): Promise<ImportBankStatementCsvResult> {
+  const previous = await findImportBatchByContentHash(db, input.contentHash);
   if (previous !== null) {
     return {
       outcome: 'already_imported',
       importBatchId: previous.id,
-      contentHash,
+      contentHash: input.contentHash,
       previouslyImportedAt: previous.importedAt,
     };
   }
 
   return runAudited(db, input.audit, async ({ exec, record }) => {
     const importBatchId = await insertImportBatch(exec, {
-      sourceChannel: BANK_STATEMENT_SOURCE_CHANNEL,
-      fileReference: input.fileReference ?? null,
-      contentHash,
-      parserVersion: BANK_STATEMENT_PARSER_VERSION,
-      rowCount: parsed.rows.length,
+      sourceChannel: input.sourceChannel,
+      fileReference: input.fileReference,
+      contentHash: input.contentHash,
+      parserVersion: input.parserVersion,
+      rowCount: input.rows.length,
     });
 
     const paymentIds: PaymentId[] = [];
     const duplicates: ImportedDuplicate[] = [];
 
-    for (const row of parsed.rows) {
+    for (const row of input.rows) {
       // Checked *before* inserting, so a file that restates a row twice within itself is
       // caught by the same rule that catches it across imports.
       const existing = await findDeterministicDuplicate(exec, row);
@@ -174,7 +342,7 @@ export async function importBankStatementCsv(
         direction: row.direction,
         occurredAt: row.occurredAt,
         rawDescription: row.rawDescription,
-        channel: BANK_STATEMENT_CHANNEL,
+        channel: input.channel,
         externalReference: row.externalReference,
         referenceType: row.referenceType,
         sourceSystem: input.sourceSystem,
@@ -221,7 +389,13 @@ export async function importBankStatementCsv(
       }
     }
 
-    return { outcome: 'imported', importBatchId, contentHash, paymentIds, duplicates };
+    return {
+      outcome: 'imported',
+      importBatchId,
+      contentHash: input.contentHash,
+      paymentIds,
+      duplicates,
+    };
   });
 }
 
@@ -243,7 +417,7 @@ export async function importBankStatementCsv(
  */
 async function findDeterministicDuplicate(
   exec: Executor,
-  row: BankStatementCsvRow,
+  row: ImportableRow,
 ): Promise<PaymentId | null> {
   if (row.externalReference === null) return null;
 
@@ -303,8 +477,16 @@ function resolveCanonical(match: PaymentRow, candidates: readonly PaymentRow[]):
   return current.id;
 }
 
-function sha256(text: string): string {
-  return createHash('sha256').update(text, 'utf8').digest('hex');
+/**
+ * The file's content hash, over its **bytes**.
+ *
+ * Bytes rather than decoded text because two of the three containers are binary: hashing a
+ * decoded `.xlsx` would hash a lossy reading of it, and two different workbooks could collide
+ * on the same string. A byte-identical re-import is a recognised no-op (`invariants.md` #10),
+ * and that guarantee is only as good as what the hash is taken over.
+ */
+function sha256Bytes(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
 }
 
 /** Re-exported so a caller can narrow an amount without reaching into `domain`. */

@@ -61,8 +61,16 @@ import type {
   PaymentWorkspaceItem,
   PersonDetail,
   PersonSummary,
+  AccountBalanceReading,
+  AccountProviderLink,
+  BalanceComparisonResult,
+  BalanceProviderStatus,
+  MessagingStatus,
+  RefreshBalancesResult,
+  ProofPackDelivery,
   ProofPackPreview,
   ReceiptView,
+  SendProofPackResult,
   ReconciliationRun,
   RefundAllocationState,
   ResyncCandidate,
@@ -519,6 +527,141 @@ export async function getProofPack(
 ): Promise<ProofPackPreview> {
   const query = asOf === undefined ? "" : `?asOf=${encodeURIComponent(asOf)}`;
   return request<ProofPackPreview>(`/api/proof-packs/${recipientPersonId}${query}`);
+}
+
+/**
+ * Whether a reviewed pack can be sent from this installation, and by what (ADR-0053).
+ *
+ * A read of configuration, not of the ledger. The screen calls it before offering to send so
+ * that "no transport is configured here" is stated up front rather than discovered by failing.
+ */
+export async function getMessagingStatus(): Promise<MessagingStatus> {
+  return request<MessagingStatus>("/api/messaging/status");
+}
+
+export interface SendProofPackInput {
+  readonly recipientPersonId: string;
+  readonly channel: string;
+  readonly address: string;
+  readonly asOf: string;
+  readonly review: {
+    readonly recipientConfirmed: boolean;
+    readonly contentConfirmed: boolean;
+    readonly evidenceConfirmed: boolean;
+  };
+  readonly attachEvidenceIds?: readonly string[];
+  /**
+   * The digest of the text that was actually reviewed.
+   *
+   * Sent so the server can refuse a pack that moved between being read and being sent. It is
+   * computed over the exact string the API returned — not a figure this app derived.
+   */
+  readonly contentDigestSeen?: string;
+  readonly reason?: string;
+}
+
+/**
+ * Sends one reviewed proof pack.
+ *
+ * Note what is **not** in the body: the message. It is derived server-side from the ledger at
+ * the moment of sending, so nothing in this app can put a figure in front of another person
+ * (ADR-0048).
+ */
+export async function sendProofPack(input: SendProofPackInput): Promise<SendProofPackResult> {
+  const { recipientPersonId, ...body } = input;
+  return request<SendProofPackResult>(`/api/proof-packs/${recipientPersonId}/deliveries`, {
+    method: "POST",
+    body: JSON.stringify({ actor: "user", ...body }),
+  });
+}
+
+export async function listProofPackDeliveries(
+  recipientPersonId?: string,
+): Promise<readonly ProofPackDelivery[]> {
+  const path =
+    recipientPersonId === undefined
+      ? "/api/deliveries"
+      : `/api/proof-packs/${recipientPersonId}/deliveries`;
+  const result = await request<{ readonly deliveries: readonly ProofPackDelivery[] }>(path);
+  return result.deliveries;
+}
+
+export async function retryProofPackDelivery(input: {
+  readonly deliveryId: string;
+  readonly reason?: string;
+}): Promise<SendProofPackResult> {
+  return request<SendProofPackResult>(`/api/deliveries/${input.deliveryId}/retry`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: "user",
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+    }),
+  });
+}
+
+/* ------------------------------------------------------------- live balance providers */
+
+/** Configuration, not ledger state: whether a live balance can be read here at all. */
+export async function getBalanceProviderStatus(): Promise<BalanceProviderStatus> {
+  return request<BalanceProviderStatus>("/api/balance-provider/status");
+}
+
+export async function listBalanceProviderLinks(): Promise<readonly AccountProviderLink[]> {
+  const result = await request<{ readonly links: readonly AccountProviderLink[] }>(
+    "/api/balance-provider/links",
+  );
+  return result.links;
+}
+
+export async function linkAccountToBalanceProvider(input: {
+  readonly accountId: string;
+  readonly externalAccountRef: string;
+  readonly providerLabel?: string;
+  readonly reason?: string;
+}): Promise<AccountProviderLink> {
+  return request<AccountProviderLink>("/api/balance-provider/links", {
+    method: "POST",
+    body: JSON.stringify({ actor: "user", ...input }),
+  });
+}
+
+export async function unlinkAccountFromBalanceProvider(input: {
+  readonly linkId: string;
+  readonly reason?: string;
+}): Promise<void> {
+  await request<{ unlinked: boolean }>(`/api/balance-provider/links/${input.linkId}/unlink`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: "user",
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+    }),
+  });
+}
+
+/** Reads every linked account now, and records what came back — including the silences. */
+export async function refreshBalances(
+  input: { readonly reason?: string } = {},
+): Promise<RefreshBalancesResult> {
+  return request<RefreshBalancesResult>("/api/balance-provider/refresh", {
+    method: "POST",
+    body: JSON.stringify({ actor: "user", ...input }),
+  });
+}
+
+/** Each account's latest reading beside the closing balance a run evidenced. */
+export async function getBalanceComparison(runId: string): Promise<BalanceComparisonResult> {
+  return request<BalanceComparisonResult>(
+    `/api/balance-provider/comparison?runId=${encodeURIComponent(runId)}`,
+  );
+}
+
+export async function listAccountBalanceReadings(
+  accountId: string,
+): Promise<readonly AccountBalanceReading[]> {
+  const result = await request<{ readonly readings: readonly AccountBalanceReading[] }>(
+    `/api/accounts/${accountId}/balance-readings`,
+  );
+  return result.readings;
 }
 
 /* --------------------------------------------------------------- the payment workspace */

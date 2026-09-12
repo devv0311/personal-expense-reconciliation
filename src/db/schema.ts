@@ -47,6 +47,7 @@ import {
   CASH_FLOW_CATEGORIES,
   CASH_FLOW_STATES,
   CONFIDENCE_LEVELS,
+  DOCUMENT_TEXT_SOURCES,
   EVIDENCE_MATCH_SIGNALS,
   EVIDENCE_MATCH_STATUSES,
   EVIDENCE_MATCH_STRENGTHS,
@@ -61,11 +62,13 @@ import {
   EXTERNAL_INTEGRATION_TYPES,
   JOB_KINDS,
   JOB_STATUSES,
+  MESSAGE_CHANNELS,
   PAYMENT_CHANNELS,
   PAYMENT_COUNTERPARTY_TYPES,
   PAYMENT_DIRECTIONS,
   PAYMENT_REFERENCE_TYPES,
   PAYMENT_STATES,
+  PROOF_PACK_DELIVERY_STATUSES,
   RECONCILIATION_VERIFICATION_STATUSES,
   RULE_ACTIONS,
   RULE_EFFECTS,
@@ -383,6 +386,21 @@ export const evidence = pgTable(
      * (ADR-0018). Required on manual notes, forbidden on every other evidence type.
      */
     noteKind: text('note_kind'),
+    /**
+     * The corrected record that replaces this one (audit row 13, ADR-0052).
+     *
+     * ADR-0034 makes linkage write-once: evidence attached to the wrong payment could never be
+     * moved, and the audit found there was no way to say so either. This is that way, and it
+     * is a **supersession, not an edit**: the wrong row keeps its links, its text and its
+     * place in history, and a new row carrying the same immutable source facts with the
+     * corrected links takes over from it. Nothing is rewritten, so "why did this ledger once
+     * believe that receipt paid for this?" stays answerable.
+     */
+    supersededByEvidenceId: uuid('superseded_by_evidence_id').references(
+      (): AnyPgColumn => evidence.id,
+    ),
+    /** Why. Required whenever a row is superseded — a correction with no account is not one. */
+    supersedeReason: text('supersede_reason'),
     createdAt: createdAt(),
   },
   (table) => [
@@ -407,7 +425,10 @@ export const evidence = pgTable(
       .where(
         sql.raw(
           "(storage_ref is not null or type in ('bank_line', 'upi_notification')) and " +
-            'linked_payment_id is null and linked_expense_id is null',
+            'linked_payment_id is null and linked_expense_id is null and ' +
+            // A superseded row is history, not an open question: offering it in the review
+            // queue would ask a person to re-decide a link they have already corrected.
+            'superseded_by_evidence_id is null',
         ),
       ),
     check('evidence_type_check', oneOf('type', EVIDENCE_TYPES)),
@@ -447,6 +468,19 @@ export const evidence = pgTable(
       'evidence_note_kind_only_on_notes_check',
       sql`(${table.type} = 'manual_note') = (${table.noteKind} is not null)`,
     ),
+    // A supersession names both its replacement and its reason, or neither. A row marked
+    // replaced with no account of why is a correction nobody can review.
+    check(
+      'evidence_supersede_reason_check',
+      sql`(${table.supersededByEvidenceId} is null) = (${table.supersedeReason} is null)`,
+    ),
+    // A row cannot replace itself. Without this the correction path could produce a cycle of
+    // length one, and "follow the chain to the current record" would never terminate.
+    check(
+      'evidence_supersede_self_check',
+      sql`${table.supersededByEvidenceId} is null or ${table.supersededByEvidenceId} <> ${table.id}`,
+    ),
+    index('evidence_superseded_by_idx').on(table.supersededByEvidenceId),
   ],
 );
 
@@ -663,6 +697,21 @@ export const receipts = pgTable(
     extractionConfidence: text('extraction_confidence'),
     extractedAt: timestamp('extracted_at', { withTimezone: true }),
     confirmedByUser: boolean('confirmed_by_user').notNull().default(false),
+    /**
+     * Where the text this extraction read actually came from (audit row 14, ADR-0051).
+     *
+     * `evidence_raw_text` — the record already carried text, typed or forwarded.
+     * `pdf_text_layer` — lifted locally off a generated PDF; nothing left the machine.
+     * `model_vision` — a multimodal model transcribed the document's bytes, which is the one
+     * path on which a document crosses the local boundary and is off unless configured.
+     *
+     * Recorded rather than inferred, because "the receipt says ₹1,240" and "a model reading a
+     * photograph of the receipt says ₹1,240" are different claims, and the person confirming
+     * the extraction is entitled to know which one is in front of them.
+     */
+    textSource: text('text_source'),
+    /** Which model transcribed it, when one did. Null on every local path. */
+    textModel: text('text_model'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -671,6 +720,20 @@ export const receipts = pgTable(
     check(
       'receipts_extraction_confidence_check',
       sql`${table.extractionConfidence} is null or ${oneOf('extraction_confidence', CONFIDENCE_LEVELS)}`,
+    ),
+    check(
+      'receipts_text_source_check',
+      sql`${table.textSource} is null or ${oneOf('text_source', DOCUMENT_TEXT_SOURCES)}`,
+    ),
+    // A model name without a model-read source, or a `model_vision` source with no model
+    // named, would each be a provenance record that does not describe anything.
+    // `is distinct from` rather than `=`, so the rule also holds for a row whose `text_source`
+    // is null (every receipt written before ADR-0051): plain `=` yields NULL there, and a
+    // NULL check passes, which would have let a model name sit on a row that never named a
+    // model-read source.
+    check(
+      'receipts_text_model_check',
+      sql`(${table.textSource} is distinct from 'model_vision') = (${table.textModel} is null)`,
     ),
   ],
 );
@@ -928,12 +991,41 @@ export const expenseAdjustments = pgTable(
     adjustmentPaymentId: uuid('adjustment_payment_id').references(() => payments.id),
     reason: text('reason'),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    /**
+     * When this adjustment was reversed as erroneous (audit row 23, ADR-0052).
+     *
+     * A refund recorded that never happened — a mis-typed amount, an adjustment against the
+     * wrong expense — had no way out: the row is append-only by design, and every path that
+     * counts money counted it. The three columns here are the same shape `allocations`
+     * already uses for supersession, and the same grant: **everything else on the row stays
+     * immutable**, and the reversal is a stamp rather than an edit, so the erroneous record
+     * and the reason it was wrong both survive (`invariants.md` #22).
+     *
+     * A reversed adjustment is excluded from every read that *counts* it and included in
+     * every read that *recounts* it — the expense timeline still shows it, with its reversal.
+     */
+    reversedAt: timestamp('reversed_at', { withTimezone: true }),
+    /** Why it was wrong. Required whenever a row is reversed. */
+    reversalReason: text('reversal_reason'),
+    /** Who reversed it — `'user'`/`'user:<id>'`, the same actor shape an `AuditEvent` carries. */
+    reversedBy: text('reversed_by'),
     createdAt: createdAt(),
   },
   (table) => [
     index('expense_adjustments_expense_idx').on(table.originalExpenseId),
     check('expense_adjustments_amount_check', sql`${table.amount} > 0`),
     check('expense_adjustments_kind_check', oneOf('kind', EXPENSE_ADJUSTMENT_KINDS)),
+    // All three, or none. A reversal with no reason is a figure that changed with no account
+    // of why, which is the one thing an append-only financial record must never allow.
+    check(
+      'expense_adjustments_reversal_check',
+      sql`(${table.reversedAt} is null) = (${table.reversalReason} is null)
+          and (${table.reversedAt} is null) = (${table.reversedBy} is null)`,
+    ),
+    // The lookup every money read now applies.
+    index('expense_adjustments_active_idx')
+      .on(table.originalExpenseId)
+      .where(sql.raw('reversed_at is null')),
   ],
 );
 
@@ -1124,6 +1216,195 @@ export const jobs = pgTable(
   ],
 );
 
+/* ========================================================= live balance providers */
+
+/**
+ * Which of this ledger's accounts a balance provider can be asked about (audit row 37).
+ *
+ * The mapping, and nothing else. No credential appears on this row: the token belongs to the
+ * adapter's closure, built from the environment in `src/server.ts`, and there is deliberately
+ * no column that could carry one — a database backup should not be a credential leak
+ * (`security-model.md`).
+ *
+ * `external_account_ref` is the provider's own handle for the account. Like `accounts.last4`
+ * it is an identifier fragment rather than an account number, and it is the provider's string
+ * rather than anything this ledger invents.
+ */
+export const accountProviderLinks = pgTable(
+  'account_provider_links',
+  {
+    id: id(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    /** The provider this ref belongs to — `BalanceProviderCapabilities.providerId`. */
+    providerId: text('provider_id').notNull(),
+    externalAccountRef: text('external_account_ref').notNull(),
+    /** A label the provider gave, for a person to check they mapped the right account. */
+    providerLabel: text('provider_label'),
+    linkedAt: timestamp('linked_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Unlinking is an archive, not a delete: past readings still name this link. */
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    // One live link per (provider, ref): two accounts claiming the same remote account would
+    // make every reading ambiguous about which of them it describes.
+    uniqueIndex('account_provider_links_ref_unique')
+      .on(table.providerId, table.externalAccountRef)
+      .where(sql`archived_at is null`),
+    uniqueIndex('account_provider_links_account_unique')
+      .on(table.accountId, table.providerId)
+      .where(sql`archived_at is null`),
+  ],
+);
+
+/**
+ * One thing a provider said about one account at one instant. Immutable.
+ *
+ * **Not evidence, and never a boundary** (ADR-0054). A `ReconciliationAccountSnapshot`'s
+ * opening and closing balances still come only from a statement somebody evidenced; a reading
+ * is a second opinion recorded beside the ledger's own arithmetic so the two can be compared.
+ * The grants file revokes UPDATE and DELETE on this table for the same reason it does on
+ * `payments` and `evidence`: what a provider said at a moment does not change afterwards.
+ *
+ * `balance` is nullable and signed. Null is "the provider did not state one" and is never zero
+ * (ADR-0017 (cash balance), 17.5); negative is an overdrawn account, which is a real balance.
+ *
+ * `as_of` is the provider's own instant and is separate from `fetched_at`, which is when this
+ * process asked. A balance from six hours ago compared against a period ending yesterday is a
+ * stale read, and keeping only one of the two timestamps would make that unknowable.
+ */
+export const accountBalanceReadings = pgTable(
+  'account_balance_readings',
+  {
+    id: id(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    accountProviderLinkId: uuid('account_provider_link_id')
+      .notNull()
+      .references(() => accountProviderLinks.id),
+    providerId: text('provider_id').notNull(),
+    balance: paiseColumn('balance'),
+    currency: text('currency').notNull().default('INR'),
+    asOf: timestamp('as_of', { withTimezone: true }),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+    status: text('status').notNull(),
+    failureReason: text('failure_reason'),
+    /**
+     * Whether the read this reading came from answered about every account it asked about.
+     *
+     * Carried onto each row rather than kept only on a run record, so a reading can never be
+     * quoted without the completeness of the read that produced it — ADR-0046's rule that an
+     * absence under an incomplete check is not agreement.
+     */
+    readComplete: boolean('read_complete').notNull(),
+    readIncompleteReason: text('read_incomplete_reason'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('account_balance_readings_account_idx').on(table.accountId, table.fetchedAt),
+    check('account_balance_readings_status_check', sql`status in ('ok', 'unavailable')`),
+    // `ok` means a balance and an instant both came back; anything short of that is
+    // `unavailable` with a reason. Without this an `ok` row could carry a null balance, and
+    // every reader downstream would have to remember that null is not zero.
+    check(
+      'account_balance_readings_shape_check',
+      sql`(${table.status} = 'ok') = (${table.balance} is not null and ${table.asOf} is not null)
+          and (${table.status} <> 'unavailable' or ${table.failureReason} is not null)
+          and (${table.readComplete} or ${table.readIncompleteReason} is not null)`,
+    ),
+  ],
+);
+
+/* ============================================================ proof-pack delivery */
+
+/**
+ * A record that a proof pack was put in front of somebody (audit row 42).
+ *
+ * ADR-0047 is emphatic that a pack is derived and persists nothing, and this table does not
+ * contradict it: it records the **outward act**, not the figures. A proof pack generated and
+ * never sent still writes nothing anywhere.
+ *
+ * `body_text` is stored anyway, and deliberately. It is the only way to answer "what exactly
+ * did I send them" after the ledger has moved on — a question whose answer cannot be
+ * re-derived, because re-deriving it would produce today's pack rather than the one that was
+ * actually sent. It is a record of a message, not a second copy of the balance.
+ *
+ * Immutable in the parts that describe what left: `recipient_person_id`, `channel`,
+ * `address`, `body_text`, `content_digest` and `attachments` are written once and never
+ * updated. Only the delivery's own progress — status, attempts, provider id and error — moves.
+ */
+export const proofPackDeliveries = pgTable(
+  'proof_pack_deliveries',
+  {
+    id: id(),
+    recipientPersonId: uuid('recipient_person_id')
+      .notNull()
+      .references(() => people.id),
+    channel: text('channel').notNull(),
+    /**
+     * The canonical recipient address — a phone number. Personal data, and treated as such:
+     * never sent to a model, never included in a proof pack's own text, never logged.
+     */
+    address: text('address').notNull(),
+    /**
+     * The exact text handed to the transport, byte for byte what the preview showed.
+     * Already through the redaction boundary: an unredacted pack is refused before it
+     * reaches this table (ADR-0047's fail-closed export check).
+     */
+    bodyText: text('body_text').notNull(),
+    /** SHA-256 of `body_text`, so a resend of unchanged content is recognisable as one. */
+    contentDigest: text('content_digest').notNull(),
+    /**
+     * The documents that went with it: `[{ evidenceId, filename, mediaType, byteSize }]`.
+     * The bytes themselves stay in the evidence store, addressed by their own content.
+     */
+    attachments: jsonb('attachments')
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /**
+     * `domain.deliveryIdempotencyKey`, uniquely indexed.
+     *
+     * This index *is* the idempotency guarantee. Two presses of send on an unchanged pack
+     * collide here and the second one returns the first one's record rather than reaching a
+     * transport — which is the only place that can be enforced, since a transport may or may
+     * not honour an idempotency header.
+     */
+    idempotencyKey: text('idempotency_key').notNull(),
+    /** The as-of label the pack carried, so a record can be matched to what it explained. */
+    packAsOf: timestamp('pack_as_of', { withTimezone: true }).notNull(),
+    status: text('status').notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastError: text('last_error'),
+    /** The provider's own id for the message, and the handle a later status refers to. */
+    providerMessageId: text('provider_message_id'),
+    /** Which transport actually carried it, e.g. `whatsapp-cloud`. */
+    transportId: text('transport_id').notNull(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex('proof_pack_deliveries_idempotency_unique').on(table.idempotencyKey),
+    index('proof_pack_deliveries_recipient_idx').on(table.recipientPersonId, table.createdAt),
+    check('proof_pack_deliveries_channel_check', oneOf('channel', MESSAGE_CHANNELS)),
+    check('proof_pack_deliveries_status_check', oneOf('status', PROOF_PACK_DELIVERY_STATUSES)),
+    check('proof_pack_deliveries_attempts_check', sql`${table.attemptCount} >= 0`),
+    // A status and its timestamps cannot disagree. `sent_at` records the moment a transport
+    // took responsibility, and `delivered_at` the moment the provider said it arrived: a
+    // `delivered` row with no `sent_at` would be a message that arrived without being sent.
+    check(
+      'proof_pack_deliveries_timestamps_check',
+      sql`(${table.status} in ('sent', 'delivered')) = (${table.sentAt} is not null)
+          and (${table.status} = 'delivered') = (${table.deliveredAt} is not null)
+          and (${table.status} <> 'failed' or ${table.lastError} is not null)`,
+    ),
+  ],
+);
+
 /* ============================================================================ audit */
 
 /** Append-only. No `UPDATE`/`DELETE` grants at the application-role level (#22). */
@@ -1149,7 +1430,7 @@ export const auditEvents = pgTable(
     action: text('action').notNull(),
     oldValue: jsonb('old_value'),
     newValue: jsonb('new_value').notNull(),
-    /** `'user'`, `'rule:<rule_id>'`, or `'system'`. */
+    /** `'user'`, `'user:<id>'`, `'rule:<rule_id>'`, `'forwarder'`, or `'system'`. */
     actor: text('actor').notNull(),
     source: text('source'),
     reason: text('reason'),

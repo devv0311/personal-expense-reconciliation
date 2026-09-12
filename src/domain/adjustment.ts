@@ -127,3 +127,83 @@ export function distributeAdjustment(
     return { ...line, amount: remaining as Paise };
   });
 }
+
+/**
+ * Rebuilds an allocation to a **risen** net amount, after an adjustment was reversed
+ * (audit row 23, ADR-0052).
+ *
+ * The mirror of {@link distributeAdjustment}, and a separate function rather than the same one
+ * with a signed amount, because the two are not the same arithmetic. Distributing a reduction
+ * apportions the *reduction* and subtracts it (`invariants.md` #12's stated input). There is no
+ * corresponding "increase" to apportion here: the reversal removed a refund that had already
+ * been folded into the lines, so what is known is the **target** — the expense's net amount
+ * once the erroneous adjustment stops counting — and the lines are re-split to it by their
+ * current weights under the one Largest Remainder Method.
+ *
+ * Two refusals, both deliberate:
+ *
+ *  - **All-zero weights.** A fully refunded expense keeps one zero-amount line per original
+ *    beneficiary (ADR-0013, `invariants.md` #12a), so reversing that refund leaves nothing to
+ *    apportion by. The original proportions are genuinely unrecoverable from the current
+ *    lines, and inventing an equal split would be a guess about who owes what. Supply
+ *    `customWeights`, or approve a fresh allocation.
+ *  - **A target below the current total.** That is a reduction, and reductions go through
+ *    `distributeAdjustment` so the documented algorithm has one implementation.
+ */
+export function restoreAllocationToNetAmount(input: {
+  readonly lines: readonly DraftAllocationLine[];
+  /** The expense's net amount after the reversal — what the new lines must sum to. */
+  readonly netAmount: Paise;
+  readonly customWeights?: readonly bigint[];
+}): readonly DraftAllocationLine[] {
+  if (input.lines.length === 0) {
+    throw new DomainError(
+      'ALLOCATION_SHAPE_INVALID',
+      'Cannot rebuild an allocation with no lines. A fully refunded expense keeps one ' +
+        'zero-amount line per original beneficiary, so there is always at least one ' +
+        '(invariants.md #12a, ADR-0013).',
+    );
+  }
+
+  const currentTotal = sumPaise(input.lines.map((line) => line.amount));
+  if (input.netAmount < currentTotal) {
+    throw new DomainError(
+      'ALLOCATION_SHAPE_INVALID',
+      `restoreAllocationToNetAmount is for a net amount that has risen; ${input.netAmount} ` +
+        `paise is below the current lines' ${currentTotal}. A reduction is distributeAdjustment's.`,
+      { netAmount: input.netAmount.toString(), currentTotal: currentTotal.toString() },
+    );
+  }
+
+  const weights = input.customWeights ?? proportionalWeights(input.lines);
+  if (weights.length !== input.lines.length) {
+    throw new DomainError(
+      'ALLOCATION_SHAPE_INVALID',
+      `Rebuilding an allocation needs one weight per line: got ${weights.length} weights for ` +
+        `${input.lines.length} lines.`,
+      { weights: String(weights.length), lines: String(input.lines.length) },
+    );
+  }
+  if (weights.every((weight) => weight === 0n)) {
+    throw new DomainError(
+      'ALLOCATION_WEIGHTS_UNRECOVERABLE',
+      'Every current line is zero, so there is no proportion to rebuild by. This is the ' +
+        'fully-refunded shape (ADR-0013): reversing that refund cannot recover who owed what, ' +
+        "and an equal split would be a guess about somebody else's money. Give explicit " +
+        'weights, or approve a fresh allocation.',
+      { lines: String(input.lines.length) },
+    );
+  }
+
+  const shares = splitByLargestRemainder(
+    input.netAmount,
+    input.lines.map((line, index) => ({
+      key: beneficiarySortKey(line.beneficiary),
+      weight: weights[index] ?? 0n,
+    })),
+  );
+  return input.lines.map((line, index) => ({
+    ...line,
+    amount: shares[index]?.amount ?? (0n as Paise),
+  }));
+}

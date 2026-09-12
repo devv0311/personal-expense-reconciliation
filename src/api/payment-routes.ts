@@ -44,7 +44,9 @@ import {
   getImportBatch,
   getPaymentWorkspaceItem,
   importBankStatementCsv,
+  importStatement,
   listImportHistory,
+  listSupportedStatementFormats,
   listPaymentCounterpartyOptions,
   listPaymentsWorkspace,
   markPaymentCashFlowNormalized,
@@ -107,6 +109,87 @@ export async function postBankCsvImport(
 
   // `already_imported` is a recognised no-op, not a failure: the file's content hash matched a
   // batch already on record, so nothing was written twice (`invariants.md` #10).
+  return jsonResponse(result.outcome === 'already_imported' ? 200 : 201, result);
+}
+
+/**
+ * `GET /api/imports/formats` — every statement format this build actually reads.
+ *
+ * A read, and the honest answer to "what can I upload?". The audit's row 02 found the ledger
+ * accepting exactly one synthetic five-column CSV; the list this returns is what replaced it,
+ * and it is generated from the format declarations rather than written out again here, so a
+ * screen naming a format this build cannot read is not a state the two can reach.
+ */
+export function getStatementFormatsRoute(): Promise<Response> {
+  return Promise.resolve(jsonResponse(200, { formats: listSupportedStatementFormats() }));
+}
+
+/**
+ * `POST /api/imports/statement` — import one statement in any supported format.
+ *
+ * Body: `{ actor, accountId, sourceSystem, formatId, contentBase64 | fileContent, filename?,
+ * fileReference? }`.
+ *
+ * `contentBase64` rather than only text, because two of the three containers are binary: an
+ * `.xlsx` is a ZIP and a `.pdf` is a binary document, and either one decoded as UTF-8 first is
+ * destroyed. A plain-text CSV may still be sent as `fileContent`, which is what the existing
+ * import screen does.
+ *
+ * `formatId` may be `"auto"`. Detection refuses rather than picking a winner it is unsure of —
+ * guessing a format is guessing which column held the money — and the refusal names every
+ * format this build reads.
+ *
+ * All-or-nothing, exactly as `POST /api/imports/bank-csv` is: a file with any unreadable row
+ * imports nothing and reports every bad row.
+ */
+export async function postStatementImport(
+  deps: ApiDependencies,
+  request: Request,
+): Promise<Response> {
+  const body = await readJsonObject(request);
+  const actor = requirePersonActor(body, 'import a statement');
+  const formatId = requireString(body, 'formatId');
+  const filename = optionalString(body, 'filename');
+  const fileReference = optionalString(body, 'fileReference');
+
+  const base64 = optionalString(body, 'contentBase64');
+  const text = optionalString(body, 'fileContent');
+  if ((base64 === undefined) === (text === undefined)) {
+    throw new ApiRequestError(
+      'Send the statement as exactly one of "contentBase64" (any format, including XLSX and ' +
+        'PDF) or "fileContent" (text formats only).',
+      'contentBase64',
+    );
+  }
+
+  let bytes: Uint8Array;
+  if (base64 !== undefined) {
+    bytes = new Uint8Array(Buffer.from(base64, 'base64'));
+    // `Buffer.from(_, 'base64')` never throws — it stops at the first byte it cannot read.
+    // So the check that matters is that something decoded at all: a body of punctuation
+    // silently becomes an empty buffer, and importing "no rows" from it would look like a
+    // statement with no transactions rather than a request that never arrived intact.
+    if (bytes.byteLength === 0) {
+      throw new ApiRequestError(
+        '"contentBase64" decoded to no bytes. Send the file as base64, or send a text ' +
+          'statement as "fileContent".',
+        'contentBase64',
+      );
+    }
+  } else {
+    bytes = new TextEncoder().encode(text ?? '');
+  }
+
+  const result = await importStatement(deps.db, {
+    accountId: asId<'account'>(requireUuidField(body, 'accountId')),
+    sourceSystem: requireString(body, 'sourceSystem'),
+    formatId,
+    bytes,
+    ...(filename === undefined ? {} : { filename }),
+    ...(fileReference === undefined ? {} : { fileReference }),
+    audit: { actor, source: 'api POST /api/imports/statement' },
+  });
+
   return jsonResponse(result.outcome === 'already_imported' ? 200 : 201, result);
 }
 

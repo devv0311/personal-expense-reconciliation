@@ -30,7 +30,15 @@ import { ServiceError } from './errors.js';
 
 /** Who performed the change, and what triggered it. */
 export interface AuditMeta {
-  /** `'user'`, `'rule:<rule_id>'`, or `'system'` — never `'ai'` (`ai-boundary.md`). */
+  /**
+   * `'user'`, `'user:<id>'`, `'rule:<rule_id>'`, `'forwarder'` or `'system'` — never `'ai'`
+   * (`ai-boundary.md`).
+   *
+   * `'forwarder'` is the automated notification intake (`intake-service.ts`): a mail rule or
+   * a phone shortcut appending immutable evidence. It is deliberately not `'user'`, because
+   * nobody read the message before it landed, and an audit trail that said a person did is
+   * worse than one that says a machine did.
+   */
   readonly actor: string;
   /** The operation that triggered it, e.g. `'services.approveAllocation'`. */
   readonly source: string;

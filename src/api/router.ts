@@ -17,11 +17,35 @@
  */
 
 import { resolveSession } from '../services/index.js';
-import type { AiService, Database, EvidenceStore, SplitwisePort } from '../services/index.js';
+import type {
+  AiService,
+  Database,
+  DocumentTextExtractor,
+  BalanceProviderPort,
+  EvidenceStore,
+  MessageTransport,
+  SplitwisePort,
+} from '../services/index.js';
 
 import { getAccountsRoute } from './account-routes.js';
 import {
+  getAccountBalanceReadingsRoute,
+  getBalanceComparisonRoute,
+  getBalanceProviderLinksRoute,
+  getBalanceProviderStatusRoute,
+  postBalanceProviderLink,
+  postBalanceProviderRefresh,
+  postBalanceProviderUnlink,
+} from './balance-provider-routes.js';
+import {
+  getIntakeStatusRoute,
+  hasValidIntakeToken,
+  postForwardedMessages,
+} from './intake-routes.js';
+import {
+  getExpenseAdjustmentsRoute,
   getRefundAllocationRoute,
+  postAdjustmentReversal,
   postDistributeAdjustment,
   postExpenseAdjustment,
 } from './adjustment-routes.js';
@@ -42,6 +66,7 @@ import {
   postEvidenceFile,
   postEvidenceLink,
   postEvidenceNote,
+  postEvidenceSupersession,
 } from './evidence-routes.js';
 import {
   getExpenseFundingRoute,
@@ -62,7 +87,9 @@ import {
   getImportsRoute,
   getPaymentRoute,
   getPaymentsRoute,
+  getStatementFormatsRoute,
   postBankCsvImport,
+  postStatementImport,
   postCashFlowDecision,
   postClassifyPayments,
   postManualPayment,
@@ -89,6 +116,14 @@ import { getExpenseRoute, getExpensesRoute } from './expense-ledger-routes.js';
 import { jsonResponse, toErrorResponse } from './http.js';
 import { getPeopleRoute } from './people-routes.js';
 import { getProofPackRoute } from './proof-pack-routes.js';
+import {
+  getDeliveriesRoute,
+  getMessagingStatusRoute,
+  getRecipientDeliveriesRoute,
+  postDeliveryRetry,
+  postDeliveryStatus,
+  postProofPackDelivery,
+} from './proof-pack-delivery-routes.js';
 import {
   getReceiptRoute,
   postReceiptConfirmation,
@@ -158,8 +193,35 @@ export interface ApiDependencies {
   readonly ai: AiService;
   /** Where documents live, which is deliberately not the database (`security-model.md`). */
   readonly evidenceStore: EvidenceStore;
+  /**
+   * Turns a stored receipt's bytes into text (audit row 14, ADR-0051).
+   *
+   * Optional, and absent means extraction still works over a record that already carries
+   * text while a stored photograph is **refused by name** rather than extracted as an empty
+   * receipt. `src/server.ts` always composes one; a test that omits it is exercising the
+   * text path deliberately.
+   */
+  readonly documentText?: DocumentTextExtractor;
   /** A real adapter when one is configured; a rejecting stub otherwise (ADR-0040). */
   readonly splitwise: SplitwisePort;
+  /**
+   * How a reviewed proof pack leaves this machine (audit row 42, ADR-0053).
+   *
+   * Optional here for the same reason `documentText` is: a test exercising the ledger has no
+   * business composing a transport. `src/server.ts` always composes one — the *unconfigured*
+   * transport refuses by name, so an installation with no credentials still has a transport
+   * and its screens can say exactly why sending is unavailable.
+   */
+  readonly messageTransport?: MessageTransport;
+  /**
+   * Live bank and card balances (audit row 37, ADR-0054).
+   *
+   * Optional here for the same reason `messageTransport` is. `src/server.ts` always composes
+   * one — the unconfigured provider reports every read as **incomplete**, never as an empty
+   * success, so an installation with no credentials still has a provider and its screens can
+   * say exactly why live balances are unavailable.
+   */
+  readonly balanceProvider?: BalanceProviderPort;
   /**
    * Whether this process refuses unauthenticated requests (audit row 50).
    *
@@ -171,6 +233,16 @@ export interface ApiDependencies {
    * door, and gets the door open.
    */
   readonly authRequired?: boolean;
+  /**
+   * The shared secret an automated forwarder authenticates with (audit row 12).
+   *
+   * Optional, and **absent means the forwarding endpoint refuses every request** — not that
+   * it stands open. That direction is deliberate: an unconfigured intake route accepting
+   * anonymous writes would be a stranger's route into a person's evidence table, while a
+   * configured-but-unused one costs nothing. `src/server.ts` reads it from
+   * `INTAKE_FORWARDING_TOKEN`.
+   */
+  readonly intakeForwardingToken?: string;
 }
 
 export type RouteParams = Readonly<Record<string, string>>;
@@ -239,6 +311,11 @@ export const EVIDENCE_ROUTES: readonly ApiRoute[] = [
     handler: postEvidenceMatchDecision,
   },
   { method: 'POST', path: '/api/evidence/:evidenceId/link', handler: postEvidenceLink },
+  {
+    method: 'POST',
+    path: '/api/evidence/:evidenceId/supersede',
+    handler: postEvidenceSupersession,
+  },
   { method: 'POST', path: '/api/evidence/:evidenceId/receipt', handler: postReceiptExtraction },
   {
     method: 'POST',
@@ -298,8 +375,28 @@ export const ALLOCATION_ROUTES: readonly ApiRoute[] = [
   },
   {
     method: 'GET',
+    path: '/api/expenses/:expenseId/adjustments',
+    handler: getExpenseAdjustmentsRoute,
+  },
+  {
+    method: 'GET',
     path: '/api/expenses/:expenseId/refund-allocation',
     handler: getRefundAllocationRoute,
+  },
+];
+
+/**
+ * Reversing an adjustment recorded in error (audit row 23, ADR-0052).
+ *
+ * Its own collection rather than a child of the expense, because a reversal is about the
+ * adjustment: the caller has the adjustment's id in hand, and routing through the expense
+ * would invite a request that names one expense and an adjustment belonging to another.
+ */
+export const ADJUSTMENT_ROUTES: readonly ApiRoute[] = [
+  {
+    method: 'POST',
+    path: '/api/adjustments/:adjustmentId/reverse',
+    handler: postAdjustmentReversal,
   },
 ];
 
@@ -320,8 +417,23 @@ export const PAYMENT_CONTEXT_ROUTES: readonly ApiRoute[] = [
 /** Statement import and its history (`docs/roadmap.md` phase 6; audit rows 01–02). */
 export const IMPORT_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/imports/bank-csv', handler: postBankCsvImport },
+  { method: 'POST', path: '/api/imports/statement', handler: postStatementImport },
+  { method: 'GET', path: '/api/imports/formats', handler: getStatementFormatsRoute },
   { method: 'GET', path: '/api/imports', handler: getImportsRoute },
   { method: 'GET', path: '/api/imports/:importBatchId', handler: getImportBatchRoute },
+];
+
+/**
+ * Automated notification intake (audit row 12).
+ *
+ * `POST /api/intake/messages` is the one route authenticated by a **forwarding token** rather
+ * than a session — its callers are a mail rule and a phone shortcut, neither of which has a
+ * browser. See {@link TOKEN_AUTHENTICATED_PATHS}. `GET /api/intake/status` is an ordinary
+ * session-protected read: a configuration screen asks it whether forwarding is set up.
+ */
+export const INTAKE_ROUTES: readonly ApiRoute[] = [
+  { method: 'POST', path: '/api/intake/messages', handler: postForwardedMessages },
+  { method: 'GET', path: '/api/intake/status', handler: getIntakeStatusRoute },
 ];
 
 /**
@@ -457,6 +569,11 @@ export const GROUP_ROUTES: readonly ApiRoute[] = [
  * (phase 21). Phase 16 shipped the snapshot with no surface for it on purpose.
  */
 export const ACCOUNT_ROUTES: readonly ApiRoute[] = [
+  {
+    method: 'GET',
+    path: '/api/accounts/:accountId/balance-readings',
+    handler: getAccountBalanceReadingsRoute,
+  },
   { method: 'GET', path: '/api/accounts', handler: getAccountsRoute },
   { method: 'POST', path: '/api/accounts', handler: postAccount },
   { method: 'POST', path: '/api/accounts/:accountId', handler: postAccountUpdate },
@@ -467,7 +584,41 @@ export const ACCOUNT_ROUTES: readonly ApiRoute[] = [
  * ADR-0047). A read: it derives a preview from approved ledger state and neither sends it nor
  * records anything.
  */
+/**
+ * Live bank/card balances — mapping, reading, and comparing (audit row 37, ADR-0054).
+ *
+ * Note what is absent: nothing here writes a reconciliation boundary. A boundary is a
+ * statement balance somebody evidenced, and `POST /api/reconciliation/runs` stays the only
+ * route that sets one.
+ */
+export const BALANCE_PROVIDER_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/balance-provider/status', handler: getBalanceProviderStatusRoute },
+  { method: 'GET', path: '/api/balance-provider/links', handler: getBalanceProviderLinksRoute },
+  { method: 'POST', path: '/api/balance-provider/links', handler: postBalanceProviderLink },
+  {
+    method: 'POST',
+    path: '/api/balance-provider/links/:linkId/unlink',
+    handler: postBalanceProviderUnlink,
+  },
+  { method: 'POST', path: '/api/balance-provider/refresh', handler: postBalanceProviderRefresh },
+  { method: 'GET', path: '/api/balance-provider/comparison', handler: getBalanceComparisonRoute },
+];
+
 export const PROOF_PACK_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/messaging/status', handler: getMessagingStatusRoute },
+  { method: 'GET', path: '/api/deliveries', handler: getDeliveriesRoute },
+  { method: 'POST', path: '/api/deliveries/status', handler: postDeliveryStatus },
+  { method: 'POST', path: '/api/deliveries/:deliveryId/retry', handler: postDeliveryRetry },
+  {
+    method: 'POST',
+    path: '/api/proof-packs/:recipientPersonId/deliveries',
+    handler: postProofPackDelivery,
+  },
+  {
+    method: 'GET',
+    path: '/api/proof-packs/:recipientPersonId/deliveries',
+    handler: getRecipientDeliveriesRoute,
+  },
   { method: 'GET', path: '/api/proof-packs/:recipientPersonId', handler: getProofPackRoute },
 ];
 
@@ -549,9 +700,11 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...EVIDENCE_ROUTES,
   ...RECEIPT_ROUTES,
   ...ALLOCATION_ROUTES,
+  ...ADJUSTMENT_ROUTES,
   ...SETTLEMENT_ROUTES,
   ...PAYMENT_CONTEXT_ROUTES,
   ...IMPORT_ROUTES,
+  ...INTAKE_ROUTES,
   ...PAYMENT_WORKSPACE_ROUTES,
   ...AUDIT_ROUTES,
   ...RULE_ROUTES,
@@ -562,6 +715,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...BALANCE_ROUTES,
   ...PEOPLE_ROUTES,
   ...ACCOUNT_ROUTES,
+  ...BALANCE_PROVIDER_ROUTES,
   ...MERCHANT_ROUTES,
   ...GROUP_ROUTES,
   ...PROOF_PACK_ROUTES,
@@ -579,6 +733,16 @@ export const API_ROUTES: readonly ApiRoute[] = [
  * history, while a new route accidentally protected is a 401 somebody notices in a minute.
  */
 const PUBLIC_PATHS: ReadonlySet<string> = new Set(SESSION_ROUTES.map((route) => route.path));
+
+/**
+ * The paths that authenticate with the forwarding token instead of a session.
+ *
+ * Exactly one, and it is a closed set for the same reason {@link PUBLIC_PATHS} is: a route
+ * accidentally added here is a write path reachable with a token that was only ever meant to
+ * append evidence. These are **not** public — a request without a valid token is rejected,
+ * and an installation with no token configured rejects every request to them.
+ */
+const TOKEN_AUTHENTICATED_PATHS: ReadonlySet<string> = new Set(['/api/intake/messages']);
 
 export interface Api {
   readonly routes: readonly ApiRoute[];
@@ -620,6 +784,24 @@ export function createApi(deps: ApiDependencies): Api {
           // The door, before the route (audit row 50). Deliberately here rather than in each
           // handler: a check every handler has to remember is a check one of them eventually
           // will not, and what is behind these routes is a person's entire financial history.
+          if (TOKEN_AUTHENTICATED_PATHS.has(match.route.path)) {
+            // A forwarder has no cookie, so this path is gated by its own shared secret —
+            // and, when none is configured, closed rather than open. Checked before the
+            // session branch so an unauthenticated forwarder never falls through to it.
+            if (!hasValidIntakeToken(request, deps.intakeForwardingToken)) {
+              return jsonResponse(401, {
+                error: {
+                  code: 'NOT_AUTHENTICATED',
+                  message:
+                    'This endpoint requires the forwarding token. Send it as ' +
+                    '"Authorization: Bearer <token>". If no INTAKE_FORWARDING_TOKEN is set on ' +
+                    'the server, forwarding is off and every request here is refused.',
+                },
+              });
+            }
+            return await match.route.handler(deps, request, match.params);
+          }
+
           if (deps.authRequired === true && !PUBLIC_PATHS.has(match.route.path)) {
             const identity = await resolveSession(deps.db, readSessionToken(request));
             if (identity === null) {

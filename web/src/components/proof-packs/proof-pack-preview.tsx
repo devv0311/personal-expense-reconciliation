@@ -7,6 +7,7 @@ import { EvidenceStatus } from "@/components/evidence-status";
 import { Fact, Facts } from "@/components/facts";
 import { Money } from "@/components/money";
 import { Section } from "@/components/page-header";
+import { SendPack } from "@/components/proof-packs/send-pack";
 import { ResponsiveTable } from "@/components/responsive-table";
 import { Button } from "@/components/ui/button";
 import { formatDate, formatDateTime } from "@/lib/dates";
@@ -23,10 +24,13 @@ import type { ProofPackPreview as Preview } from "@/lib/types";
  *   share is a bug; so would a screen that did.
  * - **Uncertainty is carried, not smoothed.** Every warning the pack raises is shown before the
  *   text, not after it, because the reader is deciding whether to send it.
- * - **Copying is a separate, deliberate act** (this phase's own). The three checkboxes below
- *   are the "recipient-facing review of exactly what is about to be sent" the roadmap asks for:
- *   who it is for, what it says, and which evidence it cites. Generating the pack sends
- *   nothing, records no settlement and writes no row — and neither does copying it.
+ * - **Copying is a separate, deliberate act.** The three checkboxes below are the
+ *   "recipient-facing review of exactly what is about to be sent": who it is for, what it says,
+ *   and which evidence it cites. Generating the pack sends nothing, records no settlement and
+ *   writes no row — and neither does copying it.
+ * - **Sending is a third act, after both** (ADR-0053). The same three confirmations gate it,
+ *   and it is deliberately a different button in a different section saying a different thing,
+ *   because copying text and putting it in front of somebody are not the same decision.
  */
 export function ProofPackPreview({ preview }: { preview: Preview }) {
   // Keyed on the pack's identity, so a different recipient or a different as-of instant starts
@@ -335,6 +339,8 @@ function ProofPackPreviewBody({ preview }: { preview: Preview }) {
           )}
         </div>
       </Section>
+
+      <SendPack preview={preview} reviewed={allReviewed} />
     </div>
   );
 }

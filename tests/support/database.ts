@@ -24,6 +24,9 @@ import type { Database, DatabaseHandle } from '../../src/db/client.js';
 /** Every table the migration creates, in an order safe to truncate together. */
 const ALL_TABLES = [
   'audit_events',
+  'proof_pack_deliveries',
+  'account_balance_readings',
+  'account_provider_links',
   'jobs',
   'sessions',
   'splitwise_audit_findings',

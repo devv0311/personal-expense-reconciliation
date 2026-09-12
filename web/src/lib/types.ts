@@ -745,9 +745,150 @@ export interface ProofPackPreview {
   readonly intendedRecipient: { readonly id: string; readonly displayName: string };
   readonly asOf: string;
   readonly generatedText: string;
+  /** SHA-256 of `generatedText`, server-derived. Echoed back on send to pin what was read. */
+  readonly contentDigest: string;
   readonly evidenceReferences: readonly ProofPackEvidenceRef[];
   readonly warnings: readonly ProofPackWarning[];
   readonly pack: ProofPack;
+}
+
+/* ------------------------------------------------------------------- proof-pack delivery */
+
+/**
+ * What this installation can actually send, if anything (ADR-0053).
+ *
+ * Read before the send form is shown, so an installation with no credentials states that
+ * plainly rather than letting somebody type a phone number and then fail.
+ */
+export interface MessagingStatus {
+  readonly transportId: string;
+  readonly channel: string;
+  readonly label: string;
+  readonly configured: boolean;
+  readonly unavailableReason?: string;
+  readonly supportsAttachments: boolean;
+  readonly endpointHost?: string;
+  readonly maxAttachmentBytes?: number;
+  readonly attachableEvidenceTypes: readonly string[];
+  readonly maxAttempts: number;
+}
+
+export interface DeliveryAttachmentRecord {
+  readonly evidenceId: string;
+  readonly filename: string;
+  readonly mediaType: string;
+  readonly byteSize: number;
+}
+
+export const PROOF_PACK_DELIVERY_STATUSES = ["pending", "sent", "delivered", "failed"] as const;
+export type ProofPackDeliveryStatus = (typeof PROOF_PACK_DELIVERY_STATUSES)[number];
+
+/** One record of a pack having been put in front of somebody. Never a settlement. */
+export interface ProofPackDelivery {
+  readonly id: string;
+  readonly recipientPersonId: string;
+  readonly recipientDisplayName: string;
+  readonly channel: string;
+  readonly address: string;
+  readonly bodyText: string;
+  readonly contentDigest: string;
+  readonly attachments: readonly DeliveryAttachmentRecord[];
+  readonly packAsOf: string;
+  readonly status: ProofPackDeliveryStatus;
+  readonly attemptCount: number;
+  readonly lastError: string | null;
+  readonly providerMessageId: string | null;
+  readonly transportId: string;
+  readonly sentAt: string | null;
+  readonly deliveredAt: string | null;
+  readonly createdAt: string;
+  readonly retryable: boolean;
+}
+
+export interface SendProofPackResult {
+  readonly delivery: ProofPackDelivery;
+  /** `false` when an identical pack had already gone and nothing was sent a second time. */
+  readonly sentNow: boolean;
+}
+
+/* ---------------------------------------------------------------- live balance providers */
+
+/** What this installation can read live, if anything (ADR-0054). */
+export interface BalanceProviderStatus {
+  readonly providerId: string;
+  readonly label: string;
+  readonly configured: boolean;
+  readonly unavailableReason?: string;
+  readonly endpointHost?: string;
+  readonly linkedAccountCount: number;
+  /** Always true. Restated by the API so the rule is not the screen's to remember. */
+  readonly readingsAreNeverBoundaries: true;
+}
+
+export interface AccountProviderLink {
+  readonly id: string;
+  readonly accountId: string;
+  readonly providerId: string;
+  readonly externalAccountRef: string;
+  readonly providerLabel: string | null;
+  readonly linkedAt: string;
+  readonly archivedAt: string | null;
+  readonly accountName: string;
+  readonly accountType: string;
+  readonly accountLast4: string | null;
+}
+
+/** One thing a provider said about one account at one instant. Never a boundary. */
+export interface AccountBalanceReading {
+  readonly id: string;
+  readonly accountId: string;
+  readonly accountProviderLinkId: string;
+  readonly providerId: string;
+  readonly balance: string | null;
+  readonly currency: string;
+  readonly asOf: string | null;
+  readonly fetchedAt: string;
+  readonly status: "ok" | "unavailable";
+  readonly failureReason: string | null;
+  readonly readComplete: boolean;
+  readonly readIncompleteReason: string | null;
+}
+
+export interface BalanceReadCompleteness {
+  readonly requested: number;
+  readonly answered: number;
+  readonly complete: boolean;
+  readonly incompleteReason?: string;
+}
+
+export interface RefreshBalancesResult {
+  readonly provider: BalanceProviderStatus;
+  readonly completeness: BalanceReadCompleteness;
+  readonly readings: readonly AccountBalanceReading[];
+  readonly fetchedAt: string;
+}
+
+export interface BalanceComparison {
+  readonly verdict: "agrees" | "differs" | "not_comparable";
+  readonly difference: string | null;
+  readonly usability: "fresh" | "stale" | "unusable";
+  readonly caveat?: string;
+}
+
+export interface AccountBalanceComparison {
+  readonly accountId: string;
+  readonly accountName: string;
+  readonly reading: AccountBalanceReading | null;
+  readonly linked: boolean;
+  readonly comparison: BalanceComparison | null;
+  readonly ledgerFigure: string | null;
+}
+
+export interface BalanceComparisonResult {
+  readonly comparedTo: string;
+  readonly provider: BalanceProviderStatus;
+  readonly comparisons: readonly AccountBalanceComparison[];
+  readonly note: string;
 }
 
 /* ------------------------------------------------------------------ the payment workspace */

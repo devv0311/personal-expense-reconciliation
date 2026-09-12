@@ -48,6 +48,11 @@ export const queryKeys = {
     ["splitwise-audit-findings", filter] as const,
   splitwiseAuditFinding: (id: string) => ["splitwise-audit-finding", id] as const,
   proofPack: (recipientPersonId: string) => ["proof-pack", recipientPersonId] as const,
+  messagingStatus: () => ["messaging-status"] as const,
+  balanceProviderStatus: () => ["balance-provider-status"] as const,
+  balanceProviderLinks: () => ["balance-provider-links"] as const,
+  balanceComparison: (runId: string) => ["balance-comparison", runId] as const,
+  deliveries: (recipientPersonId?: string) => ["deliveries", recipientPersonId ?? null] as const,
   payments: (filter: ListPaymentsFilter) => ["payments", filter] as const,
   payment: (id: string) => ["payment", id] as const,
   counterpartyOptions: () => ["counterparty-options"] as const,
@@ -210,7 +215,126 @@ export function useProofPack(recipientPersonId: string | null) {
   });
 }
 
+/**
+ * Whether a reviewed pack can be sent from here, and by what (ADR-0053).
+ *
+ * Configuration rather than ledger state, so it is cached for the session: an installation
+ * does not grow a WhatsApp token between two renders of the same screen.
+ */
+export function useMessagingStatus() {
+  return useQuery({
+    queryKey: queryKeys.messagingStatus(),
+    queryFn: api.getMessagingStatus,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Whether a live balance can be read here at all, and how many accounts are mapped. */
+export function useBalanceProviderStatus() {
+  return useQuery({
+    queryKey: queryKeys.balanceProviderStatus(),
+    queryFn: api.getBalanceProviderStatus,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useBalanceProviderLinks() {
+  return useQuery({
+    queryKey: queryKeys.balanceProviderLinks(),
+    queryFn: api.listBalanceProviderLinks,
+  });
+}
+
+/**
+ * Each account's latest reading beside a run's evidenced closing balance.
+ *
+ * `staleTime: 0`, like the proof pack: the point of a live balance is that it is current, and
+ * a cached comparison is the one thing this screen must not show.
+ */
+export function useBalanceComparison(runId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.balanceComparison(runId ?? ""),
+    queryFn: () => api.getBalanceComparison(runId as string),
+    enabled: runId !== null,
+    staleTime: 0,
+  });
+}
+
+/** The record of what has been shared, and with whom. */
+export function useProofPackDeliveries(recipientPersonId?: string) {
+  return useQuery({
+    queryKey: queryKeys.deliveries(recipientPersonId),
+    queryFn: () => api.listProofPackDeliveries(recipientPersonId),
+  });
+}
+
 /* -------------------------------------------------------------------------- mutations */
+
+/**
+ * Sends one reviewed pack.
+ *
+ * Invalidates the delivery lists and nothing else — deliberately. Sending a pack changes no
+ * balance, no expense and no settlement, so a screen that refreshed the ledger afterwards
+ * would suggest it had (ADR-0047).
+ */
+export function useSendProofPack() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.sendProofPack,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["deliveries"] });
+    },
+  });
+}
+
+export function useLinkAccountToBalanceProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.linkAccountToBalanceProvider,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["balance-provider-links"] });
+      void queryClient.invalidateQueries({ queryKey: ["balance-provider-status"] });
+    },
+  });
+}
+
+export function useUnlinkAccountFromBalanceProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.unlinkAccountFromBalanceProvider,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["balance-provider-links"] });
+      void queryClient.invalidateQueries({ queryKey: ["balance-provider-status"] });
+    },
+  });
+}
+
+/**
+ * Reads every linked account now.
+ *
+ * Invalidates the comparison and nothing about the ledger: a refresh records what a provider
+ * said and changes no balance, no snapshot and no delta (ADR-0054).
+ */
+export function useRefreshBalances() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.refreshBalances,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["balance-comparison"] });
+      void queryClient.invalidateQueries({ queryKey: ["balance-provider-links"] });
+    },
+  });
+}
+
+export function useRetryProofPackDelivery() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.retryProofPackDelivery,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["deliveries"] });
+    },
+  });
+}
 
 export function useRunReconciliation() {
   const queryClient = useQueryClient();

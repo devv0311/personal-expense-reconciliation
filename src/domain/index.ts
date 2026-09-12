@@ -12,6 +12,7 @@
 export * from './allocation.js';
 export * from './adjustment.js';
 export * from './balance.js';
+export * from './balance-reading.js';
 export * from './cash-balance.js';
 export * from './cash-flow.js';
 export * from './classification.js';
@@ -31,6 +32,7 @@ export * from './money.js';
 export * from './normalization.js';
 export * from './payment.js';
 export * from './proof-pack.js';
+export * from './proof-pack-delivery.js';
 export * from './receipt.js';
 export * from './refund-allocation.js';
 export * from './refund-attribution.js';
