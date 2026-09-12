@@ -63,7 +63,17 @@ export type ServiceErrorCode =
    * Never turned into a zero or a boundary. An unread account is recorded as unread
    * (ADR-0053).
    */
-  | 'BALANCE_PROVIDER_UNAVAILABLE';
+  | 'BALANCE_PROVIDER_UNAVAILABLE'
+  /**
+   * A question could not be planned, because no model is configured or the provider failed
+   * (`ask-service.ts`, ADR-0057).
+   *
+   * Deliberately distinct from an unanswerable question: *"the ledger has no read for that"*
+   * is an answer this surface gives happily, and *"nothing could read your question at all"*
+   * is a configuration or availability fact. Every figure a question would have reported is
+   * still reachable from the screen that owns it either way.
+   */
+  | 'LEDGER_QUESTION_UNAVAILABLE';
 
 export class ServiceError extends Error {
   public readonly code: ServiceErrorCode;

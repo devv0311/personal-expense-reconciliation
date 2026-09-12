@@ -395,3 +395,37 @@ export const jobStatusLabel = labelled({
   failed: "Failed",
   cancelled: "Cancelled",
 });
+
+/* --------------------------------- changes somebody made in Splitwise (ADR-0056) */
+
+export const remoteChangeKindLabel = labelled({
+  remote_expense_amount_changed: "They changed the amount",
+  remote_settlement_amount_changed: "They changed a repayment",
+  remote_expense_deleted: "They deleted the entry",
+  remote_settlement_deleted: "They deleted the repayment",
+  remote_expense_unlinked: "An expense this ledger has no link for",
+  remote_settlement_unlinked: "A repayment this ledger has no link for",
+  remote_person_unmapped: "A Splitwise friend nobody here is mapped to",
+  remote_duplicate_candidate: "Two indistinguishable entries",
+});
+
+/**
+ * What accepting writes, in four words.
+ *
+ * The sentence version comes from the API as `consequence` and is quoted, not composed here:
+ * these are a table column, not the statement somebody confirms against (ADR-0048).
+ */
+export const remoteChangeEffectLabel = labelled({
+  record_drift: "Records what they hold",
+  record_external_deletion: "Marks the entry gone",
+  adopt_expense_link: "Links it to an expense",
+  adopt_settlement_link: "Links it to a repayment",
+  map_person: "Maps the account to a person",
+  none: "Nothing to apply",
+});
+
+export const remoteChangeStatusLabel = labelled({
+  proposed: "Waiting on you",
+  accepted: "Accepted",
+  rejected: "Rejected",
+});

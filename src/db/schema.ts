@@ -79,6 +79,9 @@ import {
   SPLITWISE_AUDIT_REVIEW_STATUSES,
   SPLITWISE_EXPENSE_SYNC_STATUSES,
   SPLITWISE_EXTERNAL_READ_STATUSES,
+  SPLITWISE_REMOTE_CHANGE_EFFECTS,
+  SPLITWISE_REMOTE_CHANGE_KINDS,
+  SPLITWISE_REMOTE_CHANGE_STATUSES,
   SPLITWISE_SETTLEMENT_SYNC_STATUSES,
 } from '../domain/enums.js';
 import { SETTLEMENT_CLAIM_NOTE_KIND } from '../domain/evidence.js';
@@ -1915,6 +1918,182 @@ export const splitwiseAuditFindings = pgTable(
           and (${table.externalSnapshot} is null
                or jsonb_typeof(${table.externalSnapshot}) = 'object')
           and jsonb_typeof(${table.evidence}) = 'array'`,
+    ),
+  ],
+);
+
+/* ============================================ Splitwise remote-to-local change discovery */
+
+/**
+ * One discovery run: what was read from Splitwise, how completely, and what it produced
+ * (ADR-0056).
+ *
+ * The same honesty contract `splitwise_audit_runs` carries. `external_read_status` is the
+ * worst status across every pair read, and `pairs_unchecked` is how many could not be read at
+ * all — because a run that read three pairs of five and reported nothing missing has not
+ * established that nothing is missing.
+ */
+export const splitwiseRemoteReads = pgTable(
+  'splitwise_remote_reads',
+  {
+    id: id(),
+    runAt: timestamp('run_at', { withTimezone: true }).notNull().defaultNow(),
+    externalIntegrationId: uuid('external_integration_id').references(
+      () => externalIntegrations.id,
+    ),
+    externalReadStatus: text('external_read_status').notNull(),
+    externalReadDetail: text('external_read_detail'),
+    pairsRead: integer('pairs_read').notNull().default(0),
+    pairsUnchecked: integer('pairs_unchecked').notNull().default(0),
+    changesCreated: integer('changes_created').notNull().default(0),
+    changesReobserved: integer('changes_reobserved').notNull().default(0),
+    changesSuperseded: integer('changes_superseded').notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('splitwise_remote_reads_run_at_idx').on(table.runAt),
+    check(
+      'splitwise_remote_reads_status_check',
+      oneOf('external_read_status', SPLITWISE_EXTERNAL_READ_STATUSES),
+    ),
+    check(
+      'splitwise_remote_reads_counts_check',
+      sql`${table.pairsRead} >= 0 and ${table.pairsUnchecked} >= 0
+          and ${table.pairsUnchecked} <= ${table.pairsRead}
+          and ${table.changesCreated} >= 0 and ${table.changesReobserved} >= 0
+          and ${table.changesSuperseded} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * One change somebody made in Splitwise, as a proposal awaiting a person's decision
+ * (ADR-0056).
+ *
+ * The two identity columns work exactly as `splitwise_audit_findings`' do — `fingerprint` is
+ * the cause plus subject, unique among rows that have not been superseded; `comparison_digest`
+ * is the materiality, a hash over both snapshots. An unchanged re-run touches `last_observed_*`
+ * and nothing else, so **a decided change is not reopened by re-observing the same thing**.
+ *
+ * `applied_effect` is what acceptance actually performed, written beside the decision rather
+ * than inferred from the kind later. Every value it can take changes what this ledger knows
+ * about Splitwise; none of them changes an amount, an allocation or a balance.
+ */
+export const splitwiseRemoteChanges = pgTable(
+  'splitwise_remote_changes',
+  {
+    id: id(),
+    /** The run that first produced this change — its provenance, never rewritten. */
+    remoteReadId: uuid('remote_read_id')
+      .notNull()
+      .references(() => splitwiseRemoteReads.id),
+    /** The most recent run that produced the identical comparison. Status metadata only. */
+    lastObservedReadId: uuid('last_observed_read_id')
+      .notNull()
+      .references(() => splitwiseRemoteReads.id),
+    externalIntegrationId: uuid('external_integration_id')
+      .notNull()
+      .references(() => externalIntegrations.id),
+    kind: text('kind').notNull(),
+    /** What accepting would write. `none` means accepting is refused by name. */
+    effect: text('effect').notNull(),
+    summary: text('summary').notNull(),
+    /** Stated server-side so a screen quotes the consequence rather than deriving it. */
+    consequence: text('consequence').notNull(),
+    /** How complete the read this was observed under was. Never summarised into "fine". */
+    readStatus: text('read_status').notNull(),
+    readDetail: text('read_detail'),
+    personAId: uuid('person_a_id').references(() => people.id),
+    personBId: uuid('person_b_id').references(() => people.id),
+    expenseId: uuid('expense_id').references(() => expenses.id),
+    splitwiseExpenseRowId: uuid('splitwise_expense_row_id').references(() => splitwiseExpenses.id),
+    settlementId: uuid('settlement_id').references(() => settlements.id),
+    splitwiseSettlementRowId: uuid('splitwise_settlement_row_id').references(
+      () => splitwiseSettlements.id,
+    ),
+    externalReference: text('external_reference'),
+    externalUserReference: text('external_user_reference'),
+    amount: paiseColumn('amount'),
+    /** What this ledger held at comparison time. */
+    localSnapshot: jsonb('local_snapshot').notNull(),
+    /** What Splitwise reported, uninterpreted. Null when the read produced nothing. */
+    remoteSnapshot: jsonb('remote_snapshot'),
+    /** Pointers to the records this is about — never copies of them. */
+    subjects: jsonb('subjects')
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    fingerprint: text('fingerprint').notNull(),
+    comparisonDigest: text('comparison_digest').notNull(),
+    firstObservedAt: timestamp('first_observed_at', { withTimezone: true }).notNull().defaultNow(),
+    lastObservedAt: timestamp('last_observed_at', { withTimezone: true }).notNull().defaultNow(),
+    status: text('status').notNull().default('proposed'),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    /** `'user'` or `'user:<id>'` — a person, never a model and never `system`. */
+    decidedBy: text('decided_by'),
+    decisionReason: text('decision_reason'),
+    /** What accepting performed. Null for a proposed or rejected change. */
+    appliedEffect: text('applied_effect'),
+    /** The local record an adoption or mapping joined to, so the act is traceable. */
+    appliedTargetId: uuid('applied_target_id'),
+    supersededAt: timestamp('superseded_at', { withTimezone: true }),
+    supersededByChangeId: uuid('superseded_by_change_id').references(
+      (): AnyPgColumn => splitwiseRemoteChanges.id,
+    ),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    // One current row per identity. A re-run that finds the same change on the same record
+    // updates when-last-seen; it never appends a second row saying the same thing.
+    uniqueIndex('splitwise_remote_changes_current_idx')
+      .on(table.fingerprint)
+      .where(sql`${table.supersededAt} is null`),
+    index('splitwise_remote_changes_read_idx').on(table.remoteReadId),
+    index('splitwise_remote_changes_status_idx').on(table.status, table.firstObservedAt),
+    index('splitwise_remote_changes_pair_idx').on(table.personAId, table.personBId),
+    check('splitwise_remote_changes_kind_check', oneOf('kind', SPLITWISE_REMOTE_CHANGE_KINDS)),
+    check(
+      'splitwise_remote_changes_effect_check',
+      oneOf('effect', SPLITWISE_REMOTE_CHANGE_EFFECTS),
+    ),
+    check(
+      'splitwise_remote_changes_status_check',
+      oneOf('status', SPLITWISE_REMOTE_CHANGE_STATUSES),
+    ),
+    check(
+      'splitwise_remote_changes_read_status_check',
+      oneOf('read_status', SPLITWISE_EXTERNAL_READ_STATUSES),
+    ),
+    check(
+      'splitwise_remote_changes_applied_effect_check',
+      sql`${table.appliedEffect} is null
+          or applied_effect in ('record_drift', 'record_external_deletion',
+                                'adopt_expense_link', 'adopt_settlement_link', 'map_person')`,
+    ),
+    check(
+      'splitwise_remote_changes_amount_check',
+      sql`${table.amount} is null or ${table.amount} >= 0`,
+    ),
+    // A decision is attributable and explained, or it is not a decision. `proposed` is
+    // discovery's own state and carries no actor, because nobody chose it. An accepted change
+    // always names what it applied; a rejected one never does.
+    check(
+      'splitwise_remote_changes_decision_check',
+      sql`(${table.status} <> 'proposed') = (${table.decidedAt} is not null)
+          and (${table.status} <> 'proposed') = (${table.decidedBy} is not null)
+          and (${table.status} <> 'proposed') = (${table.decisionReason} is not null)
+          and (${table.status} = 'accepted') = (${table.appliedEffect} is not null)`,
+    ),
+    check(
+      'splitwise_remote_changes_supersede_check',
+      sql`${table.supersededByChangeId} is null or ${table.supersededAt} is not null`,
+    ),
+    check(
+      'splitwise_remote_changes_snapshot_shape_check',
+      sql`jsonb_typeof(${table.localSnapshot}) = 'object'
+          and (${table.remoteSnapshot} is null
+               or jsonb_typeof(${table.remoteSnapshot}) = 'object')
+          and jsonb_typeof(${table.subjects}) = 'array'`,
     ),
   ],
 );

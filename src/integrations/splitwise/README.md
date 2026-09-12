@@ -48,8 +48,18 @@ has an `AllocationLineGroupExpansion` (`docs/architecture/data-flow.md` step 8);
 only from an already-recorded `Settlement`. Built and tested against a mock only until
 deliberately pointed at a real Splitwise account — see `docs/security/security-model.md`.
 
-**Not yet implemented:** reading a Splitwise-side edit back into this ledger. Their change
-surfaces as a `drifted` finding for a person to look at and never as an input to the canonical
-ledger (`CLAUDE.md`, principle 9); making it anything more needs its own ADR. Reviewing a
-finding remains explicitly not authorization to write — the repair is a separate act a person
-asks for, one row at a time, with a written reason.
+**Reading their side back (ADR-0056).** `fetchLedgerEntries` now has a second caller:
+`services.discoverSplitwiseRemoteChanges` compares what Splitwise holds against the sync rows
+and records the differences as **proposals**. Nothing about that path makes their number ours.
+Accepting one records what they hold on the sync row, closes the row as `externally_deleted`,
+joins an external entry to a local record a person names, or maps a Splitwise account to an
+existing `Person` — and never writes an amount, an allocation or a balance. A deletion is only
+ever reported from a `complete` listing, because an entry missing from a page is an entry
+nobody looked for.
+
+Reviewing an audit finding remains explicitly not authorization to write; the repair is still a
+separate act a person asks for, one row at a time, with a written reason.
+
+**Not implemented, deliberately:** a remote figure becoming a local one. Making Splitwise's
+₹500 true in this ledger is a person recording an `ExpenseAdjustment` with evidence
+(`CLAUDE.md`, principle 9; `invariants.md` #6).

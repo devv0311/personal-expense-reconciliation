@@ -145,7 +145,8 @@ export function ResyncCandidates() {
           <h3 className="text-body font-medium">Settlements Splitwise disagrees about</h3>
           <p className="mt-1 text-meta text-ink-muted">
             A settlement&apos;s amount cannot go stale the way a refunded expense&apos;s can, so the
-            only way these come apart is Splitwise&apos;s own side moving.
+            only ways these come apart are Splitwise&apos;s own figure moving and somebody deleting
+            the entry there.
           </p>
           <div className="mt-3">
             <ResponsiveTable
@@ -164,6 +165,17 @@ export function ResyncCandidates() {
                   header: "State",
                   render: (candidate) => (
                     <span className="text-attention">{sentenceCase(candidate.syncStatus)}</span>
+                  ),
+                },
+                {
+                  key: "repair",
+                  header: "What a push does",
+                  render: (candidate) => (
+                    <span className="text-ink-muted">
+                      {candidate.plannedRepair === "recreated"
+                        ? "Puts the entry back"
+                        : "Corrects their entry"}
+                    </span>
                   ),
                 },
                 {
@@ -243,11 +255,18 @@ export function ResyncCandidates() {
           setPushingSettlement(null);
           resyncSettlement.reset();
         }}
-        title="Correct this settlement in Splitwise"
+        title={
+          pushingSettlement?.plannedRepair === "recreated"
+            ? "Put this settlement back in Splitwise"
+            : "Correct this settlement in Splitwise"
+        }
         consequence={
           <>
-            This writes to <strong>Splitwise</strong>. It corrects the settlement entry already
-            there — same entry, same id — so that it reads{" "}
+            This writes to <strong>Splitwise</strong>.{" "}
+            {pushingSettlement?.plannedRepair === "recreated"
+              ? "Somebody deleted this repayment on their side, so there is nothing to correct: this creates the entry again."
+              : "It corrects the settlement entry already there — same entry, same id."}{" "}
+            It will read{" "}
             {pushingSettlement !== null && <Money paise={pushingSettlement.currentAmount} />} in the
             direction this ledger recorded. It discharges nothing new here, and records no second
             settlement.

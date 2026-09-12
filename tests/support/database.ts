@@ -29,6 +29,8 @@ const ALL_TABLES = [
   'account_provider_links',
   'jobs',
   'sessions',
+  'splitwise_remote_changes',
+  'splitwise_remote_reads',
   'splitwise_audit_findings',
   'splitwise_audit_runs',
   'reconciliation_account_snapshots',

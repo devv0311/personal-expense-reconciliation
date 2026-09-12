@@ -367,6 +367,13 @@ export const AI_INFERENCE_TYPES = [
   'group_into_occasion',
   'explain_anomaly',
   'propose_rule',
+  /**
+   * The tenth (ADR-0057): turning a typed question into a **query plan** over reads this
+   * ledger already answers. Listed here so the operation is nameable on the boundary — it
+   * writes no `ai_inferences` row, because it produces no proposal anybody accepts and no
+   * answer a model wrote.
+   */
+  'plan_ledger_query',
 ] as const;
 export type AiInferenceType = (typeof AI_INFERENCE_TYPES)[number];
 
@@ -515,6 +522,12 @@ export const AUDITABLE_ENTITY_TYPES = [
   'reconciliation_account_snapshot',
   'splitwise_audit_run',
   'splitwise_audit_finding',
+  // Discovering what somebody changed in Splitwise writes nothing financial, but deciding
+  // about one of those changes is an attributable act with a consequence — an adopted link, a
+  // mapped person, a row marked externally deleted — so it is audited like any other decision
+  // (ADR-0056).
+  'splitwise_remote_read',
+  'splitwise_remote_change',
   // Sending a proof pack is the one act in this product that puts a person's financial
   // position in front of somebody else. It writes no money, so it is not a financial
   // decision — but "who did I send what to, when, and did it arrive" has to be answerable
@@ -539,6 +552,13 @@ export type ExternalIntegrationStatus = (typeof EXTERNAL_INTEGRATION_STATUSES)[n
  * removed rather than left standing at a figure this ledger no longer asserts. The row keeps
  * the external id it held, because an audit that could no longer see the entry it once matched
  * could not explain its own past findings.
+ *
+ * `externally_deleted` (ADR-0056) is deliberately **not** `withdrawn`, though both mean the
+ * entry is gone from Splitwise. `withdrawn` is this ledger's own finished act; this one is
+ * somebody else's deletion of a figure this ledger still asserts — a disagreement, whose
+ * repair is a *create* rather than an update. Folding the two together would send an update to
+ * a deleted entry, which is the same mistake ADR-0055 avoided by keeping `withdrawn` out of
+ * `stale`.
  */
 export const SPLITWISE_EXPENSE_SYNC_STATUSES = [
   'pending',
@@ -546,15 +566,23 @@ export const SPLITWISE_EXPENSE_SYNC_STATUSES = [
   'drifted',
   'stale',
   'withdrawn',
+  'externally_deleted',
   'sync_failed',
 ] as const;
 export type SplitwiseExpenseSyncStatus = (typeof SPLITWISE_EXPENSE_SYNC_STATUSES)[number];
 
-/** A settlement's amount cannot go stale the way an adjusted expense's can. */
+/**
+ * A settlement's amount cannot go stale the way an adjusted expense's can.
+ *
+ * `externally_deleted` arrives for the same reason it does above (ADR-0056): somebody removed
+ * the payment entry in Splitwise, and a row that still said `synced` would have the repair
+ * plan a correction against an id that no longer exists.
+ */
 export const SPLITWISE_SETTLEMENT_SYNC_STATUSES = [
   'pending',
   'synced',
   'drifted',
+  'externally_deleted',
   'sync_failed',
 ] as const;
 export type SplitwiseSettlementSyncStatus = (typeof SPLITWISE_SETTLEMENT_SYNC_STATUSES)[number];
@@ -667,6 +695,78 @@ export type SplitwiseAuditReviewStatus = (typeof SPLITWISE_AUDIT_REVIEW_STATUSES
 /** The review states a person can move a finding into — `open` is the audit's own. */
 export const SPLITWISE_AUDIT_REVIEW_DECISIONS = ['acknowledged', 'resolved', 'dismissed'] as const;
 export type SplitwiseAuditReviewDecision = (typeof SPLITWISE_AUDIT_REVIEW_DECISIONS)[number];
+
+/* --------------------------------------- Splitwise remote-to-local change discovery */
+
+/**
+ * What somebody did in Splitwise that this ledger can see and has to decide about (ADR-0056).
+ *
+ * Every one is a deterministic comparison of two recorded figures — there is no model on this
+ * path and no confidence level. "Proposal" here means *awaiting a person's decision*, not
+ * *produced by an inference*.
+ *
+ * The three `*_deleted`/absence-based kinds are only ever produced from a **complete** listing
+ * for the pair. An entry absent from a partial page is an entry nobody looked for, and
+ * reporting it as deleted would be ADR-0046's "an incomplete check is not agreement" failure
+ * running in the opposite direction.
+ */
+export const SPLITWISE_REMOTE_CHANGE_KINDS = [
+  /** An entry this ledger synced now carries a different figure in Splitwise. */
+  'remote_expense_amount_changed',
+  /** A settlement this ledger synced now carries a different figure in Splitwise. */
+  'remote_settlement_amount_changed',
+  /** An entry this ledger synced is gone from Splitwise, by somebody else's hand. */
+  'remote_expense_deleted',
+  /** A settlement this ledger synced is gone from Splitwise. */
+  'remote_settlement_deleted',
+  /** Splitwise holds a shared cost this ledger has no link for. */
+  'remote_expense_unlinked',
+  /** Splitwise holds a payment entry this ledger has no link for. */
+  'remote_settlement_unlinked',
+  /** An entry names a Splitwise user no `Person` in this ledger is mapped to. */
+  'remote_person_unmapped',
+  /** Two external entries both answer to one local record; adoption must not guess. */
+  'remote_duplicate_candidate',
+] as const;
+export type SplitwiseRemoteChangeKind = (typeof SPLITWISE_REMOTE_CHANGE_KINDS)[number];
+
+/**
+ * What accepting a change actually writes — decided by the service, quoted by the screen.
+ *
+ * Read the list and notice what is not in it: nothing here writes money. Acceptance changes
+ * what this ledger knows about Splitwise, never what it says about an amount, an allocation or
+ * a balance (ADR-0056). Bringing a remote figure in as a correction stays a person recording
+ * an `ExpenseAdjustment`, with its own evidence, under `invariants.md` #6.
+ */
+export const SPLITWISE_REMOTE_CHANGE_EFFECTS = [
+  /** Record what they now hold on the sync row, and mark it `drifted`. */
+  'record_drift',
+  /** Mark the sync row `externally_deleted`, keeping the external id it held. */
+  'record_external_deletion',
+  /** Join an external entry to a local expense the caller names. Never creates one. */
+  'adopt_expense_link',
+  /** Join an external payment to a local settlement the caller names. Never creates one. */
+  'adopt_settlement_link',
+  /** Map a Splitwise user id onto a `Person` the caller names. Never creates one. */
+  'map_person',
+  /** Nothing to apply — accepting is refused by name, and rejecting is the only decision. */
+  'none',
+] as const;
+export type SplitwiseRemoteChangeEffect = (typeof SPLITWISE_REMOTE_CHANGE_EFFECTS)[number];
+
+/**
+ * A change's decision state.
+ *
+ * `proposed` is the only one discovery itself writes. The other two carry an actor, a time and
+ * a required reason, and a re-observation of the same remote state never reopens them
+ * (ADR-0056) — a materially different one supersedes instead.
+ */
+export const SPLITWISE_REMOTE_CHANGE_STATUSES = ['proposed', 'accepted', 'rejected'] as const;
+export type SplitwiseRemoteChangeStatus = (typeof SPLITWISE_REMOTE_CHANGE_STATUSES)[number];
+
+/** The decisions a person can record. `proposed` is discovery's own, and nobody chose it. */
+export const SPLITWISE_REMOTE_CHANGE_DECISIONS = ['accept', 'reject'] as const;
+export type SplitwiseRemoteChangeDecision = (typeof SPLITWISE_REMOTE_CHANGE_DECISIONS)[number];
 
 /** Why a finding stopped being current. Both are the audit's own bookkeeping, never a review. */
 export const SPLITWISE_AUDIT_SUPERSEDE_REASONS = [

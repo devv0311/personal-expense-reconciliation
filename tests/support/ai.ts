@@ -138,3 +138,61 @@ export function scriptedReceiptExtractionTransport(): ScriptedReceiptTransport {
     },
   };
 }
+
+/* ============================================== the ask-only question surface (ADR-0057) */
+
+export interface ScriptedQueryPlanTransport extends ModelTransport {
+  /** Every redacted question this transport was asked, in order. */
+  readonly asked: readonly string[];
+  /** The full redacted payload of the last call, so a test can assert what left the machine. */
+  readonly lastPayload: () => unknown;
+  /** Scripts the reply to the next question, keyed by the redacted question text. */
+  readonly script: (redactedQuestion: string, response: unknown) => void;
+}
+
+/**
+ * A transport that answers `plan_ledger_query` from a script the test writes.
+ *
+ * Keyed by the **redacted** question, like the classification transport is keyed by the
+ * redacted description, and for the same reason: if the question redactor changes, these
+ * lookups miss and the suite says so rather than silently exercising a payload that no longer
+ * leaves the machine in that shape.
+ */
+export function scriptedQueryPlanTransport(
+  options: { readonly configured?: boolean; readonly unavailableReason?: string } = {},
+): ScriptedQueryPlanTransport {
+  const asked: string[] = [];
+  const scripted = new Map<string, unknown>();
+  let lastPayload: unknown = null;
+
+  return {
+    asked,
+    lastPayload: () => lastPayload,
+    script: (redactedQuestion: string, response: unknown) => {
+      scripted.set(redactedQuestion, response);
+    },
+    modelInfo: { provider: 'scripted', model: 'query-planner' },
+    ...(options.configured === false
+      ? {
+          availability: {
+            configured: false,
+            ...(options.unavailableReason === undefined
+              ? {}
+              : { unavailableReason: options.unavailableReason }),
+          },
+        }
+      : {}),
+    complete: (request: ModelRequest) => {
+      if (request.operation !== 'plan_ledger_query') {
+        return Promise.reject(new Error(`Unexpected operation "${request.operation}".`));
+      }
+      lastPayload = request.input;
+      const question = (request.input as { question: string }).question;
+      asked.push(question);
+      if (!scripted.has(question)) {
+        return Promise.reject(new Error(`No scripted query plan for "${question}".`));
+      }
+      return Promise.resolve(scripted.get(question));
+    },
+  };
+}

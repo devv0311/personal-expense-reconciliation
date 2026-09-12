@@ -1,27 +1,42 @@
 # CLAUDE.md — Engineering Context for This Repository
 
-> **Current decisions (2026-09-12).** The numbered sequence ended at phase 22; **four of the
-> five capabilities ADR-0050 left genuinely unbuilt are now built**, each with its own ADR and
-> none of them a phase. Real statement formats (CSV/XLSX/PDF, eight declared banks) and a
-> token-guarded forwarding intake, plus successor-not-edit corrections
+> **Current decisions (2026-09-12).** The numbered sequence ended at phase 22; **every
+> capability ADR-0050 left genuinely unbuilt is now built**, each with its own ADR and none of
+> them a phase. Real statement formats (CSV/XLSX/PDF, eight declared banks) and a token-guarded
+> forwarding intake, plus successor-not-edit corrections
 > ([ADR-0051](docs/decisions/0051-reading-a-document-is-local-first-and-optical-only-by-opt-in.md),
 > [ADR-0052](docs/decisions/0052-an-immutable-record-that-was-wrong-gets-a-successor-never-an-edit.md));
 > a **message transport for proof packs** whose body is derived server-side at send time and
 > which still records no settlement
 > ([ADR-0053](docs/decisions/0053-sending-a-proof-pack-is-a-recorded-outward-act.md));
 > **live balance adapters** whose readings are compared and never written into a boundary
-> ([ADR-0054](docs/decisions/0054-a-live-balance-is-a-second-opinion-never-a-boundary.md)); and
+> ([ADR-0054](docs/decisions/0054-a-live-balance-is-a-second-opinion-never-a-boundary.md));
 > **Splitwise repair**
 > ([ADR-0055](docs/decisions/0055-a-correction-edits-the-entry-they-are-looking-at.md)), which
-> replaced phase 22's re-sync. That first version corrected a stale entry by creating a second
-> one — tidy from this side, and it left the counterparty holding two records for one dinner with
-> Splitwise counting both. A repair now edits the entry they are looking at, at the id this
-> ledger recorded; an adapter that cannot edit in place refuses **by name** rather than falling
-> back to a create; a net that reaches zero withdraws the entry, the one deletion this system
-> performs and never to tidy an audit. **Still unbuilt:** reading a Splitwise-side edit back into
-> this ledger (principle 9 forbids it today), a natural-language interface, and an editor for a
-> model's stored proposal. Each needs its own ADR.
+> corrects the entry the counterparty is looking at rather than creating a second one, refuses
+> **by name** when an adapter cannot edit in place, and withdraws an entry whose net reaches
+> zero; **reading a change made _in_ Splitwise back into this ledger**
+> ([ADR-0056](docs/decisions/0056-a-change-made-in-splitwise-arrives-as-a-proposal.md)); and
+> **a natural-language interface**
+> ([ADR-0057](docs/decisions/0057-a-question-is-a-plan-over-reads-the-ledger-already-answers.md)).
 >
+> The last two are the newest and the easiest to get wrong. **A change somebody made in
+> Splitwise arrives as a proposal, never as an input.** Discovery compares their entries against
+> the sync rows and records both snapshots, the read's completeness and its provenance;
+> accepting one records what they hold, closes a sync row as `externally_deleted`, joins an
+> external entry to a local record the person names, or maps a Splitwise account to a `Person`.
+> **None of those writes money** — making their figure true here is still an `ExpenseAdjustment`
+> a person records with evidence (principle 9, `invariants.md` #6). A deletion is only ever
+> reported from a **complete** listing. **A question is a plan over reads the ledger already
+> answers**: the model picks one of a closed set of query kinds and never sees a figure; the
+> answer is assembled from `getCategorySpend`, `getBalance`, `listExpensePage` and their
+> neighbours, quoting what they return; the surface writes nothing at all, and an instruction is
+> refused by name rather than half-staged.
+>
+> **Still deliberately unbuilt:** natural-language _entry_, an editor for a model's stored
+> proposal, and rules that learn. No live provider is connected anywhere — every adapter is
+> configurable and refuses by name when it is not (`security-model.md`).
+
 > **Phase context (2026-09-08).** **The numbered sequence is complete: phases 1–22 are all
 > done.** [Phase 22](docs/roadmap.md) closed the 7 September capability audit's gaps
 > ([ADR-0050](docs/decisions/0050-closing-the-audit-gaps-a-workflow-is-not-shipped-until-it-is-reachable.md)).
@@ -39,7 +54,8 @@
 > arithmetic**: `receiptId` on `GET /api/evidence/:evidenceId` is the only read the whole phase
 > added. What remained unbuilt was then genuinely unbuilt rather than unreachable — a message
 > transport, live bank adapters, Splitwise repair, and the natural-language interface — and each
-> needed its own ADR. All but the last are now done; see the block above.
+> needed its own ADR. **All four are now done**, along with reading a Splitwise-side change
+> back in; see the block above.
 > [Phase 21](docs/roadmap.md) shipped the **`web/` UI/UX overhaul**
 > ([ADR-0048](docs/decisions/0048-phase-21-ui-reads-the-ledger-and-never-recomputes-it.md),
 > [ADR-0049](docs/decisions/0049-keyboard-first-navigation-never-completes-a-decision.md)),
@@ -55,9 +71,10 @@
 > consequential act is a button behind a dialog that states its consequence). The account
 > waterfall renders ADR-0017's second identity term by term and never shows a verified ₹0 over
 > incomplete evidence: a missing statement balance reads "not evidenced" and
-> `verificationStatus` comes from the database `CHECK`, not the screen. Everything that remains —
-> rules/learning, analytics, the natural-language interface, concrete external adapters and stale
-> Splitwise re-sync — is deliberately unnumbered later work.
+> `verificationStatus` comes from the database `CHECK`, not the screen. What phase 21 left for
+> later — rules/learning, analytics, the natural-language interface, concrete external adapters
+> and stale Splitwise re-sync — was then built as unnumbered capabilities; the block at the top
+> of this file is the current account of which.
 > Earlier phases are each recorded in their own ADR — read the ADR, not a summary here:
 > **Phase 17** context re-attachment
 > ([ADR-0044](docs/decisions/0044-evidence-observations-and-match-candidates.md)); **Phase 18**
@@ -239,7 +256,9 @@ Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
 - AI owns: semantic transaction classification (including proposing whether a payment is a new
   expense or a settlement — `proposedKind`, ADR-0007), merchant interpretation, receipt/item
   extraction, beneficiary suggestions, allocation suggestions, grouping into occasions, anomaly
-  explanation, rule proposals, and natural-language interaction.
+  explanation, rule proposals, and natural-language interaction — the last of which is
+  `planLedgerQuery`, and is narrower than it sounds: it turns a question into a **query plan**
+  over reads that already exist and never sees, computes or states a figure (ADR-0057).
 - AI output is always a **structured proposal** with a **confidence level**
   (`high | medium | low | unknown`). The application validates proposals before they can
   become state. An LLM must never directly write an authoritative balance, total, allocation,
@@ -318,11 +337,11 @@ Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
 ## Development workflow
 
 - This project moves in **incremental vertical slices** — see `docs/roadmap.md` for the
-  phase order. **All twenty-two are complete.** A message transport for proof packs, live
-  bank/card balance adapters and Splitwise repair are **done** (ADRs 0051–0055), each as its
-  own unnumbered capability rather than a phase. A natural-language interface, and reading a Splitwise-side
-  edit back into this ledger, remain unbuilt; neither is a prerequisite for anything already
-  shipped, and each needs its own ADR before it starts.
+  phase order. **All twenty-two are complete**, and so is every unnumbered capability ADR-0050
+  named: real statement formats and forwarding intake, a message transport for proof packs,
+  live bank/card balance adapters, Splitwise repair, reading a Splitwise-side change back in as
+  a proposal, and an ask-only natural-language interface (ADRs 0051–0057). Anything new starts
+  with its own ADR, as those did.
 - **A capability is not shipped until a person can reach it** (ADR-0050). A service function and
   an HTTP route are the middle of the work, not the end of it: the September 2026 audit found
   eleven capabilities complete at those two layers and absent from the browser. When a phase

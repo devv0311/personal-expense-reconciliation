@@ -11,9 +11,9 @@
  * `approved`. A `proposed` or `rejected` expense is not spending.
  */
 
-import { and, asc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
 
-import type { ExpenseId, PersonId } from '../domain/ids.js';
+import type { ExpenseAdjustmentId, ExpenseId, PersonId } from '../domain/ids.js';
 import type { Paise } from '../domain/money.js';
 
 import { ACTIVE_ADJUSTMENT } from './repositories.js';
@@ -388,4 +388,89 @@ export async function loadUnsettledPaidOnBehalfRows(
       displayName: nameById.get(personId) ?? 'Unknown person',
     })),
   }));
+}
+
+/**
+ * Every adjustment recorded in a period, with the expense it reduced (ADR-0057).
+ *
+ * Added because an answer needed a figure no read produced — which is the rule this repository
+ * follows wherever a surface is short of one (ADR-0048): the read gets added here, never the
+ * arithmetic to the surface. Reversed rows come back marked rather than filtered, because a
+ * question about "the refunds last month" is asking what was recorded, and a ledger that hid
+ * its own corrections would be rewriting its past (`invariants.md` #22).
+ */
+export async function listExpenseAdjustmentsInPeriod(
+  exec: Executor,
+  period: { readonly start: Date; readonly end: Date },
+  options: { readonly limit?: number } = {},
+): Promise<
+  Array<{
+    adjustmentId: ExpenseAdjustmentId;
+    expenseId: ExpenseId;
+    expenseDescription: string | null;
+    kind: string;
+    amount: Paise;
+    reason: string | null;
+    occurredAt: Date;
+    reversedAt: Date | null;
+    /** Whether an allocation reflects this adjustment yet — a pending one moves a net. */
+    distributed: boolean;
+  }>
+> {
+  const rows = await exec
+    .select({
+      adjustmentId: expenseAdjustments.id,
+      expenseId: expenseAdjustments.originalExpenseId,
+      expenseDescription: expenses.description,
+      kind: expenseAdjustments.kind,
+      amount: expenseAdjustments.amount,
+      reason: expenseAdjustments.reason,
+      occurredAt: expenseAdjustments.occurredAt,
+      reversedAt: expenseAdjustments.reversedAt,
+      allocationSupersededAt: allocations.supersededAt,
+      allocationCreatedAt: allocations.createdAt,
+    })
+    .from(expenseAdjustments)
+    .innerJoin(expenses, eq(expenses.id, expenseAdjustments.originalExpenseId))
+    .leftJoin(
+      allocations,
+      and(
+        eq(allocations.expenseId, expenseAdjustments.originalExpenseId),
+        isNull(allocations.supersededAt),
+      ),
+    )
+    .where(
+      and(
+        sql`${expenseAdjustments.occurredAt} >= ${period.start}`,
+        sql`${expenseAdjustments.occurredAt} < ${period.end}`,
+      ),
+    )
+    .orderBy(desc(expenseAdjustments.occurredAt), asc(expenseAdjustments.id))
+    .limit(options.limit ?? 100);
+
+  return rows.map((row) => ({
+    adjustmentId: row.adjustmentId as ExpenseAdjustmentId,
+    expenseId: row.expenseId as ExpenseId,
+    expenseDescription: row.expenseDescription,
+    kind: row.kind,
+    amount: row.amount as Paise,
+    reason: row.reason,
+    occurredAt: row.occurredAt,
+    reversedAt: row.reversedAt,
+    // The current allocation post-dates the adjustment, so it was rebuilt knowing about it
+    // (ADR-0045). A `null` allocation is an expense nobody has allocated at all.
+    distributed:
+      row.allocationCreatedAt !== null &&
+      row.allocationCreatedAt.getTime() >= row.occurredAt.getTime(),
+  }));
+}
+
+/** Categories in use on approved expenses, so a question can be planned against real ones. */
+export async function listExpenseCategories(exec: Executor): Promise<string[]> {
+  const rows = await exec
+    .selectDistinct({ category: expenses.category })
+    .from(expenses)
+    .where(and(sql`${expenses.category} is not null`, sql`${expenses.state} <> 'rejected'`))
+    .orderBy(asc(expenses.category));
+  return rows.flatMap((row) => (row.category === null ? [] : [row.category]));
 }

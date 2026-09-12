@@ -126,6 +126,27 @@ export function redactDescription(rawDescription: string, map?: LocalRedactionMa
 }
 
 /**
+ * Strips identifiers out of a question somebody typed (ADR-0057).
+ *
+ * Narrower than {@link redactDescription}, and narrower for the same documented reason
+ * `redactReceiptText` is: a bank narration's four-digit run is very likely an account
+ * fragment, while a question's is very likely a year. Masking "2026" would turn *"what did I
+ * spend in 2026"* into a question the planner can only call ambiguous — a real loss, for no
+ * privacy gain, since a year identifies nobody.
+ *
+ * Everything that actually identifies a person is still masked: UPI handles, phone numbers,
+ * card and account runs, and any digit run that is not a plausible calendar year.
+ */
+export function redactQuestionText(rawQuestion: string, map?: LocalRedactionMap): string {
+  return rawQuestion
+    .replace(UPI_ID_PATTERN, (match) => remember(map, 'upi_id', match, REDACTED_UPI_ID))
+    .replace(LONG_DIGIT_RUN_PATTERN, (match) =>
+      PLAUSIBLE_YEAR_PATTERN.test(match) ? match : remember(map, 'number', match, REDACTED_NUMBER),
+    )
+    .trim();
+}
+
+/**
  * Builds the payload for an inference over one payment.
  *
  * `external_reference`, `account_id` and the payment's own id are absent by construction —
@@ -245,7 +266,8 @@ export function redactReceiptEvidenceForInference(
  * A structural field (an id, an ISO timestamp, an exact minor-unit string) carries no free
  * text at all: its shape is what protects it, and scanning it would only produce false alarms.
  */
-export type SanitizationProfile = 'statement_text' | 'receipt_text' | 'structural';
+export type SanitizationProfile =
+  'statement_text' | 'receipt_text' | 'question_text' | 'structural';
 
 /** The kinds of identifier the guard refuses to let out. Reported by name, never by value. */
 export type ResidualIdentifierKind =
@@ -265,6 +287,12 @@ export type ResidualIdentifierKind =
  */
 const FIELD_PROFILES: Readonly<Record<string, SanitizationProfile>> = {
   id: 'structural',
+  // A typed question (ADR-0057). Narrower than a statement narration for the same reason a
+  // receipt's text is: a four-digit run in "what did I spend in 2026" is a year, and masking
+  // it would turn an answerable question into an ambiguous one. Every identifying pattern
+  // still applies, and any run that is not a plausible calendar year is still refused.
+  question: 'question_text',
+  today: 'structural',
   amountMinorUnits: 'structural',
   occurredAt: 'structural',
   capturedAt: 'structural',
@@ -305,7 +333,18 @@ export function findResidualIdentifiers(
   if (profile === 'statement_text' && BARE_LONG_DIGIT_RUN_PATTERN.test(value)) {
     found.push('long_digit_run');
   }
+  if (profile === 'question_text' && hasNonYearDigitRun(value)) found.push('long_digit_run');
   return found;
+}
+
+/** A four-digit run that reads as a calendar year — the one digit run a question may keep. */
+const PLAUSIBLE_YEAR_PATTERN = /^(?:19|20)\d{2}$/;
+
+function hasNonYearDigitRun(value: string): boolean {
+  for (const match of value.match(/\d{4,}/g) ?? []) {
+    if (!PLAUSIBLE_YEAR_PATTERN.test(match)) return true;
+  }
+  return false;
 }
 
 /**
@@ -649,5 +688,71 @@ export function redactRuleEvidenceForInference(
     })),
   };
   assertPayloadSanitized(redacted, 'proposeRule');
+  return redacted;
+}
+
+/* ================================================= the ask-only question surface (ADR-0057) */
+
+/**
+ * What `ai.planLedgerQuery` is shown: the question, the menu, and the roster's names.
+ *
+ * The question is free text somebody typed, which makes it the least predictable payload on
+ * this boundary — people paste account numbers, reference numbers and UPI handles into
+ * questions without thinking about it. It goes through `redactDescription` like a bank's own
+ * narration, and then through `assertPayloadSanitized`, which **refuses to send** rather than
+ * masking harder if an identifier survives (ADR-0044's fail-closed rule).
+ *
+ * What is deliberately absent: every figure. The model plans; it never sees a balance, a total
+ * or an amount, so there is nothing here for it to quote back as an answer (ADR-0057).
+ */
+export interface RedactedLedgerQuestion {
+  /** The question as asked, with identifiers masked. */
+  readonly question: string;
+  /** Today, so "last month" resolves to a period rather than to a guess. */
+  readonly today: string;
+  /** The closed set of queries a plan may name, with what each answers. */
+  readonly capabilities: readonly {
+    readonly kind: string;
+    readonly answers: string;
+    readonly example: string;
+    readonly needsPeriod: boolean;
+    readonly needsPerson: boolean;
+  }[];
+  /**
+   * Display names in the roster, so "Priya" is a name the model can echo back.
+   *
+   * Names only — no ids, and no balances. The model returns the name as asked and
+   * `src/services` resolves it, so a mis-read name produces a clarification rather than the
+   * wrong person's debt.
+   */
+  readonly knownPeople: readonly string[];
+  /** Categories already in use, for the same reason. */
+  readonly knownCategories: readonly string[];
+}
+
+export function redactLedgerQuestionForInference(
+  input: {
+    readonly question: string;
+    readonly today: Date;
+    readonly capabilities: readonly {
+      readonly kind: string;
+      readonly answers: string;
+      readonly example: string;
+      readonly needsPeriod: boolean;
+      readonly needsPerson: boolean;
+    }[];
+    readonly knownPeople: readonly string[];
+    readonly knownCategories: readonly string[];
+  },
+  options: { readonly redactionMap?: LocalRedactionMap } = {},
+): RedactedLedgerQuestion {
+  const redacted: RedactedLedgerQuestion = {
+    question: redactQuestionText(input.question, options.redactionMap),
+    today: input.today.toISOString().slice(0, 10),
+    capabilities: input.capabilities.map((entry) => ({ ...entry })),
+    knownPeople: [...input.knownPeople],
+    knownCategories: [...input.knownCategories],
+  };
+  assertPayloadSanitized(redacted, 'planLedgerQuery');
   return redacted;
 }

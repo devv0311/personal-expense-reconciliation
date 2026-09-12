@@ -25,7 +25,9 @@ by convention. See `CLAUDE.md` for the one-paragraph version and
 
 ## Service interface
 
-All AI access goes through `src/ai`, exposing exactly these operations (matching the brief):
+All AI access goes through `src/ai`, exposing exactly these operations — the nine the brief
+named, plus `planLedgerQuery` (ADR-0057), which is how "natural-language interaction" is
+actually implemented:
 
 ```ts
 classifyTransaction(payment: Payment): Promise<Inference<TransactionClassification>>
@@ -37,9 +39,10 @@ suggestAllocation(expense: Expense, beneficiaries: BeneficiaryRef[]): Promise<In
 groupIntoOccasion(expenses: Expense[]): Promise<Inference<OccasionProposal>>
 explainAnomaly(context: AnomalyContext): Promise<Inference<AnomalyExplanation>>
 proposeRule(pattern: ObservedPattern): Promise<Inference<RuleProposal>>
+planLedgerQuery(question: RedactedLedgerQuestion): Promise<Inference<LedgerQueryPlanProposal>>
 ```
 
-`Inference<T>` is the return shape for all nine — never a bare `T`:
+`Inference<T>` is the return shape for all ten — never a bare `T`:
 
 ```ts
 type Inference<T> = {
@@ -146,7 +149,7 @@ approval:
 | Piece                        | Where                                     | Notes                                                                                                                                          |
 | ---------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Inference<T>` envelope      | `src/ai/contract.ts`                      | Returned by every operation; never a bare `T`.                                                                                                 |
-| `classifyTransaction`        | `src/ai/classify-transaction.ts`          | The first of the nine. `createAiService(transport)`.                                                                                           |
+| `classifyTransaction`        | `src/ai/classify-transaction.ts`          | The first of the ten. `createAiService(transport)`.                                                                                            |
 | Gate 1 — schema validation   | `src/ai/contract.ts`                      | Strict, hand-written, no dependency added. Unknown keys, missing keys, wrong types and out-of-range values are all rejected, naming the field. |
 | Gate 2 — semantic validation | `services.validateClassificationProposal` | What a schema cannot see: an expense proposed against a credit, a payer who is not the account owner, a person who does not exist.             |
 | Redaction                    | `src/ai/redaction.ts`                     | One named function, per `security-model.md`. `external_reference` and `account_id` have no field on the outgoing payload at all.               |
@@ -174,7 +177,7 @@ carried forward from ADR-0022.
 
 ## What exists (phase 11, 2026-08-27)
 
-Two more of the nine operations, and the first time this boundary's output writes anything
+Two more of the ten operations, and the first time this boundary's output writes anything
 _without_ a `decideInference`-shaped gate (ADR-0036 — `Receipt` is DERIVED, not
 APPROVED-classified, unlike everything phase 8 touches).
 
@@ -196,3 +199,30 @@ document's gated APPROVED-classified list, so building it needs its own decision
 extension of receipt extraction's direct-write shape. `suggestBeneficiaries`, `suggestAllocation`,
 `groupIntoOccasion`, `explainAnomaly`, `proposeRule` remain unbuilt, and any production
 `ModelTransport` still does not exist (ADR-0025 continues to hold).
+
+## What exists (phase 22 and after, 2026-09-12)
+
+The "still carried forward" paragraph above stopped being true on 2026-09-12. Phase 22 built the
+six operations it named (audit row 46), and ADR-0057 added the tenth. A production
+`ModelTransport` also exists now — `src/integrations/anthropic/transport.ts`, wired by
+`src/server.ts` only when `ANTHROPIC_API_KEY` is set, refusing by name when it is not. ADR-0025's
+rule survives in the shape it always meant: **the transport is injected, and nothing is wired by
+default.**
+
+| Piece                                                                                                                  | Where                              | Notes                                                                                                                                                                                                        |
+| ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `normalizeMerchant`, `suggestBeneficiaries`, `suggestAllocation`, `groupIntoOccasion`, `explainAnomaly`, `proposeRule` | `src/ai/suggestions.ts`            | `suggestAllocation` proposes a **method**, never amounts; `proposeRule` always proposes `effect: 'propose'`; `explainAnomaly` returns prose with no persistable field.                                       |
+| `planLedgerQuery`                                                                                                      | `src/ai/ask.ts`                    | The tenth (ADR-0057). Turns a question into a closed-set **query plan**; sees no figure, computes none, and phrases no answer.                                                                               |
+| Gate 1 — schema validation                                                                                             | `src/ai/contract.ts`               | `parsePlanLedgerQueryResponse` refuses an unknown kind, an extra key (including an `answer`), a page size out of range, or a period that is not a calendar day.                                              |
+| Gate 2 — semantic validation                                                                                           | `domain.assertQueryPlanAnswerable` | Refuses a plan that parses but cannot be answered — a period ending before it starts, a refusal carrying query parameters.                                                                                   |
+| Redaction                                                                                                              | `src/ai/redaction.ts`              | `redactQuestionText` + the `question_text` sanitization profile: identifiers masked, a plausible calendar year kept, and `assertPayloadSanitized` refusing to send anything that survives.                   |
+| Availability                                                                                                           | `ModelTransport.availability`      | Optional, and **absent means configured**. The unconfigured stub declares `configured: false` with a reason, so `GET /api/ask/capabilities` can say why asking is off rather than offering a box that fails. |
+
+**`planLedgerQuery` writes no `AIInference` row**, and that is deliberate rather than an
+oversight: the row exists so a proposal can be accepted, and nothing accepts a query plan. Its
+provenance — provider, model, prompt version, confidence — is returned with the answer instead,
+and nothing about the question is persisted (ADR-0057, following ADR-0047's precedent for proof
+packs).
+
+`AI_INFERENCE_TYPES` still lists it, so the operation is nameable and a typo'd type is still
+refused at the database `CHECK`.

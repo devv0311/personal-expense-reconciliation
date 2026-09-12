@@ -18,6 +18,7 @@ import type {
   PaymentDirection,
   PaymentState,
   SplitwiseExpenseSyncStatus,
+  SplitwiseSettlementSyncStatus,
 } from './enums.js';
 import { DomainError } from './errors.js';
 import type { PersonId } from './ids.js';
@@ -286,10 +287,15 @@ export function assertAiInferenceTransition(from: AiInferenceStatus, to: AiInfer
  */
 const SPLITWISE_EXPENSE_SYNC_TRANSITIONS: Transitions<SplitwiseExpenseSyncStatus> = {
   pending: ['synced', 'sync_failed'],
-  synced: ['drifted', 'stale', 'sync_failed'],
-  drifted: ['pending', 'synced', 'withdrawn', 'sync_failed'],
-  stale: ['pending', 'synced', 'withdrawn', 'sync_failed'],
+  synced: ['drifted', 'stale', 'externally_deleted', 'sync_failed'],
+  drifted: ['pending', 'synced', 'withdrawn', 'externally_deleted', 'sync_failed'],
+  stale: ['pending', 'synced', 'withdrawn', 'externally_deleted', 'sync_failed'],
   withdrawn: ['synced'],
+  // Somebody deleted the entry on their side while this ledger still asserts a figure
+  // (ADR-0056). The only way out is a push that *creates* — there is nothing standing to
+  // correct — which is why this is not `withdrawn` and why `drifted` is not reachable from
+  // here: there is no remote figure left to drift from.
+  externally_deleted: ['synced'],
   sync_failed: ['pending', 'synced'],
 };
 
@@ -305,6 +311,36 @@ export function assertSplitwiseExpenseSyncTransition(
   to: SplitwiseExpenseSyncStatus,
 ): void {
   assertTransition('SplitwiseExpense', from, to, canTransitionSplitwiseExpenseSync(from, to));
+}
+
+/**
+ * The settlement half of the same table.
+ *
+ * Shorter than the expense one because a settlement's amount cannot go `stale`: there is no
+ * adjustment to net off, so the only way the two ledgers come apart about one is somebody
+ * editing or deleting it on their side. `externally_deleted → synced` is the recreate, and
+ * there is no `withdrawn` — a settlement never nets to zero the way a refunded expense does.
+ */
+const SPLITWISE_SETTLEMENT_SYNC_TRANSITIONS: Transitions<SplitwiseSettlementSyncStatus> = {
+  pending: ['synced', 'sync_failed'],
+  synced: ['drifted', 'externally_deleted', 'sync_failed'],
+  drifted: ['pending', 'synced', 'externally_deleted', 'sync_failed'],
+  externally_deleted: ['synced'],
+  sync_failed: ['pending', 'synced'],
+};
+
+export function canTransitionSplitwiseSettlementSync(
+  from: SplitwiseSettlementSyncStatus,
+  to: SplitwiseSettlementSyncStatus,
+): boolean {
+  return SPLITWISE_SETTLEMENT_SYNC_TRANSITIONS[from].includes(to);
+}
+
+export function assertSplitwiseSettlementSyncTransition(
+  from: SplitwiseSettlementSyncStatus,
+  to: SplitwiseSettlementSyncStatus,
+): void {
+  assertTransition('SplitwiseSettlement', from, to, canTransitionSplitwiseSettlementSync(from, to));
 }
 
 /* ------------------------------------------------------------------------- internals */

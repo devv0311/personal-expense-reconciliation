@@ -18,6 +18,8 @@ import {
   AI_PROPOSED_KINDS,
   CONFIDENCE_LEVELS,
   EXPENSE_RELATIONSHIP_TYPES,
+  LEDGER_QUERY_KINDS,
+  MAX_LEDGER_QUERY_LIMIT,
   paise,
   SUPPORTED_CURRENCY,
 } from '../domain/index.js';
@@ -25,6 +27,7 @@ import type {
   AiInferenceType,
   ConfidenceLevel,
   ExpenseRelationshipType,
+  LedgerQueryKind,
   Paise,
   PersonId,
   ProposedKind,
@@ -753,6 +756,124 @@ export function parseProposeRuleResponse(raw: unknown): {
       rationale: optionalNonEmptyString(draft['rationale'], 'proposedOutput.rationale'),
     },
   };
+}
+
+/* ------------------------------------------------------------- ledger query planning */
+
+/**
+ * `ai.planLedgerQuery`'s proposal — which existing read answers the question, and with what
+ * parameters (ADR-0057).
+ *
+ * The narrowest proposal on this boundary, and the one whose narrowness is the point. There is
+ * no field here that could carry SQL, a table, a column or a filter expression: `kind` is a
+ * member of a closed set the application defines, and `searchTerm` reaches one already-
+ * parameterised `search` filter. A model that returns anything else is refused here, before
+ * `src/services` is handed a plan to run.
+ *
+ * `personName` is a name, never an id. A model choosing a `PersonId` would be a model deciding
+ * whose balance to show; resolution happens in `src/services`, against the roster.
+ */
+export interface LedgerQueryPlanProposal {
+  readonly kind: LedgerQueryKind;
+  /** Inclusive start, exclusive end, both `YYYY-MM-DD` — parsed into `Date`s here. */
+  readonly period: { readonly start: Date; readonly end: Date } | null;
+  readonly personName: string | null;
+  readonly category: string | null;
+  readonly searchTerm: string | null;
+  readonly limit: number;
+  readonly clarification: string | null;
+}
+
+const LEDGER_QUERY_PLAN_KEYS = [
+  'kind',
+  'period',
+  'personName',
+  'category',
+  'searchTerm',
+  'limit',
+  'clarification',
+];
+
+const ISO_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+export function parsePlanLedgerQueryResponse(raw: unknown): {
+  readonly proposedOutput: LedgerQueryPlanProposal;
+  readonly confidence: ConfidenceLevel;
+} {
+  const response = requireObject(raw, 'response');
+  const confidence = requireEnum(response['confidence'], CONFIDENCE_LEVELS, 'confidence');
+  const draft = requireObject(response['proposedOutput'], 'proposedOutput');
+  requireNoUnexpectedKeys(draft, LEDGER_QUERY_PLAN_KEYS, 'proposedOutput');
+  requireNoUnexpectedKeys(response, ['confidence', 'proposedOutput'], 'response');
+
+  return {
+    confidence,
+    proposedOutput: {
+      kind: requireEnum(draft['kind'], LEDGER_QUERY_KINDS, 'proposedOutput.kind'),
+      period: optionalPeriod(draft['period'], 'proposedOutput.period'),
+      personName: optionalNonEmptyString(draft['personName'], 'proposedOutput.personName'),
+      category: optionalNonEmptyString(draft['category'], 'proposedOutput.category'),
+      searchTerm: optionalNonEmptyString(draft['searchTerm'], 'proposedOutput.searchTerm'),
+      limit: requireBoundedInteger(
+        draft['limit'],
+        1,
+        MAX_LEDGER_QUERY_LIMIT,
+        'proposedOutput.limit',
+      ),
+      clarification: optionalNonEmptyString(draft['clarification'], 'proposedOutput.clarification'),
+    },
+  };
+}
+
+function optionalPeriod(
+  value: unknown,
+  field: string,
+): { readonly start: Date; readonly end: Date } | null {
+  if (value === null || value === undefined) return null;
+  const period = requireObject(value, field);
+  requireNoUnexpectedKeys(period, ['start', 'end'], field);
+  return {
+    start: requireIsoDay(period['start'], `${field}.start`),
+    end: requireIsoDay(period['end'], `${field}.end`),
+  };
+}
+
+/**
+ * A calendar day at UTC midnight.
+ *
+ * `YYYY-MM-DD` only — never a full timestamp, never a locale-dependent format. A model that
+ * answers "last Tuesday" with prose has failed the contract rather than produced a period
+ * somebody has to guess the timezone of.
+ */
+function requireIsoDay(value: unknown, field: string): Date {
+  const text = requireNonEmptyString(value, field);
+  if (!ISO_DAY_PATTERN.test(text)) {
+    throw new AiContractError(
+      'FIELD_INVALID',
+      `"${field}" must be a calendar day as YYYY-MM-DD, received ${describe(value)}.`,
+      { field, received: describe(value) },
+    );
+  }
+  const parsed = new Date(`${text}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new AiContractError('FIELD_INVALID', `"${field}" is not a real date: ${text}.`, {
+      field,
+      received: text,
+    });
+  }
+  return parsed;
+}
+
+function requireBoundedInteger(value: unknown, min: number, max: number, field: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    throw new AiContractError(
+      value === undefined || value === null ? 'FIELD_MISSING' : 'FIELD_INVALID',
+      `Expected "${field}" to be a whole number between ${min} and ${max}, received ` +
+        `${describe(value)}.`,
+      { field, received: describe(value) },
+    );
+  }
+  return value;
 }
 
 /* ------------------------------------------------- internals the six operations added */

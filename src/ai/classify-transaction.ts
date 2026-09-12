@@ -23,6 +23,7 @@ import type {
   AnomalyExplanation,
   BeneficiarySuggestion,
   Inference,
+  LedgerQueryPlanProposal,
   MerchantNormalization,
   ModelInfo,
   OccasionSuggestion,
@@ -35,6 +36,11 @@ import {
   extractReceiptItems as extractReceiptItemsOperation,
   parseReceipt as parseReceiptOperation,
 } from './receipt-extraction.js';
+import {
+  describeTransportAvailability,
+  planLedgerQuery as planLedgerQueryOperation,
+} from './ask.js';
+import type { LedgerQuestionInput, ModelAvailability } from './ask.js';
 import {
   explainAnomaly as explainAnomalyOperation,
   groupIntoOccasion as groupIntoOccasionOperation,
@@ -93,6 +99,19 @@ export interface ModelRequest {
 export interface ModelTransport {
   /** Recorded on the `AIInference` so a proposal names what produced it. */
   readonly modelInfo: { readonly provider: string; readonly model: string };
+  /**
+   * Whether this transport can actually reach a model, and why not when it cannot
+   * (ADR-0057).
+   *
+   * Optional, and **absent means configured** — every real adapter is. The refusing stub in
+   * `src/server.ts` declares `configured: false` explicitly, which is what lets a screen say
+   * "no provider is set" instead of offering a box that fails on submit. It names the missing
+   * environment variable, never its value (`security-model.md`).
+   */
+  readonly availability?: {
+    readonly configured: boolean;
+    readonly unavailableReason?: string;
+  };
   complete(request: ModelRequest): Promise<unknown>;
 }
 
@@ -123,6 +142,16 @@ export interface AiService {
   /** Prose about one figure, and only prose: nothing here has a field a service could write. */
   explainAnomaly(input: AnomalyInput): Promise<Inference<AnomalyExplanation>>;
   proposeRule(input: RuleEvidenceInput): Promise<Inference<RuleProposal>>;
+  /**
+   * A question turned into a plan over reads that already exist — never an answer (ADR-0057).
+   *
+   * The only operation here whose output names a *read* rather than a proposed record, and
+   * the only one that can see no figure at all: there is nothing on its payload for a balance
+   * or a total to occupy.
+   */
+  planLedgerQuery(input: LedgerQuestionInput): Promise<Inference<LedgerQueryPlanProposal>>;
+  /** Whether a model is configured at all, for a screen that must not offer what cannot run. */
+  describeAvailability(): ModelAvailability;
 }
 
 /**
@@ -161,5 +190,7 @@ export function createAiService(transport: ModelTransport): AiService {
     groupIntoOccasion: (input) => groupIntoOccasionOperation(transport, input),
     explainAnomaly: (input) => explainAnomalyOperation(transport, input),
     proposeRule: (input) => proposeRuleOperation(transport, input),
+    planLedgerQuery: (input) => planLedgerQueryOperation(transport, input),
+    describeAvailability: () => describeTransportAvailability(transport),
   };
 }

@@ -10,6 +10,7 @@
  * This barrel is the layer's public surface, matching how `src/domain` exposes itself.
  */
 
+export * from './ask.js';
 export * from './classify-transaction.js';
 export * from './contract.js';
 export * from './errors.js';

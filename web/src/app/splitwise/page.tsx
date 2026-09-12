@@ -4,6 +4,7 @@ import { useState } from "react";
 import { PageHeader, Section } from "@/components/page-header";
 import { AuditFindingsList, ExternalReadBanner } from "@/components/splitwise/audit-findings";
 import { SplitwiseConnection } from "@/components/splitwise/connection";
+import { RemoteChanges } from "@/components/splitwise/remote-changes";
 import { ResyncCandidates } from "@/components/splitwise/resync-candidates";
 import { EmptyBlock, ErrorBlock, LoadingStatus, TableSkeleton } from "@/components/status";
 import { Button } from "@/components/ui/button";
@@ -43,8 +44,8 @@ export default function SplitwisePage() {
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        title="Splitwise audit"
-        description="Where this ledger and Splitwise disagree, what each disagreement is actually evidence of, and what could not be checked at all. Nothing here writes to Splitwise."
+        title="Splitwise"
+        description="Where this ledger and Splitwise disagree, what each disagreement is actually evidence of, and what could not be checked at all. Auditing writes to nothing; the two sections below it are the only places either ledger changes, one row at a time."
         actions={
           <Button disabled={audit.isPending} onClick={() => audit.mutate()}>
             {audit.isPending ? "Auditing…" : "Run an audit"}
@@ -124,6 +125,8 @@ export default function SplitwisePage() {
       </Section>
 
       <ResyncCandidates />
+
+      <RemoteChanges />
 
       <Section
         title="Audit history"

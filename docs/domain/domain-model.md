@@ -1113,8 +1113,12 @@ Splitwise expense object, plus a snapshot for drift detection.
 **Key fields.** `id`, `expense_id`, `external_integration_id`, `splitwise_expense_id`,
 `synced_at`, `our_snapshot` (JSON — our allocation as of sync time), `their_snapshot` (JSON —
 Splitwise's data as last fetched), `sync_status`
-(`pending | synced | drifted | stale | sync_failed` — `stale` added in this revision, see
-below).
+(`pending | synced | drifted | stale | withdrawn | externally_deleted | sync_failed` — `stale`
+added in the 2026-08 revision, `withdrawn` by
+[ADR-0055](../decisions/0055-a-correction-edits-the-entry-they-are-looking-at.md) and
+`externally_deleted` by
+[ADR-0056](../decisions/0056-a-change-made-in-splitwise-arrives-as-a-proposal.md); see
+`lifecycle.md` for the full table and why the last two are not one status).
 
 **Relationships.** Belongs to one `Expense` and one `ExternalIntegration`.
 
@@ -1132,10 +1136,63 @@ adjustment"). See `scenario-analysis.md` §30 (partial, still-synced case).
 **Invariants.** Never created from an `Expense` that hasn't reached `APPROVED` allocation
 first — see `ai-boundary.md` and `invariants.md`. A `drifted` or `stale` status is surfaced,
 never auto-resolved by trusting either side blindly, and never re-synced without a fresh user
-confirmation.
+confirmation. A row may also be created by **adopting** an entry somebody made in Splitwise
+against a local expense a person names (ADR-0056); an adoption lands the row as `drifted`,
+because nothing was pushed and agreement is something a comparison has to establish rather than
+something adoption may assert.
 
 **Classification.** SYSTEM (sync metadata); `our_snapshot` is effectively APPROVED data at the
 time of snapshotting.
+
+---
+
+## SplitwiseRemoteChange
+
+**Purpose.** One change somebody made **in Splitwise** that this ledger can see, recorded as a
+proposal awaiting a person's decision ([ADR-0056](../decisions/0056-a-change-made-in-splitwise-arrives-as-a-proposal.md)).
+It exists so an external edit is visible, attributable and decidable here — and so that being
+visible is never the same as being believed.
+
+**Key fields.** `id`, `remote_read_id`/`last_observed_read_id` (the discovery runs that found and
+last saw it), `external_integration_id`, `kind`, `effect` (what accepting writes), `summary`,
+`consequence` (the sentence a screen quotes before somebody confirms), `read_status`/`read_detail`
+(how complete the read was), the subject references (`person_a_id`, `person_b_id`, `expense_id`,
+`settlement_id`, the two sync-row ids, `external_reference`, `external_user_reference`), `amount`,
+`local_snapshot`, `remote_snapshot`, `subjects`, `fingerprint`, `comparison_digest`,
+`first_observed_at`/`last_observed_at`, and the decision columns (`status`, `decided_at`,
+`decided_by`, `decision_reason`, `applied_effect`, `applied_target_id`) plus supersession.
+
+**Relationships.** Belongs to one `SplitwiseRemoteRead` and one `ExternalIntegration`; optionally
+references the `Person`s, `Expense`, `Settlement` and sync rows it is about.
+
+**Lifecycle.** Written `proposed` by a discovery run. A re-run producing the identical comparison
+touches when-last-seen only — **including for a row somebody already decided**, which is not
+reopened. A materially different comparison supersedes the row and inserts a fresh `proposed`
+one, preserving the old row's snapshots and decision. Accepting applies the declared `effect`;
+rejecting applies nothing. Both record an `AuditEvent` with an actor and a required reason.
+
+**Invariants.** Accepting never writes an amount, an allocation or a balance (`invariants.md`
+#18). An absence-based kind is only produced from a **complete** external read. Adoption joins to
+a local record the caller names and refuses rather than repointing an existing link; mapping
+writes one column on a `Person` who already exists and never creates one.
+
+**Classification.** DERIVED and user-facing — every decision about one is audited.
+
+---
+
+## SplitwiseRemoteRead
+
+**Purpose.** One discovery run: what was read from Splitwise, how completely, and what it
+produced. The same honesty contract `SplitwiseAuditRun` carries — `external_read_status` is the
+worst status across every pair, and `pairs_unchecked` counts what could not be read at all,
+because a run that read three pairs of five and reported nothing missing has not established
+that nothing is missing.
+
+**Key fields.** `id`, `run_at`, `external_integration_id`, `external_read_status`,
+`external_read_detail`, `pairs_read`, `pairs_unchecked`, `changes_created`, `changes_reobserved`,
+`changes_superseded`.
+
+**Classification.** SYSTEM (read metadata). Immutable once its tallies are written.
 
 ---
 

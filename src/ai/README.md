@@ -61,8 +61,24 @@ sent. A transport that
 rejects — network, timeout, rate limit — surfaces unchanged, because "the model answered
 nonsense" and "the model never answered" call for different responses.
 
-**Not implemented:** `normalizeMerchant`, `suggestBeneficiaries`, `suggestAllocation`,
-`groupIntoOccasion`, `explainAnomaly`, `proposeRule`, and any production `ModelTransport`. The
-interface declares only what exists — see `docs/roadmap.md` phase 12 (allocation suggestions)
-and 16 (rule proposals), and ADR-0022/ADR-0036 for why `normalizeMerchant` stays carried
-forward even though phase 11 is the first phase with a real merchant hint to resolve.
+- `suggestions.ts` — the six operations phase 22 added (audit row 46): `normalizeMerchant`,
+  `suggestBeneficiaries`, `suggestAllocation`, `groupIntoOccasion`, `explainAnomaly`,
+  `proposeRule`. Each keeps the line that matters for it: `suggestAllocation` proposes a
+  **method**, never amounts; `proposeRule` always proposes `effect: 'propose'`;
+  `explainAnomaly` returns prose with no field a service could persist.
+- `ask.ts` — `planLedgerQuery`, the tenth operation (ADR-0057), plus
+  `describeTransportAvailability`. It turns a question into a **query plan** over reads that
+  already exist. It is the only operation on this boundary that can see no figure at all —
+  there is no field on its payload for a balance or a total — and the only one that writes no
+  `AIInference` row, because nothing accepts a query plan.
+
+**What is wired:** a production `ModelTransport` now exists
+(`src/integrations/anthropic/transport.ts`), composed by `src/server.ts` **only when
+`ANTHROPIC_API_KEY` is set**; without it the stub refuses by name and declares itself
+unconfigured, so a screen can say why rather than failing on submit. ADR-0025's rule holds in
+the shape it always meant — the transport is injected, and nothing is wired by default.
+
+**Not implemented, deliberately:** natural-language _entry_. An instruction is refused by name
+(`unsupported_write_request`) and pointed at the screen that owns the act; staging one as a
+confirmable proposal needs an editor for stored proposals, which does not exist
+(`docs/roadmap.md`).

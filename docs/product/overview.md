@@ -145,8 +145,22 @@ statement evidence, not merely a balanced equation. Preserve the existing outflo
 general budgeting/tax logic remains outside the core. See `docs/roadmap.md` for Phases 16–21
 and `CLAUDE.md` for the six pillars and mandatory Tier-1 UI/UX standard.
 
-## Future: analytics and natural-language interface
+## Analytics and the natural-language interface — both now built
 
-Once the ledger is trustworthy, later phases add analytics (spending by category/person/time)
-and a natural-language interface for questions like the ones above. Neither is in scope for
-the current foundation phase — see `docs/roadmap.md`.
+Both of these were "once the ledger is trustworthy, later" for most of this project's life, and
+both are now shipped. Analytics arrived with phase 22: spending by category, by month, the
+user's own share, every open balance at once, and everything paid on behalf and still owed
+(`/analytics`).
+
+The natural-language interface arrived with
+[ADR-0057](../decisions/0057-a-question-is-a-plan-over-reads-the-ledger-already-answers.md), and
+it is narrower than the phrase suggests, deliberately. It is **ask-only**, and **the model
+plans while the ledger answers**: a question becomes one of a closed set of query plans over
+reads that already exist, and every figure in the answer is the one the matching screen shows,
+produced by the same function. The model never sees a figure, never computes one and never
+phrases the answer. An instruction — "mark this settled" — is refused by name and pointed at the
+screen that owns the act.
+
+That restraint is the point rather than a limitation of the current version. A chat box that
+stated figures it had computed itself would undo the property this whole system exists to
+provide: that every number can be traced to the evidence and the decision behind it.

@@ -78,12 +78,15 @@ describe("the Splitwise audit screen", () => {
     );
   });
 
-  it("says out loud that nothing on the screen writes to Splitwise", async () => {
+  it("separates the audit, which writes to nothing, from the sections that do", async () => {
+    // The page-level claim used to be "nothing here writes to Splitwise", which stopped being
+    // true the moment the repair was mounted on the same screen (ADR-0055) and stayed untrue
+    // when change discovery joined it (ADR-0056). Auditing still writes to nothing; saying it
+    // of the whole page would be the kind of reassurance rule 2 exists to forbid.
     renderAuditPage([AUDIT_RUN_COMPLETE]);
 
-    await waitFor(() =>
-      expect(screen.getByText(/Nothing here writes to Splitwise/)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(/Auditing writes to nothing/)).toBeInTheDocument());
+    expect(screen.getByText(/one row at a time/)).toBeInTheDocument();
   });
 
   it("announces a loading state, then a retryable error", async () => {
@@ -353,6 +356,40 @@ describe("connecting Splitwise, and correcting what it holds", () => {
     ).toBeInTheDocument();
   });
 
+  it("says a deleted settlement is put back, not corrected in place", async () => {
+    // The API decides which repair a row needs and the screen quotes it (ADR-0055, extended by
+    // ADR-0056). A screen that inferred "corrected" from a row somebody deleted would promise
+    // an edit to an entry that is not there.
+    renderPage([AUDIT_RUN_COMPLETE], {
+      candidates: [],
+      settlements: [
+        {
+          splitwiseSettlementId: "sws-2",
+          settlementId: "set-2",
+          externalId: "swp-2",
+          syncStatus: "externally_deleted",
+          syncedAt: "2026-08-10T10:00:00.000Z",
+          syncedSnapshot: { amount: "50000" },
+          currentAmount: "50000",
+          counterpartyPersonId: "per-1",
+          counterpartyName: "Friend A",
+          plannedRepair: "recreated",
+        },
+      ],
+      capability: FULL_CAPABILITY,
+    });
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Push ours" })).not.toHaveLength(0),
+    );
+    await user.click(screen.getAllByRole("button", { name: "Push ours" })[0]!);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/this creates the entry again/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/same entry, same id/)).not.toBeInTheDocument();
+  });
+
   it("corrects a drifted settlement through the settlement route", async () => {
     const api = renderPage([AUDIT_RUN_COMPLETE], {
       candidates: [],
@@ -367,6 +404,7 @@ describe("connecting Splitwise, and correcting what it holds", () => {
           currentAmount: "50000",
           counterpartyPersonId: "per-1",
           counterpartyName: "Friend A",
+          plannedRepair: "corrected",
         },
       ],
       capability: FULL_CAPABILITY,
@@ -380,6 +418,7 @@ describe("connecting Splitwise, and correcting what it holds", () => {
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/records no second settlement/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/same entry, same id/)).toBeInTheDocument();
     await user.type(
       within(dialog).getByLabelText(/Why this settlement is being corrected/),
       "Splitwise shows ₹400 for a ₹500 transfer",

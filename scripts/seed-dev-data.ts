@@ -28,6 +28,7 @@ import {
   approveAllocation,
   classifyPayment,
   connectSplitwiseIntegration,
+  discoverSplitwiseRemoteChanges,
   matchEvidenceContext,
   recordEvidenceNotification,
   recordExpenseAdjustment,
@@ -369,11 +370,22 @@ async function main(): Promise<void> {
     audit: AS_SEED,
   });
 
+  // The other direction of travel (ADR-0056) — one discovery run against a scripted Splitwise
+  // that holds an entry this ledger has no link for and a friend nobody is mapped to, so the
+  // change-review screen has a real adoption and a real mapping to decide about. Still no
+  // network call, still no write to Splitwise: discovery only reads.
+  await discoverSplitwiseRemoteChanges(db, {
+    userPersonId: await requireUserPersonId(db),
+    splitwise: seedDiscoveryPort(),
+    audit: AS_SEED,
+  });
+
   console.log('Seeded a synthetic scenario covering all six pillars:');
   console.log('  3 people, 1 account, 5 expenses, 1 settlement, 1 connected integration');
   console.log('  1 itemised expense with a recorded, undistributed item refund');
   console.log('  2 evidence notifications with recorded (unaccepted) match candidates');
   console.log('  1 pending classification decision, 1 Splitwise audit with findings');
+  console.log('  1 Splitwise change-discovery run with an adoption and a mapping to decide');
   console.log(`  1 statement page to cite as boundary evidence: ${statement!.id}`);
   await database.close();
 }
@@ -413,6 +425,46 @@ function seedSplitwisePort(balances: readonly SplitwiseFriendBalance[]): Splitwi
     createExpense: () => Promise.reject(new Error('The seed script never writes to Splitwise.')),
     recordPayment: () => Promise.reject(new Error('The seed script never writes to Splitwise.')),
     fetchBalances: () => Promise.resolve(balances),
+  };
+}
+
+/**
+ * A scripted `SplitwisePort` for change discovery (ADR-0056), with the finer read implemented.
+ *
+ * Unlike {@link seedSplitwisePort} this one *can* list a pair's entries, because discovery has
+ * nothing to compare without them. It still writes nothing: `createExpense`/`recordPayment`
+ * refuse exactly as above, and discovery never calls them.
+ *
+ * What it reports is chosen so the review screen has both shapes to show — an entry this
+ * ledger has no link for (an adoption a person decides about) and a friend nobody is mapped to
+ * (a mapping). Neither proposes a figure.
+ */
+function seedDiscoveryPort(): SplitwisePort {
+  return {
+    createExpense: () => Promise.reject(new Error('The seed script never writes to Splitwise.')),
+    recordPayment: () => Promise.reject(new Error('The seed script never writes to Splitwise.')),
+    fetchBalances: () =>
+      Promise.resolve([
+        { splitwiseUserId: 'sw-alex-seed', netBalance: paise(-2_000_00n) },
+        // A Splitwise friend this ledger has never mapped to a Person.
+        { splitwiseUserId: 'sw-unmapped-seed', netBalance: paise(45_000n) },
+      ]),
+    fetchLedgerEntries: () =>
+      Promise.resolve({
+        complete: true,
+        entries: [
+          {
+            splitwiseEntryId: 'sw-seed-entry-unlinked',
+            kind: 'expense',
+            description: 'Cab back from the airport',
+            totalAmount: paise(64_000n),
+            currency: 'INR',
+            deleted: false,
+            occurredAt: new Date('2026-08-24T22:10:00.000Z'),
+            pairNetBalance: paise(-32_000n),
+          },
+        ],
+      }),
   };
 }
 
