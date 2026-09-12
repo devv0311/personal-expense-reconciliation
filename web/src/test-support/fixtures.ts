@@ -559,6 +559,7 @@ export const PROOF_PACK: ProofPackPreview = {
   asOf: "2026-09-01T09:00:00.000Z",
   generatedText:
     "Expense summary for Alex\nAs of 1 Sep 2026. Derived from my records — not yet confirmed by you.\n\nWHERE THIS STANDS\nAlex owes me ₹900.00.",
+  contentDigest: "0".repeat(64),
   evidenceReferences: [
     {
       evidenceId: "ev-1",

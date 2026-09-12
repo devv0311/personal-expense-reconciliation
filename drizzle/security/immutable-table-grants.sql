@@ -92,6 +92,15 @@ REVOKE UPDATE, DELETE ON TABLE expense_adjustment_items FROM :"app_role";
 -- there is no `resolved_at` to grant back — nothing on this row is ever meant to move.
 REVOKE UPDATE, DELETE ON TABLE reconciliation_account_snapshots FROM :"app_role";
 
+-- A delivery record says what was put in front of somebody else. What left is written once:
+-- recipient, address, the exact message, its digest and the documents that went with it. Only
+-- the delivery's own progress moves — a retry, a provider id, a confirmed arrival — so this is
+-- a column-level restriction rather than a whole-table one. "What did I send them" must stay
+-- answerable exactly as it was answered on the day it was sent (audit row 42).
+REVOKE UPDATE, DELETE ON TABLE proof_pack_deliveries FROM :"app_role";
+GRANT UPDATE (status, attempt_count, last_error, provider_message_id, sent_at, delivered_at, updated_at)
+  ON TABLE proof_pack_deliveries TO :"app_role";
+
 -- Deliberately absent: `evidence_observations` and `evidence_match_candidates` (phase 17,
 -- ADR-0044). Both are DERIVED and both are meant to move — a better reading of a notification
 -- replaces the one before it, and a candidate is re-stated when the matcher's view of it

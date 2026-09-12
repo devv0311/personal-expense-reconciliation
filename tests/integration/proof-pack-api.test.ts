@@ -136,10 +136,15 @@ describe('GET /api/proof-packs/:recipientPersonId', () => {
     expect(response.status).toBe(409);
   });
 
-  it('is registered as a GET route', () => {
+  it('is registered as a GET route, and is the only read under /api/proof-packs', () => {
     const paths = api.routes.map((route) => `${route.method} ${route.path}`);
     expect(paths).toContain('GET /api/proof-packs/:recipientPersonId');
+    // Deriving a pack is a read; sending one is a write, and lives on its own POST
+    // (ADR-0053). The list is ordered so the literal `/deliveries` segment is matched before
+    // the capture that would otherwise swallow it.
     expect(paths.filter((path) => path.includes('/api/proof-packs'))).toEqual([
+      'POST /api/proof-packs/:recipientPersonId/deliveries',
+      'GET /api/proof-packs/:recipientPersonId/deliveries',
       'GET /api/proof-packs/:recipientPersonId',
     ]);
   });

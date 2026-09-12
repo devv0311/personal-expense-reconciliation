@@ -14,3 +14,4 @@ export * from './payment-workspace-repositories.js';
 export * from './history-repositories.js';
 export * from './analytics-repositories.js';
 export * from './job-repositories.js';
+export * from './delivery-repositories.js';

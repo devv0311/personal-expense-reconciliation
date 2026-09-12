@@ -745,9 +745,70 @@ export interface ProofPackPreview {
   readonly intendedRecipient: { readonly id: string; readonly displayName: string };
   readonly asOf: string;
   readonly generatedText: string;
+  /** SHA-256 of `generatedText`, server-derived. Echoed back on send to pin what was read. */
+  readonly contentDigest: string;
   readonly evidenceReferences: readonly ProofPackEvidenceRef[];
   readonly warnings: readonly ProofPackWarning[];
   readonly pack: ProofPack;
+}
+
+/* ------------------------------------------------------------------- proof-pack delivery */
+
+/**
+ * What this installation can actually send, if anything (ADR-0053).
+ *
+ * Read before the send form is shown, so an installation with no credentials states that
+ * plainly rather than letting somebody type a phone number and then fail.
+ */
+export interface MessagingStatus {
+  readonly transportId: string;
+  readonly channel: string;
+  readonly label: string;
+  readonly configured: boolean;
+  readonly unavailableReason?: string;
+  readonly supportsAttachments: boolean;
+  readonly endpointHost?: string;
+  readonly maxAttachmentBytes?: number;
+  readonly attachableEvidenceTypes: readonly string[];
+  readonly maxAttempts: number;
+}
+
+export interface DeliveryAttachmentRecord {
+  readonly evidenceId: string;
+  readonly filename: string;
+  readonly mediaType: string;
+  readonly byteSize: number;
+}
+
+export const PROOF_PACK_DELIVERY_STATUSES = ["pending", "sent", "delivered", "failed"] as const;
+export type ProofPackDeliveryStatus = (typeof PROOF_PACK_DELIVERY_STATUSES)[number];
+
+/** One record of a pack having been put in front of somebody. Never a settlement. */
+export interface ProofPackDelivery {
+  readonly id: string;
+  readonly recipientPersonId: string;
+  readonly recipientDisplayName: string;
+  readonly channel: string;
+  readonly address: string;
+  readonly bodyText: string;
+  readonly contentDigest: string;
+  readonly attachments: readonly DeliveryAttachmentRecord[];
+  readonly packAsOf: string;
+  readonly status: ProofPackDeliveryStatus;
+  readonly attemptCount: number;
+  readonly lastError: string | null;
+  readonly providerMessageId: string | null;
+  readonly transportId: string;
+  readonly sentAt: string | null;
+  readonly deliveredAt: string | null;
+  readonly createdAt: string;
+  readonly retryable: boolean;
+}
+
+export interface SendProofPackResult {
+  readonly delivery: ProofPackDelivery;
+  /** `false` when an identical pack had already gone and nothing was sent a second time. */
+  readonly sentNow: boolean;
 }
 
 /* ------------------------------------------------------------------ the payment workspace */

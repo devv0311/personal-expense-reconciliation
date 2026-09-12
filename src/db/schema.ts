@@ -62,11 +62,13 @@ import {
   EXTERNAL_INTEGRATION_TYPES,
   JOB_KINDS,
   JOB_STATUSES,
+  MESSAGE_CHANNELS,
   PAYMENT_CHANNELS,
   PAYMENT_COUNTERPARTY_TYPES,
   PAYMENT_DIRECTIONS,
   PAYMENT_REFERENCE_TYPES,
   PAYMENT_STATES,
+  PROOF_PACK_DELIVERY_STATUSES,
   RECONCILIATION_VERIFICATION_STATUSES,
   RULE_ACTIONS,
   RULE_EFFECTS,
@@ -1210,6 +1212,93 @@ export const jobs = pgTable(
       sql`(${table.status} in ('succeeded', 'failed', 'cancelled')) = (${table.finishedAt} is not null)
           and (${table.status} <> 'queued' or ${table.startedAt} is null)
           and (${table.status} <> 'running' or ${table.startedAt} is not null)`,
+    ),
+  ],
+);
+
+/* ============================================================ proof-pack delivery */
+
+/**
+ * A record that a proof pack was put in front of somebody (audit row 42).
+ *
+ * ADR-0047 is emphatic that a pack is derived and persists nothing, and this table does not
+ * contradict it: it records the **outward act**, not the figures. A proof pack generated and
+ * never sent still writes nothing anywhere.
+ *
+ * `body_text` is stored anyway, and deliberately. It is the only way to answer "what exactly
+ * did I send them" after the ledger has moved on — a question whose answer cannot be
+ * re-derived, because re-deriving it would produce today's pack rather than the one that was
+ * actually sent. It is a record of a message, not a second copy of the balance.
+ *
+ * Immutable in the parts that describe what left: `recipient_person_id`, `channel`,
+ * `address`, `body_text`, `content_digest` and `attachments` are written once and never
+ * updated. Only the delivery's own progress — status, attempts, provider id and error — moves.
+ */
+export const proofPackDeliveries = pgTable(
+  'proof_pack_deliveries',
+  {
+    id: id(),
+    recipientPersonId: uuid('recipient_person_id')
+      .notNull()
+      .references(() => people.id),
+    channel: text('channel').notNull(),
+    /**
+     * The canonical recipient address — a phone number. Personal data, and treated as such:
+     * never sent to a model, never included in a proof pack's own text, never logged.
+     */
+    address: text('address').notNull(),
+    /**
+     * The exact text handed to the transport, byte for byte what the preview showed.
+     * Already through the redaction boundary: an unredacted pack is refused before it
+     * reaches this table (ADR-0047's fail-closed export check).
+     */
+    bodyText: text('body_text').notNull(),
+    /** SHA-256 of `body_text`, so a resend of unchanged content is recognisable as one. */
+    contentDigest: text('content_digest').notNull(),
+    /**
+     * The documents that went with it: `[{ evidenceId, filename, mediaType, byteSize }]`.
+     * The bytes themselves stay in the evidence store, addressed by their own content.
+     */
+    attachments: jsonb('attachments')
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /**
+     * `domain.deliveryIdempotencyKey`, uniquely indexed.
+     *
+     * This index *is* the idempotency guarantee. Two presses of send on an unchanged pack
+     * collide here and the second one returns the first one's record rather than reaching a
+     * transport — which is the only place that can be enforced, since a transport may or may
+     * not honour an idempotency header.
+     */
+    idempotencyKey: text('idempotency_key').notNull(),
+    /** The as-of label the pack carried, so a record can be matched to what it explained. */
+    packAsOf: timestamp('pack_as_of', { withTimezone: true }).notNull(),
+    status: text('status').notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastError: text('last_error'),
+    /** The provider's own id for the message, and the handle a later status refers to. */
+    providerMessageId: text('provider_message_id'),
+    /** Which transport actually carried it, e.g. `whatsapp-cloud`. */
+    transportId: text('transport_id').notNull(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex('proof_pack_deliveries_idempotency_unique').on(table.idempotencyKey),
+    index('proof_pack_deliveries_recipient_idx').on(table.recipientPersonId, table.createdAt),
+    check('proof_pack_deliveries_channel_check', oneOf('channel', MESSAGE_CHANNELS)),
+    check('proof_pack_deliveries_status_check', oneOf('status', PROOF_PACK_DELIVERY_STATUSES)),
+    check('proof_pack_deliveries_attempts_check', sql`${table.attemptCount} >= 0`),
+    // A status and its timestamps cannot disagree. `sent_at` records the moment a transport
+    // took responsibility, and `delivered_at` the moment the provider said it arrived: a
+    // `delivered` row with no `sent_at` would be a message that arrived without being sent.
+    check(
+      'proof_pack_deliveries_timestamps_check',
+      sql`(${table.status} in ('sent', 'delivered')) = (${table.sentAt} is not null)
+          and (${table.status} = 'delivered') = (${table.deliveredAt} is not null)
+          and (${table.status} <> 'failed' or ${table.lastError} is not null)`,
     ),
   ],
 );

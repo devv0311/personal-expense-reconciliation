@@ -48,6 +48,8 @@ export const queryKeys = {
     ["splitwise-audit-findings", filter] as const,
   splitwiseAuditFinding: (id: string) => ["splitwise-audit-finding", id] as const,
   proofPack: (recipientPersonId: string) => ["proof-pack", recipientPersonId] as const,
+  messagingStatus: () => ["messaging-status"] as const,
+  deliveries: (recipientPersonId?: string) => ["deliveries", recipientPersonId ?? null] as const,
   payments: (filter: ListPaymentsFilter) => ["payments", filter] as const,
   payment: (id: string) => ["payment", id] as const,
   counterpartyOptions: () => ["counterparty-options"] as const,
@@ -210,7 +212,56 @@ export function useProofPack(recipientPersonId: string | null) {
   });
 }
 
+/**
+ * Whether a reviewed pack can be sent from here, and by what (ADR-0053).
+ *
+ * Configuration rather than ledger state, so it is cached for the session: an installation
+ * does not grow a WhatsApp token between two renders of the same screen.
+ */
+export function useMessagingStatus() {
+  return useQuery({
+    queryKey: queryKeys.messagingStatus(),
+    queryFn: api.getMessagingStatus,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** The record of what has been shared, and with whom. */
+export function useProofPackDeliveries(recipientPersonId?: string) {
+  return useQuery({
+    queryKey: queryKeys.deliveries(recipientPersonId),
+    queryFn: () => api.listProofPackDeliveries(recipientPersonId),
+  });
+}
+
 /* -------------------------------------------------------------------------- mutations */
+
+/**
+ * Sends one reviewed pack.
+ *
+ * Invalidates the delivery lists and nothing else — deliberately. Sending a pack changes no
+ * balance, no expense and no settlement, so a screen that refreshed the ledger afterwards
+ * would suggest it had (ADR-0047).
+ */
+export function useSendProofPack() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.sendProofPack,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["deliveries"] });
+    },
+  });
+}
+
+export function useRetryProofPackDelivery() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.retryProofPackDelivery,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["deliveries"] });
+    },
+  });
+}
 
 export function useRunReconciliation() {
   const queryClient = useQueryClient();

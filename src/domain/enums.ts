@@ -441,6 +441,35 @@ export type JobKind = (typeof JOB_KINDS)[number];
 export const JOB_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'cancelled'] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
+/* --------------------------------------------------------------- proof-pack delivery */
+
+/**
+ * How a reviewed proof pack can actually leave this machine (audit row 42).
+ *
+ * One member, deliberately. The fifth pillar names WhatsApp, and a channel is not a string
+ * an installation configures freely — each one is an adapter, an address format, an
+ * attachment rule and a delivery-status vocabulary that someone had to write. Adding a
+ * second is a decision with a file attached, which is exactly the friction that should exist
+ * before a new path out of the local boundary opens.
+ */
+export const MESSAGE_CHANNELS = ['whatsapp'] as const;
+export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
+
+/**
+ * A delivery's lifecycle: `pending -> sent -> delivered`, with `failed` off either of the
+ * first two and retryable by an explicit act.
+ *
+ * `sent` and `delivered` are deliberately separate. `sent` means the transport accepted the
+ * message and returned an id; `delivered` means the provider later said it reached the
+ * recipient's device. Collapsing them would make "we handed it over" indistinguishable from
+ * "they got it", and the whole point of recording a share is to be able to say which.
+ *
+ * Nothing here ever becomes a settlement. A delivered proof pack is a message that was sent,
+ * not money that moved (ADR-0047).
+ */
+export const PROOF_PACK_DELIVERY_STATUSES = ['pending', 'sent', 'delivered', 'failed'] as const;
+export type ProofPackDeliveryStatus = (typeof PROOF_PACK_DELIVERY_STATUSES)[number];
+
 export const AUDIT_ACTIONS = ['create', 'update', 'supersede', 'delete'] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -486,6 +515,11 @@ export const AUDITABLE_ENTITY_TYPES = [
   'reconciliation_account_snapshot',
   'splitwise_audit_run',
   'splitwise_audit_finding',
+  // Sending a proof pack is the one act in this product that puts a person's financial
+  // position in front of somebody else. It writes no money, so it is not a financial
+  // decision — but "who did I send what to, when, and did it arrive" has to be answerable
+  // later, and an audit event is how every other outward act answers it.
+  'proof_pack_delivery',
 ] as const;
 export type AuditableEntityType = (typeof AUDITABLE_ENTITY_TYPES)[number];
 

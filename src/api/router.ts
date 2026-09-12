@@ -22,6 +22,7 @@ import type {
   Database,
   DocumentTextExtractor,
   EvidenceStore,
+  MessageTransport,
   SplitwisePort,
 } from '../services/index.js';
 
@@ -106,6 +107,14 @@ import { jsonResponse, toErrorResponse } from './http.js';
 import { getPeopleRoute } from './people-routes.js';
 import { getProofPackRoute } from './proof-pack-routes.js';
 import {
+  getDeliveriesRoute,
+  getMessagingStatusRoute,
+  getRecipientDeliveriesRoute,
+  postDeliveryRetry,
+  postDeliveryStatus,
+  postProofPackDelivery,
+} from './proof-pack-delivery-routes.js';
+import {
   getReceiptRoute,
   postReceiptConfirmation,
   postReceiptCorrection,
@@ -185,6 +194,15 @@ export interface ApiDependencies {
   readonly documentText?: DocumentTextExtractor;
   /** A real adapter when one is configured; a rejecting stub otherwise (ADR-0040). */
   readonly splitwise: SplitwisePort;
+  /**
+   * How a reviewed proof pack leaves this machine (audit row 42, ADR-0053).
+   *
+   * Optional here for the same reason `documentText` is: a test exercising the ledger has no
+   * business composing a transport. `src/server.ts` always composes one — the *unconfigured*
+   * transport refuses by name, so an installation with no credentials still has a transport
+   * and its screens can say exactly why sending is unavailable.
+   */
+  readonly messageTransport?: MessageTransport;
   /**
    * Whether this process refuses unauthenticated requests (audit row 50).
    *
@@ -543,6 +561,20 @@ export const ACCOUNT_ROUTES: readonly ApiRoute[] = [
  * records anything.
  */
 export const PROOF_PACK_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/messaging/status', handler: getMessagingStatusRoute },
+  { method: 'GET', path: '/api/deliveries', handler: getDeliveriesRoute },
+  { method: 'POST', path: '/api/deliveries/status', handler: postDeliveryStatus },
+  { method: 'POST', path: '/api/deliveries/:deliveryId/retry', handler: postDeliveryRetry },
+  {
+    method: 'POST',
+    path: '/api/proof-packs/:recipientPersonId/deliveries',
+    handler: postProofPackDelivery,
+  },
+  {
+    method: 'GET',
+    path: '/api/proof-packs/:recipientPersonId/deliveries',
+    handler: getRecipientDeliveriesRoute,
+  },
   { method: 'GET', path: '/api/proof-packs/:recipientPersonId', handler: getProofPackRoute },
 ];
 

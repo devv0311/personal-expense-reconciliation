@@ -29,6 +29,7 @@
  * | `AUTH_REQUIRED` | `true`/`false`. Defaults to **true** unless `HOST` is loopback, so binding to a network interface is authenticated by default and turning that off is an explicit act. |
  * | `CORS_ORIGIN` | `web/`'s origin; default `http://localhost:3000`. |
  * | `INTAKE_FORWARDING_TOKEN` | The shared secret a mail rule or phone shortcut sends to `POST /api/intake/messages`. Unset: that endpoint refuses every request rather than standing open. |
+ * | `WHATSAPP_ACCESS_TOKEN` + `WHATSAPP_PHONE_NUMBER_ID` | Wires the real WhatsApp Cloud API transport, so a **reviewed** proof pack can be sent (ADR-0053). Either missing: sending refuses by name and the screen says so before anything is typed. Copying a pack has never needed this and still does not. |
  */
 
 import { createServer } from 'node:http';
@@ -49,6 +50,11 @@ import {
 } from './integrations/document-text/index.js';
 import { DEFAULT_ANTHROPIC_MODEL } from './integrations/anthropic/index.js';
 import { createFilesystemEvidenceStore } from './integrations/evidence-store/index.js';
+import {
+  createUnconfiguredMessageTransport,
+  createWhatsAppCloudTransport,
+} from './integrations/message-transport/index.js';
+import type { MessageTransport } from './integrations/message-transport/index.js';
 import { createSplitwiseAdapter } from './integrations/splitwise/index.js';
 import type {
   CreateSplitwiseExpenseResult,
@@ -229,6 +235,31 @@ function resolveDocumentTextExtractor(): DocumentTextExtractor {
   });
 }
 
+/**
+ * The real WhatsApp transport when both credentials are present; the refusing one otherwise.
+ *
+ * Both, because either alone cannot send: the token authenticates, and the phone number id is
+ * which WhatsApp Business number it authenticates *as* — the number the recipient will see the
+ * message come from.
+ *
+ * The refusing transport is not a degraded mode. It resolves every send as a recorded failure
+ * naming the missing variables, so an installation without credentials gets an honest
+ * configuration state rather than a delivery record claiming somebody was shown their balance.
+ */
+function resolveMessageTransport(): MessageTransport {
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN?.trim();
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
+  if (
+    accessToken === undefined ||
+    accessToken.length === 0 ||
+    phoneNumberId === undefined ||
+    phoneNumberId.length === 0
+  ) {
+    return createUnconfiguredMessageTransport();
+  }
+  return createWhatsAppCloudTransport({ accessToken, phoneNumberId });
+}
+
 async function main(): Promise<void> {
   const database = await openDevDatabase();
   await database.migrate();
@@ -236,6 +267,7 @@ async function main(): Promise<void> {
   const transport = resolveModelTransport();
   const documentText = resolveDocumentTextExtractor();
   const splitwise = resolveSplitwisePort();
+  const messageTransport = resolveMessageTransport();
   const authRequired = resolveAuthRequired();
 
   const deps: ApiDependencies = {
@@ -244,6 +276,7 @@ async function main(): Promise<void> {
     evidenceStore: createFilesystemEvidenceStore({ root: EVIDENCE_STORAGE_PATH }),
     documentText,
     splitwise,
+    messageTransport,
     authRequired,
     ...(INTAKE_FORWARDING_TOKEN === undefined
       ? {}
@@ -319,6 +352,14 @@ async function main(): Promise<void> {
         documentText.describe().readsImages
           ? ' + model transcription of images (AI_DOCUMENT_VISION=true)'
           : ' only (a photographed receipt is refused, not read as empty)'
+      }`,
+    );
+    const messaging = messageTransport.describe();
+    console.log(
+      `  messaging:      ${
+        messaging.configured
+          ? `${messaging.label} (a reviewed proof pack can be sent)`
+          : 'not configured (a pack can be previewed and copied; sending refuses by name)'
       }`,
     );
     console.log(

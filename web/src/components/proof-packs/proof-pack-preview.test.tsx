@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProofPackPreview } from "@/components/proof-packs/proof-pack-preview";
@@ -10,6 +10,32 @@ import { renderWithQuery } from "@/test-support/render-with-query";
 
 const originalFetch = global.fetch;
 
+/**
+ * The two reads the send section makes, routed for every preview render.
+ *
+ * `configured: false` is the default here on purpose: most of these cases are about the
+ * *copy* flow, and an unconfigured installation is the state in which copying is all there is.
+ * The send cases opt into a configured transport explicitly.
+ */
+const UNCONFIGURED_MESSAGING = {
+  transportId: "unconfigured",
+  channel: "whatsapp",
+  label: "Not configured",
+  configured: false,
+  unavailableReason: "No message transport is configured. Set WHATSAPP_ACCESS_TOKEN…",
+  supportsAttachments: false,
+  attachableEvidenceTypes: ["receipt_image", "email_receipt"],
+  maxAttempts: 5,
+};
+
+function mockPreviewReads(overrides: Record<string, unknown> = {}) {
+  return mockApi({
+    "/api/messaging/status": UNCONFIGURED_MESSAGING,
+    "/api/proof-packs/p-alex/deliveries": { deliveries: [] },
+    ...overrides,
+  });
+}
+
 afterEach(() => {
   global.fetch = originalFetch;
   resetNavigation();
@@ -18,7 +44,8 @@ afterEach(() => {
 
 describe("the proof-pack preview", () => {
   it("quotes the pack's own figures — the balance, each share, each settlement", () => {
-    render(<ProofPackPreview preview={PROOF_PACK} />);
+    mockPreviewReads();
+    renderWithQuery(<ProofPackPreview preview={PROOF_PACK} />);
 
     expect(screen.getByText("₹900.00", { selector: "span.text-figure" })).toBeInTheDocument();
     expect(screen.getByText("Alex owes you")).toBeInTheDocument();
@@ -38,7 +65,8 @@ describe("the proof-pack preview", () => {
   });
 
   it("puts every warning before the message, not after it", () => {
-    render(<ProofPackPreview preview={PROOF_PACK} />);
+    mockPreviewReads();
+    renderWithQuery(<ProofPackPreview preview={PROOF_PACK} />);
 
     const warnings = screen.getByRole("region", { name: /before you send this/i });
     expect(within(warnings).getByText("Unresolved Splitwise findings")).toBeInTheDocument();
@@ -49,7 +77,8 @@ describe("the proof-pack preview", () => {
   });
 
   it("shows exactly what would be sent, verbatim", () => {
-    render(<ProofPackPreview preview={PROOF_PACK} />);
+    mockPreviewReads();
+    renderWithQuery(<ProofPackPreview preview={PROOF_PACK} />);
 
     expect(screen.getByTestId("proof-pack-text")).toHaveTextContent("Alex owes me ₹900.00.");
     expect(
@@ -58,14 +87,16 @@ describe("the proof-pack preview", () => {
   });
 
   it("names the intended recipient and says nobody else is in the pack", () => {
-    render(<ProofPackPreview preview={PROOF_PACK} />);
+    mockPreviewReads();
+    renderWithQuery(<ProofPackPreview preview={PROOF_PACK} />);
 
     expect(screen.getByText("Nobody else is named")).toBeInTheDocument();
     expect(screen.getByText(/Only you and Alex appear in this pack/)).toBeInTheDocument();
   });
 
   it("keeps copying disabled until the recipient, content and evidence are each confirmed", async () => {
-    render(<ProofPackPreview preview={PROOF_PACK} />);
+    mockPreviewReads();
+    renderWithQuery(<ProofPackPreview preview={PROOF_PACK} />);
     const user = userEvent.setup();
 
     const copy = screen.getByRole("button", { name: /copy the message/i });
@@ -90,20 +121,23 @@ describe("the proof-pack preview", () => {
   });
 
   it("makes it clear that copying is where the pack stops being private", () => {
-    render(<ProofPackPreview preview={PROOF_PACK} />);
+    mockPreviewReads();
+    renderWithQuery(<ProofPackPreview preview={PROOF_PACK} />);
 
     expect(screen.getByText(/Nothing is sent from this app/)).toBeInTheDocument();
     expect(screen.getByText(/which is the moment it stops being private/)).toBeInTheDocument();
   });
 
   it("says when a pack cites no supporting evidence at all", () => {
-    render(<ProofPackPreview preview={{ ...PROOF_PACK, evidenceReferences: [] }} />);
+    mockPreviewReads();
+    renderWithQuery(<ProofPackPreview preview={{ ...PROOF_PACK, evidenceReferences: [] }} />);
 
     expect(screen.getByText("This pack cites no supporting evidence.")).toBeInTheDocument();
   });
 
   it("flags a pending refund and conflicting evidence on the line they belong to", () => {
-    render(
+    mockPreviewReads();
+    renderWithQuery(
       <ProofPackPreview
         preview={{
           ...PROOF_PACK,
@@ -128,7 +162,8 @@ describe("the proof-pack preview", () => {
   });
 
   it("starts unreviewed again when the recipient changes", async () => {
-    const { rerender } = render(<ProofPackPreview preview={PROOF_PACK} />);
+    mockPreviewReads();
+    const { rerender } = renderWithQuery(<ProofPackPreview preview={PROOF_PACK} />);
     const user = userEvent.setup();
 
     await user.click(screen.getByLabelText(/The recipient is Alex/));
@@ -168,8 +203,12 @@ describe("the proof-packs screen", () => {
   it("opens straight on the recipient a ?recipient= link names", async () => {
     setSearchParams({ recipient: "p-alex" });
     const api = mockApi({
+      // Listed before the pack itself: longest-match wins in the route map, and without it
+      // the deliveries read would be answered with a proof pack.
+      "/api/proof-packs/p-alex/deliveries": { deliveries: [] },
       "/api/proof-packs/p-alex": PROOF_PACK,
       "/api/people": { people: PEOPLE },
+      "/api/messaging/status": UNCONFIGURED_MESSAGING,
     });
     renderWithQuery(<ProofPacksPage />);
 
