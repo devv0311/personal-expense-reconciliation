@@ -69,7 +69,6 @@ import {
   remoteChangeEffect,
   remoteChangeFingerprint,
   remoteChangeNeedsTarget,
-  remoteChangeRequiresCompleteRead,
 } from '../domain/index.js';
 import type {
   ExpenseId,
@@ -1023,7 +1022,19 @@ async function reconcileChanges(
   return { changesCreated, changesReobserved, changesSuperseded };
 }
 
-/** Whether this run saw enough to say a standing change no longer holds. */
+/**
+ * Whether this run saw enough to say a standing change no longer holds.
+ *
+ * **Retiring a change is itself an absence-based conclusion**, whatever kind it is: a partial
+ * listing that does not contain the entry a change was derived from has not shown that the
+ * change is gone, only that it was not on this page. So every pair-scoped kind needs the pair
+ * read *completely*, not merely read — which makes `remoteChangeRequiresCompleteRead` a
+ * statement about **producing** a change, not about retiring one, and the two must not be
+ * confused.
+ *
+ * A person-mapping change has no pair; what it depends on is the friends list, so reading that
+ * is what gives this run the standing to retire one.
+ */
 function canRetire(
   row: SplitwiseRemoteChangeRow,
   input: {
@@ -1037,9 +1048,6 @@ function canRetire(
 
   const pairKey = toPairKey(row.personAId, row.personBId);
   if (!input.readPairKeys.has(pairKey)) return false;
-  // Everything but an absence-based kind was derived from entries that were actually read, so
-  // not seeing it again is a real observation. An absence-based one needs the whole pair.
-  if (!remoteChangeRequiresCompleteRead(row.kind)) return input.completePairKeys.has(pairKey);
   return input.completePairKeys.has(pairKey);
 }
 

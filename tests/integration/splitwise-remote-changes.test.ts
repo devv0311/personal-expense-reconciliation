@@ -768,3 +768,23 @@ describe('with no integration connected', () => {
     ).rejects.toThrow(ServiceError);
   });
 });
+
+describe('retiring a change is itself an absence-based conclusion', () => {
+  it('keeps a standing change when the pair could only be read partially', async () => {
+    await syncedDinner();
+    splitwise.setLedgerEntries('sw-friend-a', [entry({ totalAmount: paise(120_000n) })]);
+    await discover();
+
+    // Their side now reads as it always did — but only a page of it was read, so "the change
+    // is gone" is not something this run saw. It is the same rule that stops a partial read
+    // proposing a deletion, applied to closing one.
+    splitwise.setLedgerEntries('sw-friend-a', [entry()], {
+      complete: false,
+      incompleteReason: 'read stopped at the page cap',
+    });
+    const second = await discover();
+
+    expect(second.changesSuperseded).toBe(0);
+    expect(await listSplitwiseRemoteChanges(database.db, {})).toHaveLength(1);
+  });
+});
