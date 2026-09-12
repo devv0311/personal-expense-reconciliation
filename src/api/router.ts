@@ -21,12 +21,22 @@ import type {
   AiService,
   Database,
   DocumentTextExtractor,
+  BalanceProviderPort,
   EvidenceStore,
   MessageTransport,
   SplitwisePort,
 } from '../services/index.js';
 
 import { getAccountsRoute } from './account-routes.js';
+import {
+  getAccountBalanceReadingsRoute,
+  getBalanceComparisonRoute,
+  getBalanceProviderLinksRoute,
+  getBalanceProviderStatusRoute,
+  postBalanceProviderLink,
+  postBalanceProviderRefresh,
+  postBalanceProviderUnlink,
+} from './balance-provider-routes.js';
 import {
   getIntakeStatusRoute,
   hasValidIntakeToken,
@@ -203,6 +213,15 @@ export interface ApiDependencies {
    * and its screens can say exactly why sending is unavailable.
    */
   readonly messageTransport?: MessageTransport;
+  /**
+   * Live bank and card balances (audit row 37, ADR-0054).
+   *
+   * Optional here for the same reason `messageTransport` is. `src/server.ts` always composes
+   * one — the unconfigured provider reports every read as **incomplete**, never as an empty
+   * success, so an installation with no credentials still has a provider and its screens can
+   * say exactly why live balances are unavailable.
+   */
+  readonly balanceProvider?: BalanceProviderPort;
   /**
    * Whether this process refuses unauthenticated requests (audit row 50).
    *
@@ -550,6 +569,11 @@ export const GROUP_ROUTES: readonly ApiRoute[] = [
  * (phase 21). Phase 16 shipped the snapshot with no surface for it on purpose.
  */
 export const ACCOUNT_ROUTES: readonly ApiRoute[] = [
+  {
+    method: 'GET',
+    path: '/api/accounts/:accountId/balance-readings',
+    handler: getAccountBalanceReadingsRoute,
+  },
   { method: 'GET', path: '/api/accounts', handler: getAccountsRoute },
   { method: 'POST', path: '/api/accounts', handler: postAccount },
   { method: 'POST', path: '/api/accounts/:accountId', handler: postAccountUpdate },
@@ -560,6 +584,26 @@ export const ACCOUNT_ROUTES: readonly ApiRoute[] = [
  * ADR-0047). A read: it derives a preview from approved ledger state and neither sends it nor
  * records anything.
  */
+/**
+ * Live bank/card balances — mapping, reading, and comparing (audit row 37, ADR-0054).
+ *
+ * Note what is absent: nothing here writes a reconciliation boundary. A boundary is a
+ * statement balance somebody evidenced, and `POST /api/reconciliation/runs` stays the only
+ * route that sets one.
+ */
+export const BALANCE_PROVIDER_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/balance-provider/status', handler: getBalanceProviderStatusRoute },
+  { method: 'GET', path: '/api/balance-provider/links', handler: getBalanceProviderLinksRoute },
+  { method: 'POST', path: '/api/balance-provider/links', handler: postBalanceProviderLink },
+  {
+    method: 'POST',
+    path: '/api/balance-provider/links/:linkId/unlink',
+    handler: postBalanceProviderUnlink,
+  },
+  { method: 'POST', path: '/api/balance-provider/refresh', handler: postBalanceProviderRefresh },
+  { method: 'GET', path: '/api/balance-provider/comparison', handler: getBalanceComparisonRoute },
+];
+
 export const PROOF_PACK_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/messaging/status', handler: getMessagingStatusRoute },
   { method: 'GET', path: '/api/deliveries', handler: getDeliveriesRoute },
@@ -671,6 +715,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...BALANCE_ROUTES,
   ...PEOPLE_ROUTES,
   ...ACCOUNT_ROUTES,
+  ...BALANCE_PROVIDER_ROUTES,
   ...MERCHANT_ROUTES,
   ...GROUP_ROUTES,
   ...PROOF_PACK_ROUTES,

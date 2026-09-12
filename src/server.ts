@@ -30,6 +30,7 @@
  * | `CORS_ORIGIN` | `web/`'s origin; default `http://localhost:3000`. |
  * | `INTAKE_FORWARDING_TOKEN` | The shared secret a mail rule or phone shortcut sends to `POST /api/intake/messages`. Unset: that endpoint refuses every request rather than standing open. |
  * | `WHATSAPP_ACCESS_TOKEN` + `WHATSAPP_PHONE_NUMBER_ID` | Wires the real WhatsApp Cloud API transport, so a **reviewed** proof pack can be sent (ADR-0053). Either missing: sending refuses by name and the screen says so before anything is typed. Copying a pack has never needed this and still does not. |
+ * | `BALANCE_PROVIDER_URL` + `BALANCE_PROVIDER_TOKEN` | Wires a live bank/card balance read against a configured HTTPS JSON endpoint (ADR-0054). Either missing: every read is recorded as **incomplete**, never as an empty success. A reading is compared against the ledger and can never become a reconciliation boundary, configured or not. |
  */
 
 import { createServer } from 'node:http';
@@ -55,6 +56,11 @@ import {
   createWhatsAppCloudTransport,
 } from './integrations/message-transport/index.js';
 import type { MessageTransport } from './integrations/message-transport/index.js';
+import {
+  createHttpBalanceProvider,
+  createUnconfiguredBalanceProvider,
+} from './integrations/balance-provider/index.js';
+import type { BalanceProviderPort } from './integrations/balance-provider/index.js';
 import { createSplitwiseAdapter } from './integrations/splitwise/index.js';
 import type {
   CreateSplitwiseExpenseResult,
@@ -260,6 +266,38 @@ function resolveMessageTransport(): MessageTransport {
   return createWhatsAppCloudTransport({ accessToken, phoneNumberId });
 }
 
+/**
+ * The real balance provider when an endpoint and a token are both present; otherwise one that
+ * reports every read as incomplete.
+ *
+ * The unconfigured case is deliberately *not* an empty success. `{ readings: [], complete:
+ * true }` would say "we checked every account and there was nothing to report", and a screen
+ * reading that would be entitled to show agreement — the exact misreport ADR-0046 exists to
+ * prevent, applied to a different external system.
+ */
+function resolveBalanceProvider(): BalanceProviderPort {
+  const endpointUrl = process.env.BALANCE_PROVIDER_URL?.trim();
+  const accessToken = process.env.BALANCE_PROVIDER_TOKEN?.trim();
+  if (
+    endpointUrl === undefined ||
+    endpointUrl.length === 0 ||
+    accessToken === undefined ||
+    accessToken.length === 0
+  ) {
+    return createUnconfiguredBalanceProvider();
+  }
+  return createHttpBalanceProvider({
+    endpointUrl,
+    accessToken,
+    ...(process.env.BALANCE_PROVIDER_ID === undefined
+      ? {}
+      : { providerId: process.env.BALANCE_PROVIDER_ID.trim() }),
+    ...(process.env.BALANCE_PROVIDER_LABEL === undefined
+      ? {}
+      : { label: process.env.BALANCE_PROVIDER_LABEL.trim() }),
+  });
+}
+
 async function main(): Promise<void> {
   const database = await openDevDatabase();
   await database.migrate();
@@ -268,6 +306,7 @@ async function main(): Promise<void> {
   const documentText = resolveDocumentTextExtractor();
   const splitwise = resolveSplitwisePort();
   const messageTransport = resolveMessageTransport();
+  const balanceProvider = resolveBalanceProvider();
   const authRequired = resolveAuthRequired();
 
   const deps: ApiDependencies = {
@@ -277,6 +316,7 @@ async function main(): Promise<void> {
     documentText,
     splitwise,
     messageTransport,
+    balanceProvider,
     authRequired,
     ...(INTAKE_FORWARDING_TOKEN === undefined
       ? {}
@@ -352,6 +392,14 @@ async function main(): Promise<void> {
         documentText.describe().readsImages
           ? ' + model transcription of images (AI_DOCUMENT_VISION=true)'
           : ' only (a photographed receipt is refused, not read as empty)'
+      }`,
+    );
+    const balances = balanceProvider.describe();
+    console.log(
+      `  balances:       ${
+        balances.configured
+          ? `${balances.label} via ${balances.endpointHost ?? 'a configured endpoint'} (compared, never a boundary)`
+          : 'not configured (every read is recorded as incomplete, never as agreement)'
       }`,
     );
     const messaging = messageTransport.describe();

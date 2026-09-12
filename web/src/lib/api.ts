@@ -61,7 +61,12 @@ import type {
   PaymentWorkspaceItem,
   PersonDetail,
   PersonSummary,
+  AccountBalanceReading,
+  AccountProviderLink,
+  BalanceComparisonResult,
+  BalanceProviderStatus,
   MessagingStatus,
+  RefreshBalancesResult,
   ProofPackDelivery,
   ProofPackPreview,
   ReceiptView,
@@ -592,6 +597,71 @@ export async function retryProofPackDelivery(input: {
       ...(input.reason === undefined ? {} : { reason: input.reason }),
     }),
   });
+}
+
+/* ------------------------------------------------------------- live balance providers */
+
+/** Configuration, not ledger state: whether a live balance can be read here at all. */
+export async function getBalanceProviderStatus(): Promise<BalanceProviderStatus> {
+  return request<BalanceProviderStatus>("/api/balance-provider/status");
+}
+
+export async function listBalanceProviderLinks(): Promise<readonly AccountProviderLink[]> {
+  const result = await request<{ readonly links: readonly AccountProviderLink[] }>(
+    "/api/balance-provider/links",
+  );
+  return result.links;
+}
+
+export async function linkAccountToBalanceProvider(input: {
+  readonly accountId: string;
+  readonly externalAccountRef: string;
+  readonly providerLabel?: string;
+  readonly reason?: string;
+}): Promise<AccountProviderLink> {
+  return request<AccountProviderLink>("/api/balance-provider/links", {
+    method: "POST",
+    body: JSON.stringify({ actor: "user", ...input }),
+  });
+}
+
+export async function unlinkAccountFromBalanceProvider(input: {
+  readonly linkId: string;
+  readonly reason?: string;
+}): Promise<void> {
+  await request<{ unlinked: boolean }>(`/api/balance-provider/links/${input.linkId}/unlink`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: "user",
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+    }),
+  });
+}
+
+/** Reads every linked account now, and records what came back — including the silences. */
+export async function refreshBalances(
+  input: { readonly reason?: string } = {},
+): Promise<RefreshBalancesResult> {
+  return request<RefreshBalancesResult>("/api/balance-provider/refresh", {
+    method: "POST",
+    body: JSON.stringify({ actor: "user", ...input }),
+  });
+}
+
+/** Each account's latest reading beside the closing balance a run evidenced. */
+export async function getBalanceComparison(runId: string): Promise<BalanceComparisonResult> {
+  return request<BalanceComparisonResult>(
+    `/api/balance-provider/comparison?runId=${encodeURIComponent(runId)}`,
+  );
+}
+
+export async function listAccountBalanceReadings(
+  accountId: string,
+): Promise<readonly AccountBalanceReading[]> {
+  const result = await request<{ readonly readings: readonly AccountBalanceReading[] }>(
+    `/api/accounts/${accountId}/balance-readings`,
+  );
+  return result.readings;
 }
 
 /* --------------------------------------------------------------- the payment workspace */

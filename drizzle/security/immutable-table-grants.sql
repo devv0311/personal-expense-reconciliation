@@ -101,6 +101,16 @@ REVOKE UPDATE, DELETE ON TABLE proof_pack_deliveries FROM :"app_role";
 GRANT UPDATE (status, attempt_count, last_error, provider_message_id, sent_at, delivered_at, updated_at)
   ON TABLE proof_pack_deliveries TO :"app_role";
 
+-- A balance reading is what a provider said at a moment. What it said does not change
+-- afterwards, exactly as a statement line does not (ADR-0054). Revoked outright rather than
+-- column-restricted: unlike a delivery, a reading has no progress of its own to move — a later
+-- read is a new row, which is also what keeps a history of readings meaningful.
+REVOKE UPDATE, DELETE ON TABLE account_balance_readings FROM :"app_role";
+
+-- A provider link is unlinked by being archived, never deleted: past readings reference it, and
+-- a reading whose link had vanished could no longer say which account it was about.
+REVOKE DELETE ON TABLE account_provider_links FROM :"app_role";
+
 -- Deliberately absent: `evidence_observations` and `evidence_match_candidates` (phase 17,
 -- ADR-0044). Both are DERIVED and both are meant to move — a better reading of a notification
 -- replaces the one before it, and a candidate is re-stated when the matcher's view of it

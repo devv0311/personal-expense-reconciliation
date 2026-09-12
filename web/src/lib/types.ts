@@ -811,6 +811,86 @@ export interface SendProofPackResult {
   readonly sentNow: boolean;
 }
 
+/* ---------------------------------------------------------------- live balance providers */
+
+/** What this installation can read live, if anything (ADR-0054). */
+export interface BalanceProviderStatus {
+  readonly providerId: string;
+  readonly label: string;
+  readonly configured: boolean;
+  readonly unavailableReason?: string;
+  readonly endpointHost?: string;
+  readonly linkedAccountCount: number;
+  /** Always true. Restated by the API so the rule is not the screen's to remember. */
+  readonly readingsAreNeverBoundaries: true;
+}
+
+export interface AccountProviderLink {
+  readonly id: string;
+  readonly accountId: string;
+  readonly providerId: string;
+  readonly externalAccountRef: string;
+  readonly providerLabel: string | null;
+  readonly linkedAt: string;
+  readonly archivedAt: string | null;
+  readonly accountName: string;
+  readonly accountType: string;
+  readonly accountLast4: string | null;
+}
+
+/** One thing a provider said about one account at one instant. Never a boundary. */
+export interface AccountBalanceReading {
+  readonly id: string;
+  readonly accountId: string;
+  readonly accountProviderLinkId: string;
+  readonly providerId: string;
+  readonly balance: string | null;
+  readonly currency: string;
+  readonly asOf: string | null;
+  readonly fetchedAt: string;
+  readonly status: "ok" | "unavailable";
+  readonly failureReason: string | null;
+  readonly readComplete: boolean;
+  readonly readIncompleteReason: string | null;
+}
+
+export interface BalanceReadCompleteness {
+  readonly requested: number;
+  readonly answered: number;
+  readonly complete: boolean;
+  readonly incompleteReason?: string;
+}
+
+export interface RefreshBalancesResult {
+  readonly provider: BalanceProviderStatus;
+  readonly completeness: BalanceReadCompleteness;
+  readonly readings: readonly AccountBalanceReading[];
+  readonly fetchedAt: string;
+}
+
+export interface BalanceComparison {
+  readonly verdict: "agrees" | "differs" | "not_comparable";
+  readonly difference: string | null;
+  readonly usability: "fresh" | "stale" | "unusable";
+  readonly caveat?: string;
+}
+
+export interface AccountBalanceComparison {
+  readonly accountId: string;
+  readonly accountName: string;
+  readonly reading: AccountBalanceReading | null;
+  readonly linked: boolean;
+  readonly comparison: BalanceComparison | null;
+  readonly ledgerFigure: string | null;
+}
+
+export interface BalanceComparisonResult {
+  readonly comparedTo: string;
+  readonly provider: BalanceProviderStatus;
+  readonly comparisons: readonly AccountBalanceComparison[];
+  readonly note: string;
+}
+
 /* ------------------------------------------------------------------ the payment workspace */
 
 export const PAYMENT_DIRECTIONS = ["debit", "credit"] as const;

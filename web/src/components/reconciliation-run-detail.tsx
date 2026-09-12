@@ -5,6 +5,7 @@ import { DiscrepancyList } from "@/components/discrepancy-list";
 import { Money } from "@/components/money";
 import { PageHeader, Section } from "@/components/page-header";
 import { AccountWaterfalls } from "@/components/reconciliation/account-waterfall";
+import { LiveBalances } from "@/components/reconciliation/live-balances";
 import { ReconciliationTotals } from "@/components/reconciliation-totals";
 import { ErrorBlock, FigureSkeleton, LoadingStatus, TableSkeleton } from "@/components/status";
 import {
@@ -24,7 +25,9 @@ import { usePeople, useReconciliationRun } from "@/lib/queries";
  * 1. **The outflow identity** (ADR-0016) — how much of what left the accounts the ledger has
  *    explained. One hero figure, `ledgerUnexplainedTotal`.
  * 2. **The cash identity** (ADR-0017) — whether each account's statement actually closes.
- * 3. **Splitwise** — what the external ledger said at the time, and where it disagreed.
+ * 3. **Live balances** — an optional second opinion from a configured provider, placed after
+ *    the waterfall and deliberately not part of it (ADR-0054).
+ * 4. **Splitwise** — what the external ledger said at the time, and where it disagreed.
  *
  * The two identities are deliberately independent and neither is derived from the other, so
  * they get their own sections rather than being blended into one score. A run can explain every
@@ -85,6 +88,8 @@ export function ReconciliationRunDetail({ id }: { id: string }) {
           periodEnd={run.periodEnd}
         />
       </Section>
+
+      <LiveBalances runId={id} />
 
       <Section
         title="Splitwise"

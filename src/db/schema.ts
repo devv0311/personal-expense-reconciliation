@@ -1216,6 +1216,108 @@ export const jobs = pgTable(
   ],
 );
 
+/* ========================================================= live balance providers */
+
+/**
+ * Which of this ledger's accounts a balance provider can be asked about (audit row 37).
+ *
+ * The mapping, and nothing else. No credential appears on this row: the token belongs to the
+ * adapter's closure, built from the environment in `src/server.ts`, and there is deliberately
+ * no column that could carry one — a database backup should not be a credential leak
+ * (`security-model.md`).
+ *
+ * `external_account_ref` is the provider's own handle for the account. Like `accounts.last4`
+ * it is an identifier fragment rather than an account number, and it is the provider's string
+ * rather than anything this ledger invents.
+ */
+export const accountProviderLinks = pgTable(
+  'account_provider_links',
+  {
+    id: id(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    /** The provider this ref belongs to — `BalanceProviderCapabilities.providerId`. */
+    providerId: text('provider_id').notNull(),
+    externalAccountRef: text('external_account_ref').notNull(),
+    /** A label the provider gave, for a person to check they mapped the right account. */
+    providerLabel: text('provider_label'),
+    linkedAt: timestamp('linked_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Unlinking is an archive, not a delete: past readings still name this link. */
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    // One live link per (provider, ref): two accounts claiming the same remote account would
+    // make every reading ambiguous about which of them it describes.
+    uniqueIndex('account_provider_links_ref_unique')
+      .on(table.providerId, table.externalAccountRef)
+      .where(sql`archived_at is null`),
+    uniqueIndex('account_provider_links_account_unique')
+      .on(table.accountId, table.providerId)
+      .where(sql`archived_at is null`),
+  ],
+);
+
+/**
+ * One thing a provider said about one account at one instant. Immutable.
+ *
+ * **Not evidence, and never a boundary** (ADR-0054). A `ReconciliationAccountSnapshot`'s
+ * opening and closing balances still come only from a statement somebody evidenced; a reading
+ * is a second opinion recorded beside the ledger's own arithmetic so the two can be compared.
+ * The grants file revokes UPDATE and DELETE on this table for the same reason it does on
+ * `payments` and `evidence`: what a provider said at a moment does not change afterwards.
+ *
+ * `balance` is nullable and signed. Null is "the provider did not state one" and is never zero
+ * (ADR-0017 (cash balance), 17.5); negative is an overdrawn account, which is a real balance.
+ *
+ * `as_of` is the provider's own instant and is separate from `fetched_at`, which is when this
+ * process asked. A balance from six hours ago compared against a period ending yesterday is a
+ * stale read, and keeping only one of the two timestamps would make that unknowable.
+ */
+export const accountBalanceReadings = pgTable(
+  'account_balance_readings',
+  {
+    id: id(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    accountProviderLinkId: uuid('account_provider_link_id')
+      .notNull()
+      .references(() => accountProviderLinks.id),
+    providerId: text('provider_id').notNull(),
+    balance: paiseColumn('balance'),
+    currency: text('currency').notNull().default('INR'),
+    asOf: timestamp('as_of', { withTimezone: true }),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+    status: text('status').notNull(),
+    failureReason: text('failure_reason'),
+    /**
+     * Whether the read this reading came from answered about every account it asked about.
+     *
+     * Carried onto each row rather than kept only on a run record, so a reading can never be
+     * quoted without the completeness of the read that produced it — ADR-0046's rule that an
+     * absence under an incomplete check is not agreement.
+     */
+    readComplete: boolean('read_complete').notNull(),
+    readIncompleteReason: text('read_incomplete_reason'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('account_balance_readings_account_idx').on(table.accountId, table.fetchedAt),
+    check('account_balance_readings_status_check', sql`status in ('ok', 'unavailable')`),
+    // `ok` means a balance and an instant both came back; anything short of that is
+    // `unavailable` with a reason. Without this an `ok` row could carry a null balance, and
+    // every reader downstream would have to remember that null is not zero.
+    check(
+      'account_balance_readings_shape_check',
+      sql`(${table.status} = 'ok') = (${table.balance} is not null and ${table.asOf} is not null)
+          and (${table.status} <> 'unavailable' or ${table.failureReason} is not null)
+          and (${table.readComplete} or ${table.readIncompleteReason} is not null)`,
+    ),
+  ],
+);
+
 /* ============================================================ proof-pack delivery */
 
 /**

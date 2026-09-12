@@ -15,3 +15,4 @@ export * from './history-repositories.js';
 export * from './analytics-repositories.js';
 export * from './job-repositories.js';
 export * from './delivery-repositories.js';
+export * from './balance-provider-repositories.js';
