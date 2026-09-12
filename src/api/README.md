@@ -233,9 +233,12 @@ in that phase — master data, statement import, the payment workspace, expense 
 funding links, history, sessions, rules, analytics, occasions and jobs — is documented in its
 own route file's header comment, and all of it is a caller of services that already existed.
 
-**Still not implemented:** a send route for a proof pack (Phase 21 made the copy/export review a
-deliberate UI step, and copying text to a clipboard reaches no external system — ADR-0047), a
-delete route against Splitwise (nothing in this system can delete a row there, and a route that
-appeared to would be a lie), and resolving a `ReconciliationDiscrepancy` on a
-`ReconciliationRun` (phase 19's reviewable record is the audit finding). Authentication and the
-single-row Splitwise re-sync, both listed here as missing through phase 21, now exist.
+**Still not implemented:** resolving a `ReconciliationDiscrepancy` on a `ReconciliationRun`
+(phase 19's reviewable record is the audit finding), and reading a Splitwise-side edit back into
+this ledger (their change stays a `drifted` finding — principle 9). Authentication, the
+single-row Splitwise re-sync, a proof-pack send route (ADR-0053) and the repair writes against
+Splitwise (ADR-0055) were all listed here as missing through phase 21 and now exist.
+
+There is no general delete route against Splitwise. `POST
+/api/expenses/:expenseId/splitwise-resync` withdraws an entry in exactly one case — an expense
+whose net has reached zero, which Splitwise cannot represent — and never to tidy an audit.

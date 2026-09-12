@@ -264,16 +264,32 @@ export function assertAiInferenceTransition(from: AiInferenceStatus, to: AiInfer
 /* ------------------------------------------------------------------- Splitwise sync */
 
 /**
- * `drifted` and `stale` are terminal-until-addressed, and addressing them means a **fresh
- * proposal a human re-confirms** — modelled as a required trip back through `pending`.
- * Allowing `drifted → synced` directly would be exactly the auto-resolution invariant #18
- * forbids.
+ * `drifted` and `stale` are terminal-until-addressed, and what invariant #18 forbids is
+ * addressing them **automatically** — a status that resolved itself because the next
+ * reconciliation run happened to agree, or because Splitwise's figure was copied over ours.
+ * Neither is reachable here.
+ *
+ * `stale`/`drifted → synced` is the repair a person asks for, one row at a time, with a
+ * required reason (`services.resyncExpenseToSplitwise`, ADR-0055). It is the "fresh proposal a
+ * human re-confirms" this table used to model as a trip back through `pending` — and routing it
+ * through `pending` was always notional, since nothing ever observed the row in that state.
+ * Making the real move legal, and asserted, is stricter than leaving it unchecked, which is
+ * what the repair did before.
+ *
+ * `withdrawn` is where a repair lands a row whose expense's net has reached zero: Splitwise
+ * cannot hold a zero-cost expense, so the entry is deleted rather than left asserting a debt
+ * this ledger no longer says exists. It leaves that state only by being pushed again, once the
+ * net is back off zero — and that push has to *create* an entry rather than correct one,
+ * because nothing is standing in Splitwise any longer. Keeping `withdrawn` a status of its own,
+ * rather than folding it back into `stale`, is what lets the repair know which of the two it
+ * is doing.
  */
 const SPLITWISE_EXPENSE_SYNC_TRANSITIONS: Transitions<SplitwiseExpenseSyncStatus> = {
   pending: ['synced', 'sync_failed'],
   synced: ['drifted', 'stale', 'sync_failed'],
-  drifted: ['pending'],
-  stale: ['pending'],
+  drifted: ['pending', 'synced', 'withdrawn', 'sync_failed'],
+  stale: ['pending', 'synced', 'withdrawn', 'sync_failed'],
+  withdrawn: ['synced'],
   sync_failed: ['pending', 'synced'],
 };
 
@@ -282,6 +298,13 @@ export function canTransitionSplitwiseExpenseSync(
   to: SplitwiseExpenseSyncStatus,
 ): boolean {
   return SPLITWISE_EXPENSE_SYNC_TRANSITIONS[from].includes(to);
+}
+
+export function assertSplitwiseExpenseSyncTransition(
+  from: SplitwiseExpenseSyncStatus,
+  to: SplitwiseExpenseSyncStatus,
+): void {
+  assertTransition('SplitwiseExpense', from, to, canTransitionSplitwiseExpenseSync(from, to));
 }
 
 /* ------------------------------------------------------------------------- internals */

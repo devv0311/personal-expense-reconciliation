@@ -318,14 +318,27 @@ describe('SplitwiseExpense sync status', () => {
     expect(canTransitionSplitwiseExpenseSync('synced', 'stale')).toBe(true);
   });
 
-  it('never auto-resolves drift or staleness straight back to synced', () => {
-    expect(canTransitionSplitwiseExpenseSync('drifted', 'synced')).toBe(false);
-    expect(canTransitionSplitwiseExpenseSync('stale', 'synced')).toBe(false);
+  it('clears drift or staleness through a repair a person asks for (ADR-0055)', () => {
+    // What invariant #18 forbids is *auto*-resolution, and no path here is automatic:
+    // `services.resyncExpenseToSplitwise` is the only caller, it requires a person and a
+    // reason, and it pushes what this ledger already approved. Before ADR-0055 this move was
+    // illegal on paper and performed anyway, unchecked, by the repair — asserting it is
+    // stricter than forbidding it was.
+    expect(canTransitionSplitwiseExpenseSync('drifted', 'synced')).toBe(true);
+    expect(canTransitionSplitwiseExpenseSync('stale', 'synced')).toBe(true);
   });
 
-  it('clears drift or staleness only through a fresh, re-confirmable proposal', () => {
+  it('still allows the fresh, re-confirmable proposal route', () => {
     expect(canTransitionSplitwiseExpenseSync('drifted', 'pending')).toBe(true);
     expect(canTransitionSplitwiseExpenseSync('stale', 'pending')).toBe(true);
+  });
+
+  it('withdraws a row whose net reached zero, and lets only a push bring it back', () => {
+    expect(canTransitionSplitwiseExpenseSync('stale', 'withdrawn')).toBe(true);
+    expect(canTransitionSplitwiseExpenseSync('withdrawn', 'synced')).toBe(true);
+    // Never straight from `synced`: withdrawing is a repair, not something drift can trigger.
+    expect(canTransitionSplitwiseExpenseSync('synced', 'withdrawn')).toBe(false);
+    expect(canTransitionSplitwiseExpenseSync('withdrawn', 'drifted')).toBe(false);
   });
 
   it('allows a failed sync to be retried', () => {

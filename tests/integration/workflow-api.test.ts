@@ -7,6 +7,7 @@
  * that a re-sync refuses a row the two ledgers already agree about.
  */
 
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createAiService } from '../../src/ai/index.js';
@@ -15,6 +16,7 @@ import type { Api } from '../../src/api/index.js';
 import type { Paise } from '../../src/domain/index.js';
 import { runNextJob } from '../../src/services/index.js';
 import { scriptedClassificationTransport } from '../support/ai.js';
+import { schema } from '../../src/db/index.js';
 import { createTestDatabase } from '../support/database.js';
 import type { TestDatabase } from '../support/database.js';
 import { createMemoryEvidenceStore } from '../support/evidence-store.js';
@@ -486,6 +488,30 @@ describe('the job queue (audit row 51)', () => {
     expect(result.error).toContain('extract_receipt');
   });
 
+  it('schedules a new job on the clock the worker reads, not the database server’s', async () => {
+    // `claimNextJob` asks whether `scheduled_for <= now`, and `now` is a `Date` the caller made.
+    // While `scheduled_for` came from the column's `now()` default, the two sides of that
+    // comparison came from two different clocks — and a database server a few milliseconds
+    // ahead of the application made a job queued "now" invisible to the very next `runNextJob`.
+    // Invisible, not lost: the failure was a queue that silently did nothing.
+    //
+    // This holds structurally rather than by tolerance — both ends are one process's clock —
+    // so the window below is the assertion this test can make, and the existing
+    // enqueue-then-run tests above are what actually exercise it.
+    const before = Date.now();
+    const created = await post('/api/jobs', { actor: 'user', kind: 'normalize_payments' });
+    const after = Date.now();
+    const { jobId } = (await created.json()) as { jobId: string };
+
+    const [row] = await database.db
+      .select({ scheduledFor: schema.jobs.scheduledFor })
+      .from(schema.jobs)
+      .where(eq(schema.jobs.id, jobId));
+    const scheduledFor = row!.scheduledFor.getTime();
+    expect(scheduledFor).toBeGreaterThanOrEqual(before);
+    expect(scheduledFor).toBeLessThanOrEqual(after);
+  });
+
   it('reports that there was nothing to run', async () => {
     expect(await runNextJob(database.db, {})).toEqual({ ran: false });
   });
@@ -522,8 +548,33 @@ describe('the job queue (audit row 51)', () => {
 
 describe('Splitwise stale re-sync (audit row 40)', () => {
   it('lists nothing to repair when nothing has drifted', async () => {
-    const body = await getJson<{ candidates: unknown[] }>('/api/splitwise/resync-candidates');
+    const body = await getJson<{ candidates: unknown[]; settlements: unknown[] }>(
+      '/api/splitwise/resync-candidates',
+    );
     expect(body.candidates).toEqual([]);
+    expect(body.settlements).toEqual([]);
+  });
+
+  it('says what the connected adapter can actually repair (ADR-0055)', async () => {
+    // Travels with the list so a screen can say "this cannot be done here" rather than offer a
+    // button that fails. The mock port implements all three; a first-sync-only adapter would
+    // report every one of them false.
+    const body = await getJson<{ capability: Record<string, boolean> }>(
+      '/api/splitwise/resync-candidates',
+    );
+    expect(body.capability).toEqual({
+      canCorrect: true,
+      canWithdraw: true,
+      canCorrectSettlement: true,
+    });
+  });
+
+  it('refuses to re-sync a settlement that was never synced', async () => {
+    const response = await post(
+      `/api/settlements/${'00000000-0000-4000-8000-000000000000'}/splitwise-resync`,
+      { actor: 'user', reason: 'Trying anyway' },
+    );
+    expect(response.status).toBe(404);
   });
 
   it('refuses to re-sync an expense that was never synced', async () => {

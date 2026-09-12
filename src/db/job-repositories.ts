@@ -66,7 +66,14 @@ export async function insertJob(
       kind: draft.kind,
       payload: draft.payload,
       actor: draft.actor,
-      ...(draft.scheduledFor === undefined ? {} : { scheduledFor: draft.scheduledFor }),
+      // Stamped from *this* process's clock, not left to the column's `now()` default.
+      //
+      // `claimNextJob` asks whether `scheduled_for <= now`, where `now` is a `Date` the caller
+      // made. Taking the two sides of that comparison from two different clocks — the database
+      // server's and the application's — means a job queued "now" can be a few milliseconds in
+      // the future as far as the worker is concerned, and a `runNextJob` immediately after an
+      // enqueue reports there is nothing to run. Both ends now come from the same clock.
+      scheduledFor: draft.scheduledFor ?? new Date(),
       ...(draft.maxAttempts === undefined ? {} : { maxAttempts: draft.maxAttempts }),
     })
     .returning({ id: jobs.id });

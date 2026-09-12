@@ -1,0 +1,2 @@
+ALTER TABLE "splitwise_expenses" DROP CONSTRAINT "splitwise_expenses_sync_status_check";--> statement-breakpoint
+ALTER TABLE "splitwise_expenses" ADD CONSTRAINT "splitwise_expenses_sync_status_check" CHECK (sync_status in ('pending', 'synced', 'drifted', 'stale', 'withdrawn', 'sync_failed'));

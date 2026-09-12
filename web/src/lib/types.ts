@@ -1321,13 +1321,67 @@ export interface ResyncCandidate {
   /** The expense's current net, which is what a re-sync would push. */
   readonly currentNetAmount: string;
   readonly description: string | null;
+  /**
+   * What repairing this row would do to Splitwise, as the API decided it.
+   *
+   * Quoted, never derived: "the net is zero, so this deletes the entry" is a conclusion drawn
+   * from the figures, and drawing it here would put a second copy of the repair's own rule
+   * somewhere it could drift from it (ADR-0048).
+   */
+  readonly plannedRepair: SplitwiseRepairKind;
 }
+
+/**
+ * Which of the three repairs happened, as the API named it — never inferred here from the
+ * figures (ADR-0048: the frontend reads the ledger and recomputes nothing).
+ */
+export type SplitwiseRepairKind = "corrected" | "withdrawn" | "recreated";
 
 export interface ResyncResult {
   readonly splitwiseExpenseId: string;
-  readonly syncStatus: "synced";
+  readonly syncStatus: "synced" | "withdrawn";
+  readonly repair: SplitwiseRepairKind;
+  readonly previousExternalId: string;
   readonly previousSnapshot: unknown;
   readonly pushedNetAmount: string;
+}
+
+/** A settlement Splitwise holds a different figure for. */
+export interface SettlementResyncCandidate {
+  readonly splitwiseSettlementId: string;
+  readonly settlementId: string;
+  readonly externalId: string;
+  readonly syncStatus: string;
+  readonly syncedAt: string;
+  readonly syncedSnapshot: unknown;
+  readonly currentAmount: string;
+  readonly counterpartyPersonId: string;
+  readonly counterpartyName: string;
+}
+
+export interface SettlementResyncResult {
+  readonly splitwiseTransactionId: string;
+  readonly syncStatus: "synced";
+  readonly previousSnapshot: unknown;
+  readonly pushedAmount: string;
+}
+
+/**
+ * What the connected adapter can actually do, sent with the list rather than assumed.
+ *
+ * A screen that offered a repair the port cannot make would be promising something that will
+ * fail — the "reachable" half of ADR-0050 read backwards.
+ */
+export interface SplitwiseRepairCapability {
+  readonly canCorrect: boolean;
+  readonly canWithdraw: boolean;
+  readonly canCorrectSettlement: boolean;
+}
+
+export interface ResyncCandidates {
+  readonly candidates: readonly ResyncCandidate[];
+  readonly settlements: readonly SettlementResyncCandidate[];
+  readonly capability: SplitwiseRepairCapability;
 }
 
 /* -------------------------------------------------------------------------- analytics */

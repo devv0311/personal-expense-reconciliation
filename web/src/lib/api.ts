@@ -73,8 +73,9 @@ import type {
   SendProofPackResult,
   ReconciliationRun,
   RefundAllocationState,
-  ResyncCandidate,
+  ResyncCandidates,
   ResyncResult,
+  SettlementResyncResult,
   RuleAssertion,
   RuleEffect,
   RuleMatchPattern,
@@ -1441,15 +1442,12 @@ export async function syncExpenseToSplitwise(input: {
   });
 }
 
-export async function listResyncCandidates(): Promise<readonly ResyncCandidate[]> {
-  const { candidates } = await request<{ candidates: ResyncCandidate[] }>(
-    "/api/splitwise/resync-candidates",
-  );
-  return candidates;
+export async function listResyncCandidates(): Promise<ResyncCandidates> {
+  return request<ResyncCandidates>("/api/splitwise/resync-candidates");
 }
 
 /**
- * Corrects a stale row in Splitwise with this ledger's current figure.
+ * Corrects this expense's entry in Splitwise with the ledger's current figure.
  *
  * The reason is required by the API, not by this form: it changes a figure in somebody else's
  * ledger, and they are entitled to an account of why.
@@ -1462,6 +1460,17 @@ export async function resyncExpenseToSplitwise(input: {
     method: "POST",
     body: JSON.stringify({ actor: ACTOR, reason: input.reason }),
   });
+}
+
+/** The settlement half of the same repair, on the same terms. */
+export async function resyncSettlementToSplitwise(input: {
+  readonly settlementId: string;
+  readonly reason: string;
+}): Promise<SettlementResyncResult> {
+  return request<SettlementResyncResult>(
+    `/api/settlements/${input.settlementId}/splitwise-resync`,
+    { method: "POST", body: JSON.stringify({ actor: ACTOR, reason: input.reason }) },
+  );
 }
 
 /* -------------------------------------------------------------------------- analytics */

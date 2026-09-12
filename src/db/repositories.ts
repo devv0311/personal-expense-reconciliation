@@ -4855,11 +4855,18 @@ export async function getSplitwiseExpenseRow(
 }
 
 /**
- * Every synced row a person could choose to repair — `stale` (our side moved) or `drifted`
- * (theirs did).
+ * Every synced row a person could choose to repair — `stale` (our side moved), `drifted`
+ * (theirs did), or `withdrawn` whose net has since come back off zero.
  *
- * `synced` rows are excluded: re-syncing a row both ledgers agree about would write a
- * duplicate into somebody else's ledger for nothing.
+ * `synced` rows are excluded: re-pushing a row both ledgers agree about would write over
+ * somebody else's ledger for nothing.
+ *
+ * A `withdrawn` row is one whose Splitwise entry this ledger deleted because the expense's net
+ * had reached zero (ADR-0055). It is listed again only once the net is non-zero — a superseded
+ * refund, say — because that is the only state in which there is anything left to assert.
+ * Leaving such a row unlisted would quietly drop an expense out of Splitwise for good, which is
+ * the same "make the number go away" failure principle 10 exists to prevent; listing it while
+ * the net is still zero would offer a repair with nothing to push.
  */
 export async function listResyncableSplitwiseExpenses(exec: Executor): Promise<
   Array<{
@@ -4886,7 +4893,7 @@ export async function listResyncableSplitwiseExpenses(exec: Executor): Promise<
     })
     .from(splitwiseExpenses)
     .innerJoin(expenses, eq(expenses.id, splitwiseExpenses.expenseId))
-    .where(inArray(splitwiseExpenses.syncStatus, ['stale', 'drifted']))
+    .where(inArray(splitwiseExpenses.syncStatus, ['stale', 'drifted', 'withdrawn']))
     .orderBy(desc(splitwiseExpenses.syncedAt));
   if (rows.length === 0) return [];
 
@@ -4908,19 +4915,24 @@ export async function listResyncableSplitwiseExpenses(exec: Executor): Promise<
     .groupBy(expenseAdjustments.originalExpenseId);
   const adjustments = new Map(adjustmentRows.map((row) => [row.expenseId, BigInt(row.total)]));
 
-  return rows.map((row) => ({
-    splitwiseExpenseId: row.id as SplitwiseExpenseId,
-    expenseId: row.expenseId as ExpenseId,
-    externalId: row.externalId,
-    syncStatus: row.syncStatus,
-    syncedAt: row.syncedAt,
-    syncedSnapshot: row.ourSnapshot,
-    // `domain.netAmount` does the subtraction, exactly as the ledger read does.
-    currentNetAmount: netAmount(row.grossAmount as Paise, [
-      (adjustments.get(row.expenseId) ?? 0n) as Paise,
-    ]).toString(),
-    description: row.description,
-  }));
+  return (
+    rows
+      .map((row) => ({
+        splitwiseExpenseId: row.id as SplitwiseExpenseId,
+        expenseId: row.expenseId as ExpenseId,
+        externalId: row.externalId,
+        syncStatus: row.syncStatus,
+        syncedAt: row.syncedAt,
+        syncedSnapshot: row.ourSnapshot,
+        // `domain.netAmount` does the subtraction, exactly as the ledger read does.
+        currentNetAmount: netAmount(row.grossAmount as Paise, [
+          (adjustments.get(row.expenseId) ?? 0n) as Paise,
+        ]).toString(),
+        description: row.description,
+      }))
+      // An already-withdrawn row with nothing to re-assert is not a repair anybody can make.
+      .filter((row) => row.syncStatus !== 'withdrawn' || row.currentNetAmount !== '0')
+  );
 }
 
 /**
@@ -4951,4 +4963,115 @@ export async function updateSplitwiseExpenseSync(
       syncStatus: next.syncStatus,
     })
     .where(eq(splitwiseExpenses.id, id));
+}
+
+/* -------------------------------------------------- Splitwise settlement re-sync (ADR-0055) */
+
+export interface SplitwiseSettlementDetailRow {
+  readonly id: SplitwiseSettlementId;
+  readonly settlementId: SettlementId;
+  readonly splitwiseTransactionId: string;
+  readonly syncedAt: Date;
+  readonly ourSnapshot: unknown;
+  readonly theirSnapshot: unknown;
+  readonly syncStatus: SplitwiseSettlementSyncStatus;
+}
+
+export async function getSplitwiseSettlementRow(
+  exec: Executor,
+  id: SplitwiseSettlementId,
+): Promise<SplitwiseSettlementDetailRow | null> {
+  const [row] = await exec
+    .select()
+    .from(splitwiseSettlements)
+    .where(eq(splitwiseSettlements.id, id));
+  return row === undefined
+    ? null
+    : {
+        id: row.id as SplitwiseSettlementId,
+        settlementId: row.settlementId as SettlementId,
+        splitwiseTransactionId: row.splitwiseTransactionId,
+        syncedAt: row.syncedAt,
+        ourSnapshot: row.ourSnapshot,
+        theirSnapshot: row.theirSnapshot,
+        syncStatus: row.syncStatus as SplitwiseSettlementSyncStatus,
+      };
+}
+
+/**
+ * Every synced settlement a person could choose to repair.
+ *
+ * Only `drifted` — a settlement's own amount cannot go `stale` the way an adjusted expense's
+ * net can (`SPLITWISE_SETTLEMENT_SYNC_STATUSES`), so the only way the two ledgers come apart
+ * about one is Splitwise's side moving.
+ *
+ * `currentAmount` is the settlement's recorded amount, read rather than recomputed: a
+ * settlement has no allocation to re-derive and no adjustment to net off.
+ */
+export async function listResyncableSplitwiseSettlements(exec: Executor): Promise<
+  Array<{
+    splitwiseSettlementId: SplitwiseSettlementId;
+    settlementId: SettlementId;
+    externalId: string;
+    syncStatus: string;
+    syncedAt: Date;
+    syncedSnapshot: unknown;
+    currentAmount: string;
+    counterpartyPersonId: PersonId;
+    counterpartyName: string;
+  }>
+> {
+  const rows = await exec
+    .select({
+      id: splitwiseSettlements.id,
+      settlementId: splitwiseSettlements.settlementId,
+      externalId: splitwiseSettlements.splitwiseTransactionId,
+      syncStatus: splitwiseSettlements.syncStatus,
+      syncedAt: splitwiseSettlements.syncedAt,
+      ourSnapshot: splitwiseSettlements.ourSnapshot,
+      amount: settlements.amount,
+      counterpartyPersonId: settlements.counterpartyPersonId,
+      counterpartyName: people.displayName,
+    })
+    .from(splitwiseSettlements)
+    .innerJoin(settlements, eq(settlements.id, splitwiseSettlements.settlementId))
+    .innerJoin(people, eq(people.id, settlements.counterpartyPersonId))
+    .where(eq(splitwiseSettlements.syncStatus, 'drifted'))
+    .orderBy(desc(splitwiseSettlements.syncedAt));
+
+  return rows.map((row) => ({
+    splitwiseSettlementId: row.id as SplitwiseSettlementId,
+    settlementId: row.settlementId as SettlementId,
+    externalId: row.externalId,
+    syncStatus: row.syncStatus,
+    syncedAt: row.syncedAt,
+    syncedSnapshot: row.ourSnapshot,
+    currentAmount: row.amount.toString(),
+    counterpartyPersonId: row.counterpartyPersonId as PersonId,
+    counterpartyName: row.counterpartyName,
+  }));
+}
+
+/** The settlement counterpart of {@link updateSplitwiseExpenseSync}, with the same one caller. */
+export async function updateSplitwiseSettlementSync(
+  exec: Executor,
+  id: SplitwiseSettlementId,
+  next: {
+    readonly splitwiseTransactionId: string;
+    readonly syncedAt: Date;
+    readonly ourSnapshot: unknown;
+    readonly theirSnapshot: unknown;
+    readonly syncStatus: SplitwiseSettlementSyncStatus;
+  },
+): Promise<void> {
+  await exec
+    .update(splitwiseSettlements)
+    .set({
+      splitwiseTransactionId: next.splitwiseTransactionId,
+      syncedAt: next.syncedAt,
+      ourSnapshot: next.ourSnapshot,
+      theirSnapshot: next.theirSnapshot,
+      syncStatus: next.syncStatus,
+    })
+    .where(eq(splitwiseSettlements.id, id));
 }

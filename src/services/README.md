@@ -208,8 +208,9 @@ import (phase 6):
     agree. Net shares come from the current, already refund-aware allocation (ADR-0045) — the
     audit reads that number, it does not compute a second one.
   - **No external write.** The only port calls are `fetchBalances` and the optional
-    `fetchLedgerEntries`, both reads. Reviewing a finding does not authorize one either; stale
-    re-sync stays separate, explicitly approved work (ADR-0040/0041).
+    `fetchLedgerEntries`, both reads. Reviewing a finding does not authorize one either: the
+    repair is a separate act a person asks for, one row at a time, with a written reason
+    (`splitwise-resync-service.ts`, ADR-0055).
   - **A failed read is an incomplete audit.** Every failure path records what could not be seen
     and stops short of the conclusions that needed it. Absence is evidence only under a
     `complete` read, and no finding is retired by a read that could not be made.
@@ -223,9 +224,9 @@ import (phase 6):
   same transaction on the same external read. With no integration connected the audit does not
   run at all and reconciliation behaves exactly as it did before this phase.
 
-Not yet implemented: re-sync of a `stale` `SplitwiseExpense`/`SplitwiseSettlement` — see
-`docs/roadmap.md` phase 15's implementation note and ADR-0046's §6. Resolving a
-`ReconciliationDiscrepancy` on a `ReconciliationRun` also remains unbuilt; phase 19's review path
+Re-sync of a `stale`/`drifted` row is now built — `splitwise-resync-service.ts`, ADR-0055 —
+and corrects the entry Splitwise already holds rather than creating a second one. Resolving a
+`ReconciliationDiscrepancy` on a `ReconciliationRun` remains unbuilt; phase 19's review path
 is for `splitwise_audit_findings`, which is a different, addressable record (ADR-0046 §3).
 
 ## Phase 20 — Derived proof packs (ADR-0047)
@@ -303,6 +304,13 @@ missing workflows needed and had never had:
   aggregates (built from `computeObligations`' own output, so an analytics figure cannot
   disagree with a balance), standing rules, occasion labels, the background queue, and the
   single-row Splitwise correction ADR-0046 left open.
+
+  `splitwise-resync-service.ts` was rebuilt after phase 22 (ADR-0055). Its first version
+  corrected an entry by creating a second one, which left the counterparty holding two records
+  for one expense; it now calls the optional `updateExpense` at the id this ledger already
+  recorded, refuses **by name** when the injected port has no such method rather than falling
+  back to a create, withdraws the entry via `deleteEntry` when the net reaches zero, and
+  corrects a `drifted` settlement in place rather than recording a second one.
 
 `getEvidence` gained one field, `receiptId` — a pointer, not an extraction, and the only read
 the phase added anywhere.

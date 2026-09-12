@@ -356,9 +356,19 @@ from a percentage and a possibly-stale total.
 ## Sync and reconciliation
 
 18. **Splitwise is reconciled against, not trusted.** A `SplitwiseExpense`/`SplitwiseSettlement`
-    sync is one-directional by default (our approved data → Splitwise) until bidirectional sync is
-    explicitly implemented (`docs/roadmap.md` LATER); on drift, the discrepancy is surfaced in
-    a `ReconciliationRun`, and neither side is auto-corrected from the other. If **our own** side
+    sync is one-directional (our approved data → Splitwise); on drift, the discrepancy is
+    surfaced in a `ReconciliationRun`, and neither side is auto-corrected from the other.
+
+    **Repair, added per [ADR-0055](../decisions/0055-a-correction-edits-the-entry-they-are-looking-at.md),
+    is not an exception to this.** A person may push this ledger's current figure over a
+    `stale`/`drifted` row, one row at a time, with a written reason — that is still our approved
+    data going outward, and nothing reads Splitwise's number back in. The repair **edits the
+    entry Splitwise already holds**, at the id this ledger recorded, rather than creating a
+    second one: a "correction" that leaves the counterparty holding two records for one expense
+    makes their ledger less accurate than the stale figure did. An adapter that cannot edit in
+    place refuses by name and never substitutes a create. The single deletion this system
+    performs is an expense whose net has reached zero, which Splitwise cannot represent; an
+    external row this ledger merely cannot _explain_ stays a finding for a person to resolve. If **our own** side
     changes after a sync (e.g. an `ExpenseAdjustment` reduces `netAmount`), the sync moves to
     `stale`, not `drifted` — the two are surfaced and handled distinctly (added per ADR-0008; see
     `SplitwiseExpense`/`SplitwiseSettlement` in `domain-model.md`).
