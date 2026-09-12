@@ -12,11 +12,7 @@ import { Button } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/dates";
 import { sentenceCase } from "@/lib/labels";
 import { useResyncCandidates, useResyncExpense, useResyncSettlement } from "@/lib/queries";
-import type {
-  ResyncCandidate,
-  SettlementResyncCandidate,
-  SplitwiseRepairKind,
-} from "@/lib/types";
+import type { ResyncCandidate, SettlementResyncCandidate, SplitwiseRepairKind } from "@/lib/types";
 
 /**
  * Rows Splitwise still holds an out-of-date figure for, and the one action that fixes them.
@@ -65,10 +61,10 @@ export function ResyncCandidates() {
           <AlertTitle>This connection cannot correct an entry in place.</AlertTitle>
           <AlertDescription>
             <p>
-              The configured Splitwise adapter has no way to edit an entry it already created,
-              so the repair below will refuse rather than push. It will not fall back to
-              creating a second entry: that would leave the other person holding two records
-              for one expense, with nothing saying which is current.
+              The configured Splitwise adapter has no way to edit an entry it already created, so
+              the repair below will refuse rather than push. It will not fall back to creating a
+              second entry: that would leave the other person holding two records for one expense,
+              with nothing saying which is current.
             </p>
           </AlertDescription>
         </Alert>
@@ -148,8 +144,8 @@ export function ResyncCandidates() {
         <div className="mt-6">
           <h3 className="text-body font-medium">Settlements Splitwise disagrees about</h3>
           <p className="mt-1 text-meta text-ink-muted">
-            A settlement&apos;s amount cannot go stale the way a refunded expense&apos;s can, so
-            the only way these come apart is Splitwise&apos;s own side moving.
+            A settlement&apos;s amount cannot go stale the way a refunded expense&apos;s can, so the
+            only way these come apart is Splitwise&apos;s own side moving.
           </p>
           <div className="mt-3">
             <ResponsiveTable
@@ -215,8 +211,8 @@ export function ResyncCandidates() {
         title={dialogTitle(pushingExpense?.plannedRepair)}
         consequence={
           <>
-            This writes to <strong>Splitwise</strong> — the only action in this product that
-            does. {repairConsequence(pushingExpense?.plannedRepair)}{" "}
+            This writes to <strong>Splitwise</strong> — the only action in this product that does.{" "}
+            {repairConsequence(pushingExpense?.plannedRepair)}{" "}
             {pushingExpense !== null && pushingExpense.plannedRepair !== "withdrawn" && (
               <>
                 The figure it pushes is this ledger&apos;s current one of{" "}
@@ -252,9 +248,9 @@ export function ResyncCandidates() {
           <>
             This writes to <strong>Splitwise</strong>. It corrects the settlement entry already
             there — same entry, same id — so that it reads{" "}
-            {pushingSettlement !== null && <Money paise={pushingSettlement.currentAmount} />} in
-            the direction this ledger recorded. It discharges nothing new here, and records no
-            second settlement.
+            {pushingSettlement !== null && <Money paise={pushingSettlement.currentAmount} />} in the
+            direction this ledger recorded. It discharges nothing new here, and records no second
+            settlement.
           </>
         }
         confirmLabel="Push it"

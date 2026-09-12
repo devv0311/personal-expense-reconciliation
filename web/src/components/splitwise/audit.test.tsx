@@ -348,7 +348,9 @@ describe("connecting Splitwise, and correcting what it holds", () => {
     ).toBeInTheDocument();
     // And says what it will *not* do instead, because the previous version of this repair did
     // exactly that.
-    expect(screen.getByText(/would leave the other person holding two records/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/would leave the other person holding two records/),
+    ).toBeInTheDocument();
   });
 
   it("corrects a drifted settlement through the settlement route", async () => {

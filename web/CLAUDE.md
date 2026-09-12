@@ -16,7 +16,7 @@ audit-trail screens. None of it widened what this package may do — the rules b
 exception, and `receiptId` on `GET /api/evidence/:evidenceId` is the only read that was added.
 
 **After phase 22**, four unnumbered capabilities added screens here: sending a reviewed proof
-pack (ADR-0053), a live-balance panel that sits visibly *after* the waterfall and never inside
+pack (ADR-0053), a live-balance panel that sits visibly _after_ the waterfall and never inside
 it (ADR-0054), statement import for real formats (ADR-0051), and the rebuilt Splitwise repair
 (ADR-0055). Rule 1 held throughout, and the repair is a good illustration of what it costs:
 the screen has to state, before a person confirms, whether a push corrects their entry, removes
