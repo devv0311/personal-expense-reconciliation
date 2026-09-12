@@ -361,8 +361,8 @@ function TargetPicker({
       </Select>
       <p className="text-micro text-ink-faint">
         An expense has to be approved before it can be joined, and may hold only one link — one
-        still proposed or under review will be refused. Adopting creates no expense: if none
-        exists here, author it first.
+        still proposed or under review will be refused. Adopting creates no expense: if none exists
+        here, author it first.
       </p>
     </div>
   );

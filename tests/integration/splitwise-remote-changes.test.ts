@@ -29,7 +29,9 @@ import {
   discoverSplitwiseRemoteChanges,
   getBalance,
   listResyncCandidates,
+  listSettlementResyncCandidates,
   recordSettlement,
+  resyncSettlementToSplitwise,
   syncExpenseToSplitwise,
   syncSettlementToSplitwise,
   transitionExpense,
@@ -621,6 +623,41 @@ describe('a settlement somebody deleted on their side', () => {
     expect(link?.syncStatus).toBe('externally_deleted');
     const settlements = await database.db.select().from(schema.settlements);
     expect(settlements).toHaveLength(1);
+  });
+
+  it('repairs it by creating the entry again, never by recording a second settlement', async () => {
+    const settlementId = await syncedSettlement();
+    splitwise.setLedgerEntries('sw-friend-a', []);
+    const { changes } = await discover();
+    const deletion = changes.find((change) => change.kind === 'remote_settlement_deleted')!;
+    await decideSplitwiseRemoteChange(database.db, {
+      changeId: deletion.id,
+      decision: 'accept',
+      reason: 'They removed the repayment entry.',
+      audit: AS_USER,
+    });
+
+    // The candidate list says what the push will do, so a screen quotes it rather than
+    // inferring "corrected" for a row with nothing standing (ADR-0055's rule, ADR-0056's case).
+    const candidates = await listSettlementResyncCandidates(database.db);
+    expect(candidates.find((row) => row.settlementId === settlementId)?.plannedRepair).toBe(
+      'recreated',
+    );
+
+    const result = await resyncSettlementToSplitwise(database.db, {
+      settlementId,
+      splitwise,
+      reason: 'Putting the repayment back after they deleted it.',
+      audit: AS_USER,
+    });
+    expect(result.repair).toBe('recreated');
+    // A create, not an update — and, critically, exactly one settlement here still.
+    expect(splitwise.recordedPayments).toHaveLength(2);
+    expect(splitwise.updatedPayments).toHaveLength(0);
+    expect(await database.db.select().from(schema.settlements)).toHaveLength(1);
+
+    const link = await getSplitwiseSettlementBySettlementId(database.db, settlementId);
+    expect(link?.syncStatus).toBe('synced');
   });
 });
 

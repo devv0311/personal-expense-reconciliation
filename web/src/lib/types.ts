@@ -1357,11 +1357,21 @@ export interface SettlementResyncCandidate {
   readonly currentAmount: string;
   readonly counterpartyPersonId: string;
   readonly counterpartyName: string;
+  /**
+   * What repairing this settlement would do to Splitwise, as the API decided it.
+   *
+   * `corrected` for a drifted entry, `recreated` for one somebody deleted on their side
+   * (ADR-0056). Quoted here, never derived from `syncStatus` — the same rule the expense side
+   * follows (ADR-0048).
+   */
+  readonly plannedRepair: Extract<SplitwiseRepairKind, "corrected" | "recreated">;
 }
 
 export interface SettlementResyncResult {
   readonly splitwiseTransactionId: string;
   readonly syncStatus: "synced";
+  readonly repair: Extract<SplitwiseRepairKind, "corrected" | "recreated">;
+  readonly previousExternalId: string;
   readonly previousSnapshot: unknown;
   readonly pushedAmount: string;
 }
