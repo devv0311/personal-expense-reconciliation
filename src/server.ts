@@ -22,7 +22,7 @@
  * | `HOST` | Bind address; default `127.0.0.1` (loopback only). |
  * | `DATABASE_URL` | A real Postgres connection string. Unset falls back to PGlite persisted at `PGLITE_DATA_DIR` (default `./local-data/pglite-dev`), rather than the test suite's in-memory instance, so data survives a restart and `scripts/seed-dev-data.ts` populates the same database this process serves. |
  * | `EVIDENCE_STORAGE_PATH` | Where documents are written; default `./local-data/evidence`. |
- * | `ANTHROPIC_API_KEY` | Wires the real model transport. Unset: every AI operation refuses, naming the missing configuration. |
+ * | `ANTHROPIC_API_KEY` | Wires the real model transport. Unset: every AI operation refuses, naming the missing configuration, and `GET /api/ask/capabilities` reports the provider as unconfigured so the question screen never offers a box that fails (ADR-0057). |
  * | `ANTHROPIC_MODEL` | Overrides the default model. |
  * | `AI_DOCUMENT_VISION` | `true` lets a multimodal model transcribe a **photographed** receipt whose bytes have no text layer — the one path on which a document leaves this machine (ADR-0051). Unset/false: a photographed receipt is refused by name and can still be itemized by hand. A generated PDF is always read locally, configured or not. |
  * | `SPLITWISE_API_KEY` + `SPLITWISE_USER_ID` | Wires the real Splitwise adapter. Either missing: every Splitwise call refuses, and an audit records an INCOMPLETE check rather than agreement. |
