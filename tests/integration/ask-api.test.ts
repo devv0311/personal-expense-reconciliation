@@ -318,6 +318,29 @@ describe('the boundary around the question', () => {
     expect(unconfigured.asked).toEqual([]);
   });
 
+  it('reports a provider that fails mid-call as unavailable, not as a broken ledger', async () => {
+    // A transport error carries its own class. Before this was discriminated explicitly it
+    // slipped past as an anonymous 500 — "something is wrong with your ledger" rather than
+    // "the provider could not be reached".
+    const failing = scriptedQueryPlanTransport();
+    await expect(
+      answerLedgerQuestion(database.db, {
+        question: 'A question nobody scripted',
+        userPersonId: cast.userPersonId,
+        ai: createAiService(failing),
+        now: NOW,
+      }),
+    ).rejects.toThrow(ServiceError);
+    await expect(
+      answerLedgerQuestion(database.db, {
+        question: 'A question nobody scripted',
+        userPersonId: cast.userPersonId,
+        ai: createAiService(failing),
+        now: NOW,
+      }),
+    ).rejects.toThrow(/could not be planned/);
+  });
+
   it('refuses an empty or oversized question', async () => {
     await expect(ask('   ')).rejects.toThrow(/Ask something/);
     await expect(ask('a'.repeat(501))).rejects.toThrow(/at most 500 characters/);

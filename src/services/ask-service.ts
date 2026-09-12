@@ -51,6 +51,7 @@ import type {
   Paise,
   PersonId,
 } from '../domain/index.js';
+import { isAiContractError, isSanitizationError } from '../ai/index.js';
 import type { AiService, ModelAvailability, ModelInfo } from '../ai/index.js';
 
 import {
@@ -195,10 +196,13 @@ export async function answerLedgerQuestion(
       knownCategories: categories,
     });
   } catch (error) {
-    // A contract breach and a sanitization refusal are both the boundary working, and both
-    // belong to their own error types — they propagate. Anything else is the provider being
-    // unreachable, which is a fact about the environment rather than about the question.
-    if (error instanceof Error && error.name !== 'Error') throw error;
+    // A contract breach and a sanitization refusal are both the boundary working as designed,
+    // and each already maps to its own status — they propagate untouched. **Everything else is
+    // the provider being unreachable**, which is a fact about the environment rather than about
+    // the question, and reaches the caller as a 503 that says so. Discriminating on the two
+    // named types rather than on "is this a plain Error" matters: a transport failure carries
+    // its own class too, and the earlier check let it through as an anonymous 500.
+    if (isAiContractError(error) || isSanitizationError(error)) throw error;
     throw new ServiceError(
       'LEDGER_QUESTION_UNAVAILABLE',
       `The question could not be planned: ${error instanceof Error ? error.message : String(error)}`,
