@@ -113,7 +113,15 @@ export type DomainErrorCode =
   /** A remote Splitwise change was applied without an explicit local decision (ADR-0054). */
   | 'SPLITWISE_CHANGE_UNREVIEWED'
   /** A proposed remote change no longer matches the remote state it was derived from. */
-  | 'SPLITWISE_CHANGE_STALE';
+  | 'SPLITWISE_CHANGE_STALE'
+  /**
+   * A query plan parsed as the contract but cannot be answered (gate 2, ADR-0057).
+   *
+   * Distinct from `AiContractError`, which means the model's reply was not a plan at all. This
+   * one means it was a plan naming a period that ends before it starts, a page size outside
+   * the bound, or a refusal carrying query parameters it has no business carrying.
+   */
+  | 'LEDGER_QUERY_PLAN_INVALID';
 
 /** Thrown by `src/domain` when an input violates a documented invariant. */
 export class DomainError extends Error {

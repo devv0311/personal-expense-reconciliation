@@ -116,7 +116,9 @@ export function toErrorResponse(error: unknown): Response {
                   ? 503
                   : error.code === 'SPLITWISE_SYNC_FAILED'
                     ? 502
-                    : 500;
+                    : error.code === 'LEDGER_QUESTION_UNAVAILABLE'
+                      ? 503
+                      : 500;
     return jsonResponse(status, {
       error: { code: error.code, message: error.message },
     } satisfies ApiErrorBody);

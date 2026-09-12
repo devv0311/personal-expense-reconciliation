@@ -28,6 +28,7 @@ import type {
 } from '../services/index.js';
 
 import { getAccountsRoute } from './account-routes.js';
+import { getAskCapabilitiesRoute, postAsk } from './ask-routes.js';
 import {
   getAccountBalanceReadingsRoute,
   getBalanceComparisonRoute,
@@ -186,6 +187,13 @@ import {
   postSyncExpense,
   postSyncSettlement,
 } from './splitwise-routes.js';
+import {
+  getRemoteChangeRoute,
+  getRemoteChangesRoute,
+  getRemoteReadsRoute,
+  postDiscoverRemoteChanges,
+  postRemoteChangeDecision,
+} from './splitwise-remote-routes.js';
 
 /** What the handlers need. Injected, so nothing in `src/api` reaches for a connection. */
 export interface ApiDependencies {
@@ -490,6 +498,17 @@ export const RULE_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/rules/:ruleId', handler: postRuleUpdate },
 ];
 
+/**
+ * Asking the ledger a question in words (audit row 45, ADR-0057).
+ *
+ * A read surface. `POST /api/ask` carries a question in a body and writes nothing — it takes
+ * no `actor`, because nothing happened to attribute.
+ */
+export const ASK_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/ask/capabilities', handler: getAskCapabilitiesRoute },
+  { method: 'POST', path: '/api/ask', handler: postAsk },
+];
+
 /** Aggregate reads over the ledger's own figures (audit rows 30 and 44). All reads. */
 export const ANALYTICS_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/analytics/spending', handler: getSpendingRoute },
@@ -670,6 +689,32 @@ export const SPLITWISE_ROUTES: readonly ApiRoute[] = [
  * (phase 19, ADR-0046). Every route is a read or a recorded decision — none writes to
  * Splitwise, and reviewing a finding does not authorize one to.
  */
+/**
+ * Reading changes made *in* Splitwise, and deciding about them (ADR-0056).
+ *
+ * `/api/splitwise/remote-changes/discover` is listed before `/api/splitwise/remote-changes/:id`,
+ * which would otherwise read "discover" as an id — the table's one precedence rule.
+ *
+ * Note what is absent, as with the audit routes: nothing here writes a figure. Accepting a
+ * change records what Splitwise holds, closes a sync row, or joins two ids; making a remote
+ * number true in this ledger stays an `ExpenseAdjustment` a person records with evidence.
+ */
+export const SPLITWISE_REMOTE_ROUTES: readonly ApiRoute[] = [
+  {
+    method: 'POST',
+    path: '/api/splitwise/remote-changes/discover',
+    handler: postDiscoverRemoteChanges,
+  },
+  { method: 'GET', path: '/api/splitwise/remote-changes', handler: getRemoteChangesRoute },
+  { method: 'GET', path: '/api/splitwise/remote-reads', handler: getRemoteReadsRoute },
+  {
+    method: 'POST',
+    path: '/api/splitwise/remote-changes/:id/decision',
+    handler: postRemoteChangeDecision,
+  },
+  { method: 'GET', path: '/api/splitwise/remote-changes/:id', handler: getRemoteChangeRoute },
+];
+
 export const SPLITWISE_AUDIT_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/splitwise/audits', handler: postSplitwiseAudit },
   { method: 'GET', path: '/api/splitwise/audits', handler: getSplitwiseAuditsRoute },
@@ -715,6 +760,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...AUDIT_ROUTES,
   ...RULE_ROUTES,
   ...ANALYTICS_ROUTES,
+  ...ASK_ROUTES,
   ...OCCASION_ROUTES,
   ...JOB_ROUTES,
   ...EXPENSE_LEDGER_ROUTES,
@@ -726,6 +772,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...GROUP_ROUTES,
   ...PROOF_PACK_ROUTES,
   ...SPLITWISE_ROUTES,
+  ...SPLITWISE_REMOTE_ROUTES,
   ...SPLITWISE_AUDIT_ROUTES,
   ...RECONCILIATION_ROUTES,
 ];

@@ -133,6 +133,16 @@ async function openDevDatabase(): Promise<DatabaseHandle> {
  */
 const UNCONFIGURED_MODEL_TRANSPORT: ModelTransport = {
   modelInfo: { provider: 'none', model: 'unconfigured' },
+  // Declared rather than inferred (ADR-0057). `GET /api/ask/capabilities` reads this so the
+  // question box can say why it is unavailable instead of failing on submit; every other
+  // operation already refused by name, and this is the same refusal made readable in advance.
+  availability: {
+    configured: false,
+    unavailableReason:
+      'ANTHROPIC_API_KEY is not set on the API process, so there is no model to plan a query ' +
+      'with. Every figure a question would report is still reachable from the screen that ' +
+      'owns it — analytics, balances, expenses, reconciliation and the Splitwise audit.',
+  },
   complete(): Promise<unknown> {
     return Promise.reject(
       new Error(

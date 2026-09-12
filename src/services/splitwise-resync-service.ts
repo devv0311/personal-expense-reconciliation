@@ -49,7 +49,11 @@ import {
   updateSplitwiseSettlementSync,
 } from '../db/index.js';
 import type { Database, Executor } from '../db/index.js';
-import { assertSplitwiseExpenseSyncTransition, settlementParties } from '../domain/index.js';
+import {
+  assertSplitwiseExpenseSyncTransition,
+  assertSplitwiseSettlementSyncTransition,
+  settlementParties,
+} from '../domain/index.js';
 import type {
   ExpenseId,
   PersonId,
@@ -109,6 +113,9 @@ export function describeSplitwiseRepairCapability(
  */
 export type SplitwiseRepairKind = 'corrected' | 'withdrawn' | 'recreated';
 
+/** Sync statuses from which nothing is standing in Splitwise, so a repair must create. */
+const NOTHING_STANDING: readonly string[] = ['withdrawn', 'externally_deleted'];
+
 /** One row Splitwise and this ledger disagree about, with what each currently says. */
 export interface ResyncCandidate {
   readonly splitwiseExpenseId: SplitwiseExpenseId;
@@ -143,12 +150,11 @@ export async function listResyncCandidates(db: Executor): Promise<readonly Resyn
   const rows = await listResyncableSplitwiseExpenses(db);
   return rows.map((row) => ({
     ...row,
-    plannedRepair:
-      row.syncStatus === 'withdrawn'
-        ? 'recreated'
-        : row.currentNetAmount === '0'
-          ? 'withdrawn'
-          : 'corrected',
+    plannedRepair: NOTHING_STANDING.includes(row.syncStatus)
+      ? 'recreated'
+      : row.currentNetAmount === '0'
+        ? 'withdrawn'
+        : 'corrected',
   }));
 }
 
@@ -163,12 +169,21 @@ export interface SettlementResyncCandidate {
   readonly currentAmount: string;
   readonly counterpartyPersonId: PersonId;
   readonly counterpartyName: string;
+  /**
+   * What repairing this row would do to Splitwise, decided here rather than by whoever renders
+   * it — the same rule the expense side follows (ADR-0055, extended by ADR-0056).
+   */
+  readonly plannedRepair: Extract<SplitwiseRepairKind, 'corrected' | 'recreated'>;
 }
 
 export async function listSettlementResyncCandidates(
   db: Executor,
 ): Promise<readonly SettlementResyncCandidate[]> {
-  return listResyncableSplitwiseSettlements(db);
+  const rows = await listResyncableSplitwiseSettlements(db);
+  return rows.map((row) => ({
+    ...row,
+    plannedRepair: row.syncStatus === 'externally_deleted' ? 'recreated' : 'corrected',
+  }));
 }
 
 /* ----------------------------------------------------------------- repairing an expense */
@@ -220,7 +235,8 @@ export async function resyncExpenseToSplitwise(
   if (
     link.syncStatus !== 'stale' &&
     link.syncStatus !== 'drifted' &&
-    link.syncStatus !== 'withdrawn'
+    link.syncStatus !== 'withdrawn' &&
+    link.syncStatus !== 'externally_deleted'
   ) {
     throw new ServiceError(
       'PRECONDITION_FAILED',
@@ -251,13 +267,16 @@ export async function resyncExpenseToSplitwise(
   }
 
   const netIsZero = expense.netAmount === 0n;
-  const nothingStanding = before.syncStatus === 'withdrawn';
+  // `withdrawn` (this ledger removed it, ADR-0055) and `externally_deleted` (somebody else
+  // did, ADR-0056) differ in what they mean and agree on what they imply for a repair: there
+  // is no entry to correct, so the honest push is a create.
+  const nothingStanding = NOTHING_STANDING.includes(before.syncStatus);
 
   if (nothingStanding && netIsZero) {
     throw new ServiceError(
       'PRECONDITION_FAILED',
-      'This expense nets to zero and its Splitwise entry has already been withdrawn. There is ' +
-        'nothing left to assert and nothing standing to correct.',
+      `This expense nets to zero and its Splitwise entry is already gone (${before.syncStatus}). ` +
+        'There is nothing left to assert and nothing standing to correct.',
       { expenseId: expense.id },
     );
   }
@@ -391,6 +410,9 @@ export interface ResyncSettlementInput {
 export interface ResyncSettlementResult {
   readonly splitwiseTransactionId: string;
   readonly syncStatus: 'synced';
+  /** `corrected` in place, or `recreated` because their entry was deleted (ADR-0056). */
+  readonly repair: Extract<SplitwiseRepairKind, 'corrected' | 'recreated'>;
+  readonly previousExternalId: string;
   readonly previousSnapshot: unknown;
   readonly pushedAmount: string;
 }
@@ -428,7 +450,7 @@ export async function resyncSettlementToSplitwise(
       { settlementId: settlement.id },
     );
   }
-  if (link.syncStatus !== 'drifted') {
+  if (link.syncStatus !== 'drifted' && link.syncStatus !== 'externally_deleted') {
     throw new ServiceError(
       'PRECONDITION_FAILED',
       `This settlement row is "${link.syncStatus}". Pushing over one the ledgers already agree ` +
@@ -457,33 +479,53 @@ export async function resyncSettlementToSplitwise(
   const from = await requireSplitwiseUserId(db, fromPersonId);
   const to = await requireSplitwiseUserId(db, toPersonId);
 
-  const update = requirePortMethod(
-    input.splitwise.updatePayment?.bind(input.splitwise),
-    'updatePayment',
-    'correct a settlement Splitwise already holds. Recording a second settlement instead would ' +
-      'discharge the debt twice.',
-  );
+  // Nothing is standing when somebody deleted their entry, so the honest push is a create —
+  // the same conclusion the expense repair reaches for a `withdrawn` row, and the reason
+  // `externally_deleted` is a status of its own rather than another shade of `drifted`.
+  const repair: Extract<SplitwiseRepairKind, 'corrected' | 'recreated'> =
+    link.syncStatus === 'externally_deleted' ? 'recreated' : 'corrected';
+  assertSplitwiseSettlementSyncTransition(before.syncStatus, 'synced');
 
-  let updated;
+  let externalId: string;
+  let theirSnapshot: unknown;
   try {
-    updated = await update({
-      splitwiseTransactionId: before.splitwiseTransactionId,
-      amount: settlement.amount,
-      fromSplitwiseUserId: from,
-      toSplitwiseUserId: to,
-    });
-    if (updated.splitwiseTransactionId !== before.splitwiseTransactionId) {
-      throw new Error(
-        `the entry id moved from ${before.splitwiseTransactionId} to ` +
-          `${updated.splitwiseTransactionId}, which is a duplicate rather than a correction`,
+    if (repair === 'corrected') {
+      const update = requirePortMethod(
+        input.splitwise.updatePayment?.bind(input.splitwise),
+        'updatePayment',
+        'correct a settlement Splitwise already holds. Recording a second settlement instead ' +
+          'would discharge the debt twice.',
       );
+      const updated = await update({
+        splitwiseTransactionId: before.splitwiseTransactionId,
+        amount: settlement.amount,
+        fromSplitwiseUserId: from,
+        toSplitwiseUserId: to,
+      });
+      if (updated.splitwiseTransactionId !== before.splitwiseTransactionId) {
+        throw new Error(
+          `the entry id moved from ${before.splitwiseTransactionId} to ` +
+            `${updated.splitwiseTransactionId}, which is a duplicate rather than a correction`,
+        );
+      }
+      externalId = before.splitwiseTransactionId;
+      theirSnapshot = updated.theirSnapshot;
+    } else {
+      const recorded = await input.splitwise.recordPayment({
+        amount: settlement.amount,
+        fromSplitwiseUserId: from,
+        toSplitwiseUserId: to,
+      });
+      externalId = recorded.splitwiseTransactionId;
+      theirSnapshot = recorded.theirSnapshot;
     }
   } catch (error) {
+    if (error instanceof ServiceError) throw error;
     throw new ServiceError(
       'SPLITWISE_SYNC_FAILED',
       `Splitwise refused the correction for settlement ${settlement.id}: ` +
         (error instanceof Error ? error.message : String(error)),
-      { settlementId: settlement.id },
+      { settlementId: settlement.id, repair },
     );
   }
 
@@ -493,15 +535,16 @@ export async function resyncSettlementToSplitwise(
       amount: settlement.amount.toString(),
       from,
       to,
-      repair: 'corrected',
+      repair,
+      previousExternalId: before.splitwiseTransactionId,
       correctionReason: input.reason,
     };
 
     await updateSplitwiseSettlementSync(exec, link.id, {
-      splitwiseTransactionId: before.splitwiseTransactionId,
+      splitwiseTransactionId: externalId,
       syncedAt,
       ourSnapshot,
-      theirSnapshot: updated.theirSnapshot,
+      theirSnapshot,
       syncStatus: 'synced',
     });
 
@@ -509,14 +552,20 @@ export async function resyncSettlementToSplitwise(
       entityType: 'splitwise_settlement',
       entityId: link.id,
       action: 'update',
-      oldValue: { syncStatus: link.syncStatus, ourSnapshot: before.ourSnapshot },
-      newValue: { syncStatus: 'synced', ourSnapshot },
+      oldValue: {
+        syncStatus: link.syncStatus,
+        splitwiseTransactionId: before.splitwiseTransactionId,
+        ourSnapshot: before.ourSnapshot,
+      },
+      newValue: { syncStatus: 'synced', splitwiseTransactionId: externalId, ourSnapshot },
       reason: input.reason,
     });
 
     return {
-      splitwiseTransactionId: before.splitwiseTransactionId,
+      splitwiseTransactionId: externalId,
       syncStatus: 'synced' as const,
+      repair,
+      previousExternalId: before.splitwiseTransactionId,
       previousSnapshot: before.ourSnapshot,
       pushedAmount: settlement.amount.toString(),
     };

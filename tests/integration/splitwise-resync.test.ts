@@ -240,7 +240,7 @@ describe('resyncExpenseToSplitwise', () => {
         reason: 'Again.',
         audit: AS_USER,
       }),
-    ).rejects.toThrow(/already been withdrawn/);
+    ).rejects.toThrow(/already gone \(withdrawn\)/);
     expect(splitwise.deletedEntries).toHaveLength(1);
   });
 

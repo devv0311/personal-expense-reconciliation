@@ -127,6 +127,13 @@
       "when": 1789208526451,
       "tag": "0017_splitwise_withdrawn_status",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1789229929725,
+      "tag": "0018_splitwise_remote_changes",
+      "breakpoints": true
     }
   ]
 }

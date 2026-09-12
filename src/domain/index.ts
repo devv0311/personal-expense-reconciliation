@@ -42,3 +42,5 @@ export * from './rounding.js';
 export * from './rules.js';
 export * from './splitwise-audit.js';
 export * from './splitwise-drift.js';
+export * from './splitwise-remote-change.js';
+export * from './ledger-query.js';

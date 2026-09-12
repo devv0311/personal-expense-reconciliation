@@ -4893,7 +4893,17 @@ export async function listResyncableSplitwiseExpenses(exec: Executor): Promise<
     })
     .from(splitwiseExpenses)
     .innerJoin(expenses, eq(expenses.id, splitwiseExpenses.expenseId))
-    .where(inArray(splitwiseExpenses.syncStatus, ['stale', 'drifted', 'withdrawn']))
+    .where(
+      inArray(splitwiseExpenses.syncStatus, [
+        'stale',
+        'drifted',
+        'withdrawn',
+        // Somebody deleted the entry on their side while this ledger still asserts a figure
+        // (ADR-0056). Nothing is standing to correct, so the repair is a create — which is why
+        // this is listed beside `withdrawn` rather than folded into `drifted`.
+        'externally_deleted',
+      ]),
+    )
     .orderBy(desc(splitwiseExpenses.syncedAt));
   if (rows.length === 0) return [];
 
@@ -4931,7 +4941,13 @@ export async function listResyncableSplitwiseExpenses(exec: Executor): Promise<
         description: row.description,
       }))
       // An already-withdrawn row with nothing to re-assert is not a repair anybody can make.
-      .filter((row) => row.syncStatus !== 'withdrawn' || row.currentNetAmount !== '0')
+      // The same holds for one somebody else deleted: if the net is zero there is nothing to
+      // put back, and the two ledgers already say the same thing.
+      .filter(
+        (row) =>
+          (row.syncStatus !== 'withdrawn' && row.syncStatus !== 'externally_deleted') ||
+          row.currentNetAmount !== '0',
+      )
   );
 }
 
@@ -5001,9 +5017,11 @@ export async function getSplitwiseSettlementRow(
 /**
  * Every synced settlement a person could choose to repair.
  *
- * Only `drifted` — a settlement's own amount cannot go `stale` the way an adjusted expense's
- * net can (`SPLITWISE_SETTLEMENT_SYNC_STATUSES`), so the only way the two ledgers come apart
- * about one is Splitwise's side moving.
+ * `drifted` or `externally_deleted` — a settlement's own amount cannot go `stale` the way an
+ * adjusted expense's net can (`SPLITWISE_SETTLEMENT_SYNC_STATUSES`), so the only ways the two
+ * ledgers come apart about one are Splitwise's figure moving and somebody deleting the entry
+ * there (ADR-0056). The first is corrected in place; the second has to be recreated, because
+ * nothing is standing to correct.
  *
  * `currentAmount` is the settlement's recorded amount, read rather than recomputed: a
  * settlement has no allocation to re-derive and no adjustment to net off.
@@ -5036,7 +5054,7 @@ export async function listResyncableSplitwiseSettlements(exec: Executor): Promis
     .from(splitwiseSettlements)
     .innerJoin(settlements, eq(settlements.id, splitwiseSettlements.settlementId))
     .innerJoin(people, eq(people.id, settlements.counterpartyPersonId))
-    .where(eq(splitwiseSettlements.syncStatus, 'drifted'))
+    .where(inArray(splitwiseSettlements.syncStatus, ['drifted', 'externally_deleted']))
     .orderBy(desc(splitwiseSettlements.syncedAt));
 
   return rows.map((row) => ({
