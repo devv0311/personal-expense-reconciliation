@@ -986,6 +986,18 @@ export function useResyncExpense() {
   });
 }
 
+export function useResyncSettlement() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.resyncSettlementToSplitwise,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.resyncCandidates() });
+      void queryClient.invalidateQueries({ queryKey: ["splitwise-audit-findings"] });
+      void queryClient.invalidateQueries({ queryKey: ["settlements"] });
+    },
+  });
+}
+
 /** A push changes the expense's state, what still needs one, and what an audit would find. */
 function invalidateSplitwise(
   queryClient: ReturnType<typeof useQueryClient>,

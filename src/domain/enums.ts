@@ -531,12 +531,21 @@ export type ExternalIntegrationType = (typeof EXTERNAL_INTEGRATION_TYPES)[number
 export const EXTERNAL_INTEGRATION_STATUSES = ['connected', 'disconnected', 'error'] as const;
 export type ExternalIntegrationStatus = (typeof EXTERNAL_INTEGRATION_STATUSES)[number];
 
-/** `stale` (our side changed) is deliberately distinct from `drifted` (theirs did). */
+/**
+ * `stale` (our side changed) is deliberately distinct from `drifted` (theirs did).
+ *
+ * `withdrawn` (ADR-0055) is the one state a repair can leave a row in other than `synced`: the
+ * expense's net fell to zero, Splitwise cannot hold a zero-cost expense, and so the entry was
+ * removed rather than left standing at a figure this ledger no longer asserts. The row keeps
+ * the external id it held, because an audit that could no longer see the entry it once matched
+ * could not explain its own past findings.
+ */
 export const SPLITWISE_EXPENSE_SYNC_STATUSES = [
   'pending',
   'synced',
   'drifted',
   'stale',
+  'withdrawn',
   'sync_failed',
 ] as const;
 export type SplitwiseExpenseSyncStatus = (typeof SPLITWISE_EXPENSE_SYNC_STATUSES)[number];

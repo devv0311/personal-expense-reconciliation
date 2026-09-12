@@ -1,6 +1,28 @@
 # CLAUDE.md — Engineering Context for This Repository
 
-> **Current decisions (2026-09-08).** **The numbered sequence is complete: phases 1–22 are all
+> **Current decisions (2026-09-12).** The numbered sequence ended at phase 22; **four of the
+> five capabilities ADR-0050 left genuinely unbuilt are now built**, each with its own ADR and
+> none of them a phase. Real statement formats (CSV/XLSX/PDF, eight declared banks) and a
+> token-guarded forwarding intake, plus successor-not-edit corrections
+> ([ADR-0051](docs/decisions/0051-reading-a-document-is-local-first-and-optical-only-by-opt-in.md),
+> [ADR-0052](docs/decisions/0052-an-immutable-record-that-was-wrong-gets-a-successor-never-an-edit.md));
+> a **message transport for proof packs** whose body is derived server-side at send time and
+> which still records no settlement
+> ([ADR-0053](docs/decisions/0053-sending-a-proof-pack-is-a-recorded-outward-act.md));
+> **live balance adapters** whose readings are compared and never written into a boundary
+> ([ADR-0054](docs/decisions/0054-a-live-balance-is-a-second-opinion-never-a-boundary.md)); and
+> **Splitwise repair**
+> ([ADR-0055](docs/decisions/0055-a-correction-edits-the-entry-they-are-looking-at.md)), which
+> replaced phase 22's re-sync. That first version corrected a stale entry by creating a second
+> one — tidy from this side, and it left the counterparty holding two records for one dinner with
+> Splitwise counting both. A repair now edits the entry they are looking at, at the id this
+> ledger recorded; an adapter that cannot edit in place refuses **by name** rather than falling
+> back to a create; a net that reaches zero withdraws the entry, the one deletion this system
+> performs and never to tidy an audit. **Still unbuilt:** reading a Splitwise-side edit back into
+> this ledger (principle 9 forbids it today), a natural-language interface, and an editor for a
+> model's stored proposal. Each needs its own ADR.
+>
+> **Phase context (2026-09-08).** **The numbered sequence is complete: phases 1–22 are all
 > done.** [Phase 22](docs/roadmap.md) closed the 7 September capability audit's gaps
 > ([ADR-0050](docs/decisions/0050-closing-the-audit-gaps-a-workflow-is-not-shipped-until-it-is-reachable.md)).
 > That audit's verdict is worth keeping in mind, because it names a failure mode this repository
@@ -15,9 +37,9 @@
 > single-row re-sync, `/analytics`, `/automation` (rules and jobs), occasions, the audit-trail
 > screens, and ledger-wide search with real paging. **`web/` still performs no financial
 > arithmetic**: `receiptId` on `GET /api/evidence/:evidenceId` is the only read the whole phase
-> added. What remains unbuilt is now genuinely unbuilt rather than unreachable — a message
-> transport, live bank adapters, bidirectional Splitwise sync, and the natural-language
-> interface — and each needs its own ADR.
+> added. What remained unbuilt was then genuinely unbuilt rather than unreachable — a message
+> transport, live bank adapters, Splitwise repair, and the natural-language interface — and each
+> needed its own ADR. All but the last are now done; see the block above.
 > [Phase 21](docs/roadmap.md) shipped the **`web/` UI/UX overhaul**
 > ([ADR-0048](docs/decisions/0048-phase-21-ui-reads-the-ledger-and-never-recomputes-it.md),
 > [ADR-0049](docs/decisions/0049-keyboard-first-navigation-never-completes-a-decision.md)),
@@ -297,10 +319,10 @@ Full invariant list (with the "why" for each): `docs/domain/invariants.md`.
 
 - This project moves in **incremental vertical slices** — see `docs/roadmap.md` for the
   phase order. **All twenty-two are complete.** A message transport for proof packs, live
-  bank/card balance
-  adapters, bidirectional Splitwise sync beyond the single-row correction, and the
-  natural-language interface remain unnumbered later work; none is a prerequisite for anything
-  already shipped, and each needs its own ADR before it starts.
+  bank/card balance adapters and Splitwise repair are **done** (ADRs 0051–0055), each as its
+  own unnumbered capability rather than a phase. A natural-language interface, and reading a Splitwise-side
+  edit back into this ledger, remain unbuilt; neither is a prerequisite for anything already
+  shipped, and each needs its own ADR before it starts.
 - **A capability is not shipped until a person can reach it** (ADR-0050). A service function and
   an HTTP route are the middle of the work, not the end of it: the September 2026 audit found
   eleven capabilities complete at those two layers and absent from the browser. When a phase

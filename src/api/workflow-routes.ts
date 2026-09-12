@@ -25,7 +25,8 @@
  * POST /api/jobs/:jobId/cancel           stop one nobody wants any more
  *
  * GET  /api/splitwise/resync-candidates  rows the two ledgers disagree about
- * POST /api/expenses/:expenseId/splitwise-resync  push this ledger's current figure
+ * POST /api/expenses/:expenseId/splitwise-resync  correct this expense's entry in place
+ * POST /api/settlements/:settlementId/splitwise-resync  correct this settlement's entry
  * ```
  */
 
@@ -57,9 +58,12 @@ import {
   getUnsettledPaidOnBehalf,
   listJobs,
   listOccasions,
+  describeSplitwiseRepairCapability,
   listResyncCandidates,
+  listSettlementResyncCandidates,
   listRules,
   resyncExpenseToSplitwise,
+  resyncSettlementToSplitwise,
   retryJob,
   updateRule,
 } from '../services/index.js';
@@ -339,13 +343,27 @@ export async function postJobCancel(
 
 /* ==================================================================== Splitwise re-sync */
 
+/**
+ * `GET /api/splitwise/resync-candidates` — everything a person could choose to repair.
+ *
+ * `capability` travels with the list rather than being assumed: the injected adapter may not
+ * be able to correct an entry in place at all, and a screen that offered the repair anyway
+ * would be promising something the port cannot do (ADR-0050, ADR-0055).
+ */
 export async function getResyncCandidatesRoute(deps: ApiDependencies): Promise<Response> {
-  const candidates = await listResyncCandidates(deps.db);
-  return jsonResponse(200, { candidates });
+  const [candidates, settlements] = await Promise.all([
+    listResyncCandidates(deps.db),
+    listSettlementResyncCandidates(deps.db),
+  ]);
+  return jsonResponse(200, {
+    candidates,
+    settlements,
+    capability: describeSplitwiseRepairCapability(deps.splitwise),
+  });
 }
 
 /**
- * `POST /api/expenses/:expenseId/splitwise-resync` — correct a stale row in Splitwise.
+ * `POST /api/expenses/:expenseId/splitwise-resync` — correct this expense's entry in Splitwise.
  *
  * Body: `{ actor, reason }`. `reason` is required: this changes a figure in somebody else's
  * ledger, and they are entitled to an account of why.
@@ -365,6 +383,32 @@ export async function postSplitwiseResync(
     splitwise: deps.splitwise,
     reason,
     audit: { actor, source: 'api POST /api/expenses/:expenseId/splitwise-resync', reason },
+  });
+  return jsonResponse(200, result);
+}
+
+/**
+ * `POST /api/settlements/:settlementId/splitwise-resync` — correct a drifted settlement.
+ *
+ * Body: `{ actor, reason }`, on the same terms as the expense repair above.
+ */
+export async function postSplitwiseSettlementResync(
+  deps: ApiDependencies,
+  request: Request,
+  params: RouteParams,
+): Promise<Response> {
+  const settlementId = asId<'settlement'>(
+    requireUuid(requireParam(params, 'settlementId'), 'settlementId'),
+  );
+  const body = await readJsonObject(request);
+  const actor = requirePersonActor(body, 'correct a Splitwise settlement');
+  const reason = requireString(body, 'reason');
+
+  const result = await resyncSettlementToSplitwise(deps.db, {
+    settlementId,
+    splitwise: deps.splitwise,
+    reason,
+    audit: { actor, source: 'api POST /api/settlements/:settlementId/splitwise-resync', reason },
   });
   return jsonResponse(200, result);
 }

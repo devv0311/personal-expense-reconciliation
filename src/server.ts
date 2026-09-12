@@ -64,9 +64,12 @@ import type { BalanceProviderPort } from './integrations/balance-provider/index.
 import { createSplitwiseAdapter } from './integrations/splitwise/index.js';
 import type {
   CreateSplitwiseExpenseResult,
+  DeleteSplitwiseEntryResult,
   RecordSplitwisePaymentResult,
   SplitwiseFriendBalance,
   SplitwisePort,
+  UpdateSplitwiseExpenseResult,
+  UpdateSplitwisePaymentResult,
 } from './integrations/splitwise/index.js';
 
 const PORT = Number.parseInt(process.env.PORT ?? '4000', 10);
@@ -173,6 +176,14 @@ function createUnconfiguredSplitwisePort(): SplitwisePort {
   return {
     createExpense: (): Promise<CreateSplitwiseExpenseResult> => notConfigured('createExpense'),
     recordPayment: (): Promise<RecordSplitwisePaymentResult> => notConfigured('recordPayment'),
+    // The repair writes (ADR-0055) are declared and rejecting, not omitted. Omitting them
+    // would say "this adapter cannot correct an entry in place" — a statement about the
+    // capability — when the truth is "there are no credentials", which is exactly what
+    // `createExpense` above already reports. A screen reading `capability` should not be told
+    // the repair is impossible here when configuring a key is all it would take.
+    updateExpense: (): Promise<UpdateSplitwiseExpenseResult> => notConfigured('updateExpense'),
+    deleteEntry: (): Promise<DeleteSplitwiseEntryResult> => notConfigured('deleteEntry'),
+    updatePayment: (): Promise<UpdateSplitwisePaymentResult> => notConfigured('updatePayment'),
     // Read-only and non-fatal to its caller (services.runReconciliation catches a failure here
     // and surfaces it as a discrepancy rather than failing the whole run, ADR-0041) — resolving
     // empty would misreport "connected, nothing owed" instead of "not actually configured", so

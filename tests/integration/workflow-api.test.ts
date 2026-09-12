@@ -522,8 +522,33 @@ describe('the job queue (audit row 51)', () => {
 
 describe('Splitwise stale re-sync (audit row 40)', () => {
   it('lists nothing to repair when nothing has drifted', async () => {
-    const body = await getJson<{ candidates: unknown[] }>('/api/splitwise/resync-candidates');
+    const body = await getJson<{ candidates: unknown[]; settlements: unknown[] }>(
+      '/api/splitwise/resync-candidates',
+    );
     expect(body.candidates).toEqual([]);
+    expect(body.settlements).toEqual([]);
+  });
+
+  it('says what the connected adapter can actually repair (ADR-0055)', async () => {
+    // Travels with the list so a screen can say "this cannot be done here" rather than offer a
+    // button that fails. The mock port implements all three; a first-sync-only adapter would
+    // report every one of them false.
+    const body = await getJson<{ capability: Record<string, boolean> }>(
+      '/api/splitwise/resync-candidates',
+    );
+    expect(body.capability).toEqual({
+      canCorrect: true,
+      canWithdraw: true,
+      canCorrectSettlement: true,
+    });
+  });
+
+  it('refuses to re-sync a settlement that was never synced', async () => {
+    const response = await post(
+      `/api/settlements/${'00000000-0000-4000-8000-000000000000'}/splitwise-resync`,
+      { actor: 'user', reason: 'Trying anyway' },
+    );
+    expect(response.status).toBe(404);
   });
 
   it('refuses to re-sync an expense that was never synced', async () => {

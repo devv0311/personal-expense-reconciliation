@@ -216,3 +216,88 @@ describe('writes', () => {
     expect(body['cost']).toBe('900.00');
   });
 });
+
+/**
+ * The repair writes (ADR-0055). What these hold to account is that a correction addresses the
+ * entry already there — a URL carrying its id, and an id that comes back unchanged.
+ */
+describe('repair writes', () => {
+  function requestUrl(fetchImpl: { mock: { calls: unknown[][] } }): string {
+    return String(fetchImpl.mock.calls[0]?.[0]);
+  }
+
+  it('corrects an expense at its own id, sending the same body shape as a create', async () => {
+    const fetchImpl = vi.fn(respondWith(jsonResponse({ expenses: [{ id: 555 }] })));
+    const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
+
+    const result = await adapter.updateExpense!({
+      splitwiseExpenseId: '555',
+      description: 'Groceries',
+      amount: paise(62002n),
+      currency: 'INR',
+      paidBySplitwiseUserId: '1',
+      shares: [
+        { splitwiseUserId: '1', owedAmount: paise(31001n) },
+        { splitwiseUserId: '42', owedAmount: paise(31001n) },
+      ],
+    });
+
+    expect(result.splitwiseExpenseId).toBe('555');
+    expect(requestUrl(fetchImpl)).toContain('/update_expense/555');
+    const body = JSON.parse(requestBody(fetchImpl)) as Record<string, unknown>;
+    expect(body['cost']).toBe('620.02');
+    expect(body['users__0__owed_share']).toBe('310.01');
+  });
+
+  it('refuses an answer carrying a different id — that is a duplicate, not a correction', async () => {
+    const fetchImpl = vi.fn(respondWith(jsonResponse({ expenses: [{ id: 999 }] })));
+    const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
+
+    await expect(
+      adapter.updateExpense!({
+        splitwiseExpenseId: '555',
+        description: null,
+        amount: paise(100n),
+        currency: 'INR',
+        paidBySplitwiseUserId: '1',
+        shares: [{ splitwiseUserId: '42', owedAmount: paise(100n) }],
+      }),
+    ).rejects.toThrow(/duplicate, not a correction/);
+  });
+
+  it('deletes an entry at its own id', async () => {
+    const fetchImpl = vi.fn(respondWith(jsonResponse({ success: true })));
+    const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
+
+    const result = await adapter.deleteEntry!({ splitwiseEntryId: '555' });
+    expect(result.splitwiseEntryId).toBe('555');
+    expect(requestUrl(fetchImpl)).toContain('/delete_expense/555');
+  });
+
+  it('treats an unexplained `success: false` as a failure, not a completed deletion', async () => {
+    const fetchImpl = vi.fn(respondWith(jsonResponse({ success: false })));
+    const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
+
+    await expect(adapter.deleteEntry!({ splitwiseEntryId: '555' })).rejects.toBeInstanceOf(
+      SplitwiseTransportError,
+    );
+  });
+
+  it('corrects a settlement at its own id, keeping it a payment', async () => {
+    const fetchImpl = vi.fn(respondWith(jsonResponse({ expenses: [{ id: 777 }] })));
+    const adapter = createSplitwiseAdapter({ ...OPTIONS, fetchImpl });
+
+    const result = await adapter.updatePayment!({
+      splitwiseTransactionId: '777',
+      amount: paise(45000n),
+      fromSplitwiseUserId: '42',
+      toSplitwiseUserId: '1',
+    });
+
+    expect(result.splitwiseTransactionId).toBe('777');
+    expect(requestUrl(fetchImpl)).toContain('/update_expense/777');
+    const body = JSON.parse(requestBody(fetchImpl)) as Record<string, unknown>;
+    expect(body['payment']).toBe(true);
+    expect(body['cost']).toBe('450.00');
+  });
+});

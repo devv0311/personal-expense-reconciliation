@@ -618,6 +618,7 @@ describe('the surface itself', () => {
       'POST /api/expenses/:expenseId/splitwise-resync',
       'GET /api/splitwise/resync-candidates',
       'POST /api/settlements/:settlementId/splitwise-sync',
+      'POST /api/settlements/:settlementId/splitwise-resync',
       'POST /api/splitwise/audits',
       'GET /api/splitwise/audits',
       'GET /api/splitwise/audits/:id',

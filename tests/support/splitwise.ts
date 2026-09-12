@@ -10,6 +10,8 @@
 import type {
   CreateSplitwiseExpenseInput,
   CreateSplitwiseExpenseResult,
+  DeleteSplitwiseEntryInput,
+  DeleteSplitwiseEntryResult,
   FetchSplitwiseLedgerEntriesInput,
   FetchSplitwiseLedgerEntriesResult,
   RecordSplitwisePaymentInput,
@@ -17,6 +19,10 @@ import type {
   SplitwiseFriendBalance,
   SplitwiseLedgerEntry,
   SplitwisePort,
+  UpdateSplitwiseExpenseInput,
+  UpdateSplitwiseExpenseResult,
+  UpdateSplitwisePaymentInput,
+  UpdateSplitwisePaymentResult,
 } from '../../src/integrations/splitwise/index.js';
 
 export interface MockSplitwisePort extends SplitwisePort {
@@ -26,6 +32,12 @@ export interface MockSplitwisePort extends SplitwisePort {
   readonly recordedPayments: readonly RecordSplitwisePaymentInput[];
   /** Every `fetchLedgerEntries` call, so a test can prove a read happened — or did not. */
   readonly ledgerReads: readonly FetchSplitwiseLedgerEntriesInput[];
+  /** Every in-place correction (ADR-0055), so a test can prove the id did not move. */
+  readonly updatedExpenses: readonly UpdateSplitwiseExpenseInput[];
+  /** Every deletion — which must only ever happen for an expense whose net reached zero. */
+  readonly deletedEntries: readonly DeleteSplitwiseEntryInput[];
+  /** Every settlement correction. */
+  readonly updatedPayments: readonly UpdateSplitwisePaymentInput[];
 }
 
 /**
@@ -41,6 +53,14 @@ export function createMockSplitwisePort(): MockSplitwisePort & {
   failNextRecordPayment: (message: string) => void;
   failNextFetchBalances: (message: string) => void;
   failNextFetchLedgerEntries: (message: string) => void;
+  failNextUpdateExpense: (message: string) => void;
+  failNextDeleteEntry: (message: string) => void;
+  failNextUpdatePayment: (message: string) => void;
+  /**
+   * Makes the next `updateExpense` answer with a *different* id — a Splitwise that duplicated
+   * rather than corrected. The one remote misbehaviour the repair must refuse to record.
+   */
+  answerNextUpdateWithDifferentId: (id: string) => void;
   setFriendBalances: (balances: readonly SplitwiseFriendBalance[]) => void;
   setLedgerEntries: (
     friendSplitwiseUserId: string,
@@ -51,12 +71,19 @@ export function createMockSplitwisePort(): MockSplitwisePort & {
   const createdExpenses: CreateSplitwiseExpenseInput[] = [];
   const recordedPayments: RecordSplitwisePaymentInput[] = [];
   const ledgerReads: FetchSplitwiseLedgerEntriesInput[] = [];
+  const updatedExpenses: UpdateSplitwiseExpenseInput[] = [];
+  const deletedEntries: DeleteSplitwiseEntryInput[] = [];
+  const updatedPayments: UpdateSplitwisePaymentInput[] = [];
   let expenseCounter = 0;
   let paymentCounter = 0;
   let nextCreateExpenseFailure: string | null = null;
   let nextRecordPaymentFailure: string | null = null;
   let nextFetchBalancesFailure: string | null = null;
   let nextFetchLedgerEntriesFailure: string | null = null;
+  let nextUpdateExpenseFailure: string | null = null;
+  let nextDeleteEntryFailure: string | null = null;
+  let nextUpdatePaymentFailure: string | null = null;
+  let nextUpdateExpenseId: string | null = null;
   let friendBalances: readonly SplitwiseFriendBalance[] = [];
   const ledgerEntries = new Map<
     string,
@@ -67,9 +94,24 @@ export function createMockSplitwisePort(): MockSplitwisePort & {
     createdExpenses,
     recordedPayments,
     ledgerReads,
+    updatedExpenses,
+    deletedEntries,
+    updatedPayments,
 
     failNextCreateExpense: (message: string) => {
       nextCreateExpenseFailure = message;
+    },
+    failNextUpdateExpense: (message: string) => {
+      nextUpdateExpenseFailure = message;
+    },
+    failNextDeleteEntry: (message: string) => {
+      nextDeleteEntryFailure = message;
+    },
+    failNextUpdatePayment: (message: string) => {
+      nextUpdatePaymentFailure = message;
+    },
+    answerNextUpdateWithDifferentId: (id: string) => {
+      nextUpdateExpenseId = id;
     },
     failNextRecordPayment: (message: string) => {
       nextRecordPaymentFailure = message;
@@ -143,6 +185,36 @@ export function createMockSplitwisePort(): MockSplitwisePort & {
       });
     },
 
+    updateExpense(input: UpdateSplitwiseExpenseInput): Promise<UpdateSplitwiseExpenseResult> {
+      updatedExpenses.push(input);
+      if (nextUpdateExpenseFailure !== null) {
+        const message = nextUpdateExpenseFailure;
+        nextUpdateExpenseFailure = null;
+        return Promise.reject(new Error(message));
+      }
+      // The id comes back unchanged unless a test has scripted the misbehaviour: a correction
+      // that answers with a new id is a duplicate, and the service must refuse to record it.
+      const answeredId = nextUpdateExpenseId ?? input.splitwiseExpenseId;
+      nextUpdateExpenseId = null;
+      return Promise.resolve({
+        splitwiseExpenseId: answeredId,
+        theirSnapshot: { echoedInput: toJsonSafe(input) },
+      });
+    },
+
+    deleteEntry(input: DeleteSplitwiseEntryInput): Promise<DeleteSplitwiseEntryResult> {
+      deletedEntries.push(input);
+      if (nextDeleteEntryFailure !== null) {
+        const message = nextDeleteEntryFailure;
+        nextDeleteEntryFailure = null;
+        return Promise.reject(new Error(message));
+      }
+      return Promise.resolve({
+        splitwiseEntryId: input.splitwiseEntryId,
+        theirSnapshot: { deleted: true },
+      });
+    },
+
     recordPayment(input: RecordSplitwisePaymentInput): Promise<RecordSplitwisePaymentResult> {
       recordedPayments.push(input);
       if (nextRecordPaymentFailure !== null) {
@@ -156,6 +228,38 @@ export function createMockSplitwisePort(): MockSplitwisePort & {
         theirSnapshot: { echoedInput: toJsonSafe(input) },
       });
     },
+
+    updatePayment(input: UpdateSplitwisePaymentInput): Promise<UpdateSplitwisePaymentResult> {
+      updatedPayments.push(input);
+      if (nextUpdatePaymentFailure !== null) {
+        const message = nextUpdatePaymentFailure;
+        nextUpdatePaymentFailure = null;
+        return Promise.reject(new Error(message));
+      }
+      return Promise.resolve({
+        splitwiseTransactionId: input.splitwiseTransactionId,
+        theirSnapshot: { echoedInput: toJsonSafe(input) },
+      });
+    },
+  };
+}
+
+/**
+ * A port that can create but **not** correct — an adapter with first-sync writes only.
+ *
+ * The mirror of `createAggregateOnlySplitwisePort` on the write side (ADR-0055): "this adapter
+ * cannot edit an entry in place" has to be representable, so the repair can refuse by name
+ * instead of quietly falling back to creating a second entry.
+ */
+export function createFirstSyncOnlySplitwisePort(): SplitwisePort & {
+  readonly createdExpenses: readonly CreateSplitwiseExpenseInput[];
+} {
+  const full = createMockSplitwisePort();
+  return {
+    createdExpenses: full.createdExpenses,
+    createExpense: full.createExpense.bind(full),
+    recordPayment: full.recordPayment.bind(full),
+    fetchBalances: full.fetchBalances.bind(full),
   };
 }
 

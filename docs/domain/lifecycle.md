@@ -229,12 +229,32 @@ pending ──▶ synced ──▶ drifted   (on next reconciliation check, if S
         ──▶ synced ──▶ stale     (if OUR side changed — e.g. an ExpenseAdjustment was distributed
                                    against an already-synced Expense — ADR-0008)
         ──▶ sync_failed
+
+drifted ──▶ synced      (a repair a person asked for, ADR-0055)
+stale   ──▶ synced
+        ──▶ withdrawn   (the net reached zero: Splitwise cannot hold a zero-cost expense, so the
+                          entry is deleted rather than left asserting a debt — ADR-0055)
+withdrawn ──▶ synced    (the net came back off zero; this push CREATES, because nothing is
+                          standing in Splitwise to correct)
 ```
 
-`drifted` and `stale` are both terminal-until-addressed states surfaced in `ReconciliationRun`,
-never auto-resolved (invariant #18) — kept as two distinct statuses rather than one, because
-"Splitwise changed independently" and "we changed and owe Splitwise a fresh proposal" call for
-different next actions and shouldn't be conflated.
+`drifted` and `stale` are both terminal-until-addressed states surfaced in `ReconciliationRun`
+— kept as two distinct statuses rather than one, because "Splitwise changed independently" and
+"we changed and owe Splitwise a fresh proposal" call for different next actions and shouldn't be
+conflated.
+
+Neither is ever resolved **automatically** (invariant #18). What clears one is
+`services.resyncExpenseToSplitwise`: a person asks for it, one row at a time, with a written
+reason recorded on an `AuditEvent`, and it pushes only the figure this ledger already approved.
+Until ADR-0055 this table routed that through `pending`; nothing ever observed a row in that
+state and the repair wrote `synced` directly without asserting anything, so the real move is now
+legal and checked. `withdrawn` stays distinct from `stale` precisely because the repair needs to
+know whether an entry is standing: an update sent to a deleted entry is not a correction.
+
+`SplitwiseSettlement` has no `stale` and no `withdrawn` — a settlement's amount cannot move the
+way an adjusted expense's net can, and there is no zero case. `drifted → synced` via
+`services.resyncSettlementToSplitwise` is its only repair, and it corrects the entry in place
+rather than recording a second settlement, which would discharge the debt twice (invariant #9).
 
 ## Item-refund attribution and account snapshot extensions
 

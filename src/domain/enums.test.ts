@@ -131,6 +131,7 @@ describe('state enums match lifecycle.md', () => {
       'synced',
       'drifted',
       'stale',
+      'withdrawn',
       'sync_failed',
     ]);
   });

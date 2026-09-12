@@ -17,6 +17,12 @@
  * an adapter that cannot list a pair's entries omits it, and the audit records `unsupported`
  * rather than treating a capability it does not have as agreement.
  *
+ * `updateExpense`, `deleteEntry` and `updatePayment` (ADR-0055) are the write half of the same
+ * idea, and optional for the same reason. They replaced the first version of re-sync, which
+ * corrected an entry by creating a second one — leaving the other person holding two records
+ * for one expense. An adapter without them makes the repair **refuse by name**; it never falls
+ * back to creating a duplicate.
+ *
  * Every id crossing this port is `people.splitwise_user_id` — the mapping already stored on
  * `Person`, never looked up a second way.
  */
@@ -52,6 +58,65 @@ export interface RecordSplitwisePaymentInput {
 }
 
 export interface RecordSplitwisePaymentResult {
+  readonly splitwiseTransactionId: string;
+  readonly theirSnapshot: unknown;
+}
+
+/**
+ * Correcting an entry Splitwise already holds (audit row 40, ADR-0055).
+ *
+ * The id is the one this ledger already recorded, and it **stays the same**. That is the whole
+ * difference between this and a second `createExpense`: the entry the other person is looking
+ * at is the entry that changes, rather than a new one appearing beside a stale one they now
+ * have to reconcile by hand.
+ */
+export interface UpdateSplitwiseExpenseInput {
+  readonly splitwiseExpenseId: string;
+  readonly description: string | null;
+  /** The expense's current `netAmount`, never the gross figure. */
+  readonly amount: Paise;
+  readonly currency: string;
+  readonly paidBySplitwiseUserId: string;
+  readonly shares: readonly SplitwiseExpenseShare[];
+}
+
+export interface UpdateSplitwiseExpenseResult {
+  /** Unchanged, and returned so a caller can assert that it did not move. */
+  readonly splitwiseExpenseId: string;
+  readonly theirSnapshot: unknown;
+}
+
+/**
+ * Removing an entry from Splitwise.
+ *
+ * Narrower than it looks, and deliberately. This exists for the one case where updating is not
+ * a correction but a lie: an expense whose net has fallen to zero. Splitwise will not hold a
+ * zero-cost expense, so "update it to ₹0" is not available, and leaving the old figure in
+ * place asserts a debt this ledger no longer says exists.
+ *
+ * It is never used to tidy an audit. An external row this ledger cannot explain stays a
+ * finding for a person to resolve (ADR-0046); deleting somebody else's record to make a check
+ * come out clean is the opposite of auditing it.
+ */
+export interface DeleteSplitwiseEntryInput {
+  readonly splitwiseEntryId: string;
+}
+
+export interface DeleteSplitwiseEntryResult {
+  readonly splitwiseEntryId: string;
+  /** Whatever Splitwise returned, kept so the deletion is as traceable as the creation was. */
+  readonly theirSnapshot: unknown;
+}
+
+/** Correcting a settlement Splitwise already holds. Same id, corrected amount or direction. */
+export interface UpdateSplitwisePaymentInput {
+  readonly splitwiseTransactionId: string;
+  readonly amount: Paise;
+  readonly fromSplitwiseUserId: string;
+  readonly toSplitwiseUserId: string;
+}
+
+export interface UpdateSplitwisePaymentResult {
   readonly splitwiseTransactionId: string;
   readonly theirSnapshot: unknown;
 }
@@ -144,4 +209,27 @@ export interface SplitwisePort {
   fetchLedgerEntries?(
     input: FetchSplitwiseLedgerEntriesInput,
   ): Promise<FetchSplitwiseLedgerEntriesResult>;
+
+  /**
+   * Corrects an entry Splitwise already holds, in place (ADR-0055).
+   *
+   * **Optional by design**, like `fetchLedgerEntries`, and for the same reason: an adapter
+   * that cannot do it omits the method, and the service refuses the repair by name rather
+   * than falling back to creating a second entry. That fallback is exactly what this replaces
+   * — it left the other person holding two records for one expense and no account of which
+   * one was current.
+   */
+  updateExpense?(input: UpdateSplitwiseExpenseInput): Promise<UpdateSplitwiseExpenseResult>;
+
+  /**
+   * Deletes an entry Splitwise holds.
+   *
+   * Optional, and used for exactly one case: an expense whose net has fallen to zero, which
+   * Splitwise cannot represent and which must therefore not be left standing at its old
+   * figure. Never used to make an audit come out clean.
+   */
+  deleteEntry?(input: DeleteSplitwiseEntryInput): Promise<DeleteSplitwiseEntryResult>;
+
+  /** Corrects a settlement Splitwise already holds, in place. Optional, like the two above. */
+  updatePayment?(input: UpdateSplitwisePaymentInput): Promise<UpdateSplitwisePaymentResult>;
 }

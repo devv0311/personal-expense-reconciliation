@@ -120,6 +120,13 @@
       "when": 1789206709779,
       "tag": "0016_live_balance_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789208526451,
+      "tag": "0017_splitwise_withdrawn_status",
+      "breakpoints": true
     }
   ]
 }

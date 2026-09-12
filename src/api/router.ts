@@ -170,6 +170,7 @@ import {
   postRule,
   postRuleUpdate,
   postSplitwiseResync,
+  postSplitwiseSettlementResync,
 } from './workflow-routes.js';
 import {
   getSplitwiseAuditFindingRoute,
@@ -656,6 +657,11 @@ export const SPLITWISE_ROUTES: readonly ApiRoute[] = [
     method: 'POST',
     path: '/api/settlements/:settlementId/splitwise-sync',
     handler: postSyncSettlement,
+  },
+  {
+    method: 'POST',
+    path: '/api/settlements/:settlementId/splitwise-resync',
+    handler: postSplitwiseSettlementResync,
   },
 ];
 

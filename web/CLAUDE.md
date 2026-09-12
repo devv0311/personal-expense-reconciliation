@@ -15,6 +15,15 @@ session gate, Splitwise connection and re-sync, analytics, rules, jobs, occasion
 audit-trail screens. None of it widened what this package may do — the rules below held without
 exception, and `receiptId` on `GET /api/evidence/:evidenceId` is the only read that was added.
 
+**After phase 22**, four unnumbered capabilities added screens here: sending a reviewed proof
+pack (ADR-0053), a live-balance panel that sits visibly *after* the waterfall and never inside
+it (ADR-0054), statement import for real formats (ADR-0051), and the rebuilt Splitwise repair
+(ADR-0055). Rule 1 held throughout, and the repair is a good illustration of what it costs:
+the screen has to state, before a person confirms, whether a push corrects their entry, removes
+it, or puts one back — so the API sends `plannedRepair` per row. Working it out here from
+`currentNetAmount === "0"` would have been one comparison and a second copy of a rule that must
+agree with the repair forever.
+
 The short version, if you only read one paragraph: this is a ledger, not a dashboard. One hero
 figure per screen, sized `text-display`/`text-figure`; every other number stays quiet. Color is
 semantic and single-purpose (`debit`/`credit`/`accent`/`attention` each mean exactly one thing —

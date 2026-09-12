@@ -4,9 +4,13 @@ The port to the external Splitwise API. See `docs/product/overview.md` (Splitwis
 `docs/domain/domain-model.md` (`ExternalIntegration`, `SplitwiseExpense`, `SplitwiseSettlement`).
 
 **Owns:** `port.ts`'s `SplitwisePort` interface — `createExpense`, `recordPayment`,
-`fetchBalances` (phase 15, ADR-0041). No concrete adapter is shipped (ADR-0025's "model
-transport is injected, no provider wired" precedent): no Splitwise credentials exist in this
-repository, and `CLAUDE.md` forbids connecting a real account during development.
+`fetchBalances` (phase 15, ADR-0041), the optional `fetchLedgerEntries` (ADR-0046) and the
+optional repair writes `updateExpense`/`deleteEntry`/`updatePayment` (ADR-0055) — plus
+`adapter.ts`, a dependency-free implementation over Splitwise's v3 REST API. The adapter is
+**injected, never imported** by a caller, and `server.ts` supplies it only when
+`SPLITWISE_API_KEY` and `SPLITWISE_USER_ID` are both set; otherwise every method rejects with a
+message saying so. No Splitwise credentials exist in this repository, and `CLAUDE.md` forbids
+connecting a real account during development.
 `services.syncExpenseToSplitwise`/`syncSettlementToSplitwise` (phase 14, ADR-0040) build the
 payload from an already-`APPROVED` `Expense`/`Settlement` — always from
 `AllocationLineGroupExpansion` rows for a `group`-typed line, never the raw line (ADR-0009) —
@@ -22,7 +26,17 @@ for a Splitwise holding nothing. Each entry carries a `pairNetBalance` — its o
 the pair balance, in `fetchBalances`' sign convention — so a listing that claims to be complete
 can be checked against the balance Splitwise itself reported, and downgraded to `partial` when
 it does not add up. `tests/support/splitwise.ts` provides the in-memory mock every test injects,
-plus `createAggregateOnlySplitwisePort` for the no-`fetchLedgerEntries` case.
+plus `createAggregateOnlySplitwisePort` for the no-`fetchLedgerEntries` case and
+`createFirstSyncOnlySplitwisePort` for the no-repair-writes case.
+
+`updateExpense`, `deleteEntry` and `updatePayment` (ADR-0055) are the write half of the same
+idea and optional for the same reason. A correction goes to the id this ledger already recorded
+and that id must come back unchanged — an answer carrying a new one is refused as a duplicate
+rather than recorded as a correction. An adapter without them makes
+`services.resyncExpenseToSplitwise` refuse **by name**; it never falls back to `createExpense`,
+which is what the first version of the repair did and what left the counterparty holding two
+records for one expense. `deleteEntry` exists for exactly one case — an expense whose net has
+reached zero, which Splitwise cannot hold — and never to make an audit come out clean.
 
 **Depends on:** `src/domain` types only; called from `src/services`, never calls back into
 `src/services` or `src/db` itself.
@@ -34,7 +48,8 @@ has an `AllocationLineGroupExpansion` (`docs/architecture/data-flow.md` step 8);
 only from an already-recorded `Settlement`. Built and tested against a mock only until
 deliberately pointed at a real Splitwise account — see `docs/security/security-model.md`.
 
-**Not yet implemented:** any concrete adapter, and a write path back to Splitwise for a `stale`
-expense (an amount update or a deletion) — see `docs/roadmap.md` phase 15's implementation note
-and ADR-0046 §6. Phase 19 detects, attributes and makes drift reviewable; reviewing a finding is
-explicitly not authorization to write, and no method on this port can perform one.
+**Not yet implemented:** reading a Splitwise-side edit back into this ledger. Their change
+surfaces as a `drifted` finding for a person to look at and never as an input to the canonical
+ledger (`CLAUDE.md`, principle 9); making it anything more needs its own ADR. Reviewing a
+finding remains explicitly not authorization to write — the repair is a separate act a person
+asks for, one row at a time, with a written reason.

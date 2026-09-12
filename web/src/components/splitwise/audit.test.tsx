@@ -228,18 +228,40 @@ describe("connecting Splitwise, and correcting what it holds", () => {
     syncedSnapshot: { amount: "180000" },
     currentNetAmount: "144000",
     description: "Dinner at Toit",
+    plannedRepair: "corrected",
   };
 
-  function renderPage(runs: readonly SplitwiseAuditRun[]): ApiMock {
+  const FULL_CAPABILITY = {
+    canCorrect: true,
+    canWithdraw: true,
+    canCorrectSettlement: true,
+  };
+
+  function renderPage(
+    runs: readonly SplitwiseAuditRun[],
+    resyncCandidates: Record<string, unknown> = {
+      candidates: [CANDIDATE],
+      settlements: [],
+      capability: FULL_CAPABILITY,
+    },
+  ): ApiMock {
     const api = mockApi({
       "/api/splitwise/audit-findings": { findings: [] },
-      "/api/splitwise/resync-candidates": { candidates: [CANDIDATE] },
+      "/api/splitwise/resync-candidates": resyncCandidates,
       "/api/splitwise/audits": { runs },
       "/api/expenses/exp-1/splitwise-resync": {
         splitwiseExpenseId: "swe-1",
         syncStatus: "synced",
+        repair: "corrected",
+        previousExternalId: "sw-99",
         previousSnapshot: { amount: "180000" },
         pushedNetAmount: "144000",
+      },
+      "/api/settlements/set-1/splitwise-resync": {
+        splitwiseTransactionId: "swp-1",
+        syncStatus: "synced",
+        previousSnapshot: { amount: "50000" },
+        pushedAmount: "50000",
       },
     });
     renderWithQuery(<SplitwisePage />);
@@ -279,5 +301,94 @@ describe("connecting Splitwise, and correcting what it holds", () => {
 
     await waitFor(() => expect(api.callsTo("/splitwise-resync")).not.toHaveLength(0));
     expect(api.callsTo("/splitwise-resync")[0]!.body).toMatchObject({ reason: "Refunded ₹360" });
+  });
+
+  it("says the correction edits their entry rather than adding a second one", async () => {
+    renderPage([AUDIT_RUN_COMPLETE]);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Push ours" })).not.toHaveLength(0),
+    );
+    await user.click(screen.getAllByRole("button", { name: "Push ours" })[0]!);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/same entry, same id/)).toBeInTheDocument();
+  });
+
+  it("names a withdrawal as a deletion, and labels its button accordingly", async () => {
+    renderPage([AUDIT_RUN_COMPLETE], {
+      candidates: [{ ...CANDIDATE, currentNetAmount: "0", plannedRepair: "withdrawn" }],
+      settlements: [],
+      capability: FULL_CAPABILITY,
+    });
+    const user = userEvent.setup();
+
+    // The row says so before anything is clicked: a person scanning the list can see which of
+    // these pushes removes an entry from somebody else's ledger.
+    // `findAllByText`: `ResponsiveTable` renders the wide and stacked layouts as separate
+    // markup, one hidden by CSS that jsdom does not apply.
+    expect(await screen.findAllByText("Removes their entry")).not.toHaveLength(0);
+    await user.click(screen.getAllByRole("button", { name: "Push ours" })[0]!);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/the entry is deleted/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Remove it" })).toBeInTheDocument();
+  });
+
+  it("says so when the connected adapter cannot correct an entry in place", async () => {
+    renderPage([AUDIT_RUN_COMPLETE], {
+      candidates: [CANDIDATE],
+      settlements: [],
+      capability: { ...FULL_CAPABILITY, canCorrect: false },
+    });
+
+    expect(
+      await screen.findByText("This connection cannot correct an entry in place."),
+    ).toBeInTheDocument();
+    // And says what it will *not* do instead, because the previous version of this repair did
+    // exactly that.
+    expect(screen.getByText(/would leave the other person holding two records/)).toBeInTheDocument();
+  });
+
+  it("corrects a drifted settlement through the settlement route", async () => {
+    const api = renderPage([AUDIT_RUN_COMPLETE], {
+      candidates: [],
+      settlements: [
+        {
+          splitwiseSettlementId: "sws-1",
+          settlementId: "set-1",
+          externalId: "swp-1",
+          syncStatus: "drifted",
+          syncedAt: "2026-08-10T10:00:00.000Z",
+          syncedSnapshot: { amount: "50000" },
+          currentAmount: "50000",
+          counterpartyPersonId: "per-1",
+          counterpartyName: "Friend A",
+        },
+      ],
+      capability: FULL_CAPABILITY,
+    });
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Push ours" })).not.toHaveLength(0),
+    );
+    await user.click(screen.getAllByRole("button", { name: "Push ours" })[0]!);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/records no second settlement/)).toBeInTheDocument();
+    await user.type(
+      within(dialog).getByLabelText(/Why this settlement is being corrected/),
+      "Splitwise shows ₹400 for a ₹500 transfer",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Push it" }));
+
+    await waitFor(() =>
+      expect(api.callsTo("/settlements/set-1/splitwise-resync")).not.toHaveLength(0),
+    );
+    expect(api.callsTo("/settlements/set-1/splitwise-resync")[0]!.body).toMatchObject({
+      reason: "Splitwise shows ₹400 for a ₹500 transfer",
+    });
   });
 });

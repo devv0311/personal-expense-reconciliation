@@ -8,9 +8,14 @@
  *    what Splitwise says. `services.runReconciliation` and `domain.auditSplitwisePair` compare
  *    it against this ledger's own figures; disagreement becomes a discrepancy or a finding,
  *    and never a correction to the local ledger.
- *  - **Writes are first-sync only.** `createExpense` and `recordPayment` push a decision a
- *    person already approved locally. Nothing here updates or deletes a remote row — stale
- *    re-sync is still unbuilt and is still its own deliberate decision (ADR-0040, ADR-0046).
+ *  - **Writes push a decision, never a merge.** `createExpense` and `recordPayment` push one a
+ *    person approved locally; `updateExpense` and `updatePayment` correct one already there,
+ *    in place, at the id this ledger recorded (ADR-0055). None of them reads Splitwise's
+ *    current figure first and reconciles it — that would make their number an input to ours.
+ *  - **`deleteEntry` exists for one case.** An expense whose net has fallen to zero, which
+ *    Splitwise cannot hold and which must therefore not be left standing at its old figure.
+ *    Never for tidying an audit: an external row this ledger cannot explain is a finding for a
+ *    person to resolve (ADR-0046), not something to delete out of the way.
  *  - **A failure is a failure, never agreement.** Every method throws rather than resolving
  *    empty. An adapter that answered "no balances" when it could not reach Splitwise would
  *    make an unreadable account look like a reconciled one, which is the single worst thing
@@ -31,13 +36,20 @@ import type { Paise } from '../../domain/index.js';
 import type {
   CreateSplitwiseExpenseInput,
   CreateSplitwiseExpenseResult,
+  DeleteSplitwiseEntryInput,
+  DeleteSplitwiseEntryResult,
   FetchSplitwiseLedgerEntriesInput,
   FetchSplitwiseLedgerEntriesResult,
   RecordSplitwisePaymentInput,
   RecordSplitwisePaymentResult,
+  SplitwiseExpenseShare,
   SplitwiseFriendBalance,
   SplitwiseLedgerEntry,
   SplitwisePort,
+  UpdateSplitwiseExpenseInput,
+  UpdateSplitwiseExpenseResult,
+  UpdateSplitwisePaymentInput,
+  UpdateSplitwisePaymentResult,
 } from './port.js';
 
 const SPLITWISE_API_BASE = 'https://secure.splitwise.com/api/v3.0';
@@ -118,29 +130,63 @@ export function createSplitwiseAdapter(options: SplitwiseAdapterOptions): Splitw
     return body;
   }
 
+  /**
+   * The shared wire body for an expense, whether it is being created or corrected.
+   *
+   * One function on purpose: a correction that serialized its shares even slightly differently
+   * from the creation would make "the figures agree" depend on which call last wrote them.
+   *
+   * Splitwise's own wire format is major units as a decimal string. This is the only place in
+   * the system that converts, and it does so exactly: paise divided by 100 with the remainder
+   * kept as the two decimal places, never a float (`invariants.md` #12).
+   */
+  function expenseBody(input: {
+    readonly description: string | null;
+    readonly amount: Paise;
+    readonly currency: string;
+    readonly paidBySplitwiseUserId: string;
+    readonly shares: readonly SplitwiseExpenseShare[];
+  }): Record<string, unknown> {
+    const users: Record<string, unknown> = {};
+    input.shares.forEach((share, index) => {
+      users[`users__${index}__user_id`] = Number(share.splitwiseUserId);
+      users[`users__${index}__owed_share`] = toMajorUnits(share.owedAmount);
+      users[`users__${index}__paid_share`] =
+        share.splitwiseUserId === input.paidBySplitwiseUserId ? toMajorUnits(input.amount) : '0.00';
+    });
+    return {
+      cost: toMajorUnits(input.amount),
+      description: input.description ?? 'Expense',
+      currency_code: input.currency,
+      split_equally: false,
+      ...users,
+    };
+  }
+
+  /** The shared wire body for a settlement, likewise used by both `recordPayment` and its update. */
+  function paymentBody(input: {
+    readonly amount: Paise;
+    readonly fromSplitwiseUserId: string;
+    readonly toSplitwiseUserId: string;
+  }): Record<string, unknown> {
+    return {
+      payment: true,
+      cost: toMajorUnits(input.amount),
+      description: 'Settlement',
+      users__0__user_id: Number(input.fromSplitwiseUserId),
+      users__0__paid_share: toMajorUnits(input.amount),
+      users__0__owed_share: '0.00',
+      users__1__user_id: Number(input.toSplitwiseUserId),
+      users__1__paid_share: '0.00',
+      users__1__owed_share: toMajorUnits(input.amount),
+    };
+  }
+
   return {
     async createExpense(input: CreateSplitwiseExpenseInput): Promise<CreateSplitwiseExpenseResult> {
-      // Splitwise's own wire format is major units as a decimal string. This is the only place
-      // in the system that converts, and it does so exactly: paise divided by 100 with the
-      // remainder kept as the two decimal places, never a float (`invariants.md` #12).
-      const users = input.shares.map((share, index) => ({
-        [`users__${index}__user_id`]: Number(share.splitwiseUserId),
-        [`users__${index}__owed_share`]: toMajorUnits(share.owedAmount),
-        [`users__${index}__paid_share`]:
-          share.splitwiseUserId === input.paidBySplitwiseUserId
-            ? toMajorUnits(input.amount)
-            : '0.00',
-      }));
-
       const body = await call('/create_expense', {
         method: 'POST',
-        body: JSON.stringify({
-          cost: toMajorUnits(input.amount),
-          description: input.description ?? 'Expense',
-          currency_code: input.currency,
-          split_equally: false,
-          ...Object.assign({}, ...users),
-        }),
+        body: JSON.stringify(expenseBody(input)),
       });
 
       const created = firstOf(body, 'expenses');
@@ -154,20 +200,47 @@ export function createSplitwiseAdapter(options: SplitwiseAdapterOptions): Splitw
       return { splitwiseExpenseId: id, theirSnapshot: created };
     },
 
+    async updateExpense(input: UpdateSplitwiseExpenseInput): Promise<UpdateSplitwiseExpenseResult> {
+      const body = await call(`/update_expense/${encodeURIComponent(input.splitwiseExpenseId)}`, {
+        method: 'POST',
+        body: JSON.stringify(expenseBody(input)),
+      });
+
+      const updated = firstOf(body, 'expenses');
+      const id = readId(updated);
+      // The id moving would mean Splitwise created something rather than corrected what was
+      // there — the precise failure this method exists to avoid. Reported rather than recorded:
+      // the caller must not write "corrected" over a row that was actually duplicated.
+      if (id !== null && id !== input.splitwiseExpenseId) {
+        throw new SplitwiseTransportError(
+          `Splitwise answered the correction of entry ${input.splitwiseExpenseId} with a ` +
+            `different entry (${id}). That is a duplicate, not a correction, and nothing was ` +
+            'recorded locally against it.',
+        );
+      }
+      return { splitwiseExpenseId: input.splitwiseExpenseId, theirSnapshot: updated };
+    },
+
+    async deleteEntry(input: DeleteSplitwiseEntryInput): Promise<DeleteSplitwiseEntryResult> {
+      const body = await call(`/delete_expense/${encodeURIComponent(input.splitwiseEntryId)}`, {
+        method: 'POST',
+      });
+      // Splitwise answers a delete with `{ success: boolean }` and, on refusal, an `errors`
+      // object `call` has already thrown on. A `success: false` with no error text would
+      // otherwise read as a completed deletion.
+      if (readBoolean(body, 'success') === false) {
+        throw new SplitwiseTransportError(
+          `Splitwise did not delete entry ${input.splitwiseEntryId} and gave no reason. It is ` +
+            'still there, holding a figure this ledger no longer asserts.',
+        );
+      }
+      return { splitwiseEntryId: input.splitwiseEntryId, theirSnapshot: body };
+    },
+
     async recordPayment(input: RecordSplitwisePaymentInput): Promise<RecordSplitwisePaymentResult> {
       const body = await call('/create_expense', {
         method: 'POST',
-        body: JSON.stringify({
-          payment: true,
-          cost: toMajorUnits(input.amount),
-          description: 'Settlement',
-          users__0__user_id: Number(input.fromSplitwiseUserId),
-          users__0__paid_share: toMajorUnits(input.amount),
-          users__0__owed_share: '0.00',
-          users__1__user_id: Number(input.toSplitwiseUserId),
-          users__1__paid_share: '0.00',
-          users__1__owed_share: toMajorUnits(input.amount),
-        }),
+        body: JSON.stringify(paymentBody(input)),
       });
 
       const created = firstOf(body, 'expenses');
@@ -178,6 +251,23 @@ export function createSplitwiseAdapter(options: SplitwiseAdapterOptions): Splitw
         );
       }
       return { splitwiseTransactionId: id, theirSnapshot: created };
+    },
+
+    async updatePayment(input: UpdateSplitwisePaymentInput): Promise<UpdateSplitwisePaymentResult> {
+      const body = await call(
+        `/update_expense/${encodeURIComponent(input.splitwiseTransactionId)}`,
+        { method: 'POST', body: JSON.stringify(paymentBody(input)) },
+      );
+
+      const updated = firstOf(body, 'expenses');
+      const id = readId(updated);
+      if (id !== null && id !== input.splitwiseTransactionId) {
+        throw new SplitwiseTransportError(
+          `Splitwise answered the correction of settlement ${input.splitwiseTransactionId} ` +
+            `with a different entry (${id}). That is a duplicate, not a correction.`,
+        );
+      }
+      return { splitwiseTransactionId: input.splitwiseTransactionId, theirSnapshot: updated };
     },
 
     async fetchBalances(): Promise<readonly SplitwiseFriendBalance[]> {
