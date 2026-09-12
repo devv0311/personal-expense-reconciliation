@@ -51,8 +51,10 @@ export function AskPanel() {
           <AlertTitle>Asking is unavailable on this installation.</AlertTitle>
           <AlertDescription>
             <p>{model?.unavailableReason}</p>
+            {/* The reason already says where the figures live; this turns those names into
+                links rather than saying it a second time. */}
             <p className="mt-2">
-              Every figure a question would report is reachable from the screen that owns it —{" "}
+              Go straight there:{" "}
               <Link href="/analytics" className="text-accent underline underline-offset-2">
                 analytics
               </Link>
@@ -63,8 +65,8 @@ export function AskPanel() {
               ,{" "}
               <Link href="/expenses" className="text-accent underline underline-offset-2">
                 expenses
-              </Link>{" "}
-              and{" "}
+              </Link>
+              ,{" "}
               <Link href="/reconciliation" className="text-accent underline underline-offset-2">
                 reconciliation
               </Link>

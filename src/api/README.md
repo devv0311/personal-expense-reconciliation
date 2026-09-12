@@ -233,11 +233,21 @@ in that phase — master data, statement import, the payment workspace, expense 
 funding links, history, sessions, rules, analytics, occasions and jobs — is documented in its
 own route file's header comment, and all of it is a caller of services that already existed.
 
+**Reading a Splitwise-side change (ADR-0056)** is now five routes — discover, list, read one,
+decide, and the read history. They write no figure: accepting a change records what Splitwise
+holds on a sync row, closes it as `externally_deleted`, joins two ids, or maps a Splitwise
+account to an existing `Person`. Making a remote figure true in this ledger is still an
+`ExpenseAdjustment` a person records with evidence.
+
+**Asking the ledger a question (ADR-0057)** is two: `GET /api/ask/capabilities` and
+`POST /api/ask`. The POST carries a question in a body and takes **no `actor`**, because nothing
+happened to attribute — the service it calls imports no writer.
+
 **Still not implemented:** resolving a `ReconciliationDiscrepancy` on a `ReconciliationRun`
-(phase 19's reviewable record is the audit finding), and reading a Splitwise-side edit back into
-this ledger (their change stays a `drifted` finding — principle 9). Authentication, the
-single-row Splitwise re-sync, a proof-pack send route (ADR-0053) and the repair writes against
-Splitwise (ADR-0055) were all listed here as missing through phase 21 and now exist.
+(phase 19's reviewable record is the audit finding). Authentication, the single-row Splitwise
+re-sync, a proof-pack send route (ADR-0053), the repair writes against Splitwise (ADR-0055) and
+reading their side back (ADR-0056) were all listed here as missing through phase 21 and now
+exist.
 
 There is no general delete route against Splitwise. `POST
 /api/expenses/:expenseId/splitwise-resync` withdraws an entry in exactly one case — an expense

@@ -1,30 +1,32 @@
 # Roadmap
 
-> **Current roadmap (2026-09-07).** **The numbered sequence is complete: phases 1–21 are all
-> done.** Phase 21 shipped the `web/` UI/UX overhaul
-> ([ADR-0048](decisions/0048-phase-21-ui-reads-the-ledger-and-never-recomputes-it.md),
-> [ADR-0049](decisions/0049-keyboard-first-navigation-never-completes-a-decision.md)), which
-> makes all six of `CLAUDE.md`'s pillars reachable through end-to-end flows. Everything that
-> remains — rules/learning, broader analytics, the natural-language interface, concrete external
-> adapters and stale Splitwise re-sync — is deliberately unnumbered later work. Phases 16–21
-> replaced the earlier numbered Rules/learning, Analytics and Natural-language sequence.
-> Historical notes below and in `docs/superpowers/` retain their original phase references; this
-> schedule governs.
-> ADR-0017 (cash balance)'s persistence, classification lifecycle and account snapshots, and
-> ADR-0018 (item refunds) in full — attribution schema, validation, **and** the allocation
-> engine that turns net item costs into a superseding allocation and new obligations — are now
-> **shipped**, as is Phase 19's Splitwise drift and ghost-debt auditing engine
-> ([ADR-0046](decisions/0046-splitwise-audit-findings-and-external-read-completeness.md)) and
-> Phase 20's derived proof packs
-> ([ADR-0047](decisions/0047-proof-packs-are-a-derived-read-not-a-second-ledger.md)):
-> `domain.buildProofPack` + `services.buildProofPackPreview` + `GET /api/proof-packs/:recipientPersonId`,
-> a pure recipient-specific read that quotes `getBalance`, `getRefundAllocationState` and the
-> open Phase 19 findings rather than recomputing any figure, redacts free text through Phase 17's
-> boundary and refuses to return an unredacted pack, and persists nothing — no table, no
-> migration. Phase 21 then turned all of it into a product: six screens, a command palette, an
-> account-level cash waterfall, an interactive item-refund splitter, an evidence inspector, the
-> Splitwise finding review and the proof-pack export review — adding **five reads and no
-> arithmetic**, because `web/` computes no financial figure at all (ADR-0048).
+> **Current roadmap (2026-09-12).** **The numbered sequence is complete: phases 1–22 are all
+> done, and every unnumbered capability ADR-0050 left on the list is now built.** What follows
+> the numbered phases is recorded in the table under
+> [After phase 22](#after-phase-22-the-unnumbered-capabilities); read that table rather than
+> this paragraph for the state of any one of them.
+>
+> The two most recent are the ones this note exists to stop anybody re-deriving. **Reading a
+> change made _in_ Splitwise back into this ledger** is built
+> ([ADR-0056](decisions/0056-a-change-made-in-splitwise-arrives-as-a-proposal.md)): discovery
+> compares their entries against the sync rows and writes proposals carrying both snapshots, the
+> read's completeness and the one bounded thing accepting does — record what they hold, close a
+> sync row as `externally_deleted`, join two ids, or map a person. None of those is a figure.
+> **A natural-language interface** is built
+> ([ADR-0057](decisions/0057-a-question-is-a-plan-over-reads-the-ledger-already-answers.md)) as
+> an ask-only surface: a question becomes one of a closed set of query plans, the answer is
+> assembled from reads that already exist, and the model never sees a figure.
+>
+> Four capabilities delivered on 2026-09-12 are **done**, and any older sentence calling them
+> unbuilt is stale: real statement formats and forwarding intake (ADR-0051/0052), proof-pack
+> **delivery** over a real transport (ADR-0053), live bank/card balance adapters (ADR-0054), and
+> Splitwise repair including the withdrawn-entry lifecycle (ADR-0055). Phase 21's five API reads
+> and Phase 22's `receiptId` read are likewise long since shipped.
+>
+> The rules that governed all of it have not moved: ADR-0017 (cash balance) and ADR-0018 (item
+> refunds) are implemented in full; `web/` performs no financial arithmetic (ADR-0048); no
+> keyboard shortcut completes a decision (ADR-0049); and a capability is not shipped until a
+> person can reach it (ADR-0050).
 
 Incremental vertical slices, per `CLAUDE.md`. Each phase should leave the system in a working,
 tested state — no phase depends on a _later_ phase being done first. Do not start a phase
@@ -439,28 +441,27 @@ figure` hero number per screen (previously every figure sat in the same narrow 1
 
 ## Recommended next phase
 
-**There is no next numbered phase.** Phases 1–22 are complete: the ledger has a domain, a
-service layer, an API, and — since Phase 22 closed the capability audit's gaps — a browser
-surface over every workflow either of them supports.
+**There is no next numbered phase, and no unnumbered capability left on ADR-0050's list.**
+Phases 1–22 are complete, and the four things that list named as genuinely unbuilt — a message
+transport, live balance adapters, Splitwise repair, and a natural-language interface — are all
+built, each with its own decision record (ADRs 0051–0057). See
+[After phase 22](#after-phase-22-the-unnumbered-capabilities) for the per-capability state and
+what each one deliberately still does not do.
 
-What remains is genuinely unbuilt rather than merely unreachable, which is a shorter and more
-honest list than the one Phase 21 left behind. Each needs its own decision record before it
-starts:
+What remains is a short list of things nobody has decided to build, rather than a backlog:
 
-- **A message transport for proof packs.** A pack is derived, redacted and reviewed; copying it
-  prepares text for somebody to paste elsewhere. Sending it — packaging attachments, addressing
-  a recipient, recording that it went — is unbuilt, and `CLAUDE.md`'s fifth pillar is careful
-  that generating a pack authorizes none of it.
-- **Live bank and card balance adapters.** The waterfall compares statement boundaries a person
-  entered as evidence. Fetching a current balance from an institution is a real external
-  integration with real credentials, and `security-model.md` is explicit that it is wired
-  deliberately and late.
-- **Bidirectional Splitwise sync.** Phase 22 shipped the single-row correction ADR-0046 left
-  open, one row at a time behind a required reason. Deleting a row, and reconciling changes made
-  _in_ Splitwise back into this ledger, are still unbuilt — and the second is the harder one,
-  because it means deciding when an external ledger may change a local figure at all.
-- **The natural-language interface.** `ai-boundary.md` names it; nothing implements it. Every
-  constraint that governs the other nine AI operations governs it too.
+- **Rules and learning beyond what phase 22 shipped.** Manual rules exist and propose by
+  default. Auto-approval from confidence is forbidden (`invariants.md` #16), so "learning" here
+  means proposing better, never deciding unattended.
+- **An editor for a model's stored proposal.** `POST /api/review/inferences/:id/decision`
+  accepts `modify` with a `modifiedOutput`; the UI offers accept and reject only.
+- **Natural-language _entry_.** ADR-0057 built the ask-only half deliberately: landing an
+  instruction as a staged, confirmable proposal needs the proposal editor above, and refusing
+  an instruction outright is an honest state rather than a placeholder for one.
+- **A live provider actually connected.** Every external adapter here is configurable and
+  refuses by name when it is not configured; connecting a real Splitwise, WhatsApp, balance
+  endpoint or model provider is a deliberate decision with real credentials
+  (`security-model.md`), and this repository has never made it.
 
 ### Phase 22 — Closing the capability audit's gaps (delivered)
 
@@ -748,14 +749,14 @@ Each needed its own ADR before it started, and each has one. They are not phases
 was a prerequisite for anything already shipped, and they were built in whatever order made
 sense.
 
-| Capability                             | State                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Real statement formats, and forwarding | **Done (2026-09-12)** — [ADR-0051](decisions/0051-reading-a-document-is-local-first-and-optical-only-by-opt-in.md), [ADR-0052](decisions/0052-an-immutable-record-that-was-wrong-gets-a-successor-never-an-edit.md). Eight declared bank/card/UPI formats over CSV, XLSX and PDF with no new dependency; `POST /api/intake/messages` behind its own token, refusing every request where none is configured; receipt extraction reading the document rather than the row; and a successor-not-an-edit path for a wrong evidence link or a wrong adjustment.                                                                                                                                                                                                                                                                                                                                                         |
-| A message transport for proof packs    | **Done (2026-09-12)** — [ADR-0053](decisions/0053-sending-a-proof-pack-is-a-recorded-outward-act.md). The message body is derived server-side at send time and the route has no field for one; the three review confirmations are enforced in `src/domain` as well as the screen; a pack that changed between reading and sending is refused; a resend of unchanged content sends nothing. **Sending still records no settlement** (ADR-0047 unchanged).                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Live bank/card balance adapters        | **Done (2026-09-12)** — [ADR-0054](decisions/0054-a-live-balance-is-a-second-opinion-never-a-boundary.md). A reading is compared and never written: no route sets a closing balance from a provider, and `domain.assertBoundaryIsNotAProviderReading` guards the one that sets boundaries. An unknown ledger figure is `not_comparable` rather than agreeing; a reading with no balance or no `asOf` is `unusable`; a stale match says so.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Splitwise repair (the write half)      | **Done (2026-09-12)** — migration `0017_splitwise_withdrawn_status.sql`, [ADR-0055](decisions/0055-a-correction-edits-the-entry-they-are-looking-at.md). Phase 22's repair corrected a stale entry by creating a second one, leaving the counterparty holding two records for one expense and Splitwise counting both. It now edits the entry they are looking at, at the id this ledger recorded, checked at the adapter and again at the service. `updateExpense`/`deleteEntry`/`updatePayment` are optional port methods: an adapter without them refuses **by name** and never falls back to a create. A net that reaches zero withdraws the entry — the one deletion this system performs, and never for tidying an audit — into a new `withdrawn` status that keeps the external id. A drifted settlement is corrected in place rather than discharged twice. 19 new backend tests and 4 new frontend tests. |
-| Bidirectional Splitwise sync           | **Not started, and narrower than it sounds.** The write half above is done. What remains is reading somebody else's change back _into_ this ledger, which principle 9 currently forbids outright: their edit surfaces as a `drifted` finding for a person, never as an input. Making it anything more needs its own ADR, and it is not obviously worth having.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| A natural-language interface           | **Not started.** The last item on ADR-0050's list. It needs its own ADR first: an NL question against the ledger is a read that must recompute nothing (ADR-0048's rule, applied to a new surface), an NL _instruction_ has to land as a proposal a person confirms (`ai-boundary.md`), and the query itself crosses the sanitization boundary (pillar 6).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Capability                             | State                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Real statement formats, and forwarding | **Done (2026-09-12)** — [ADR-0051](decisions/0051-reading-a-document-is-local-first-and-optical-only-by-opt-in.md), [ADR-0052](decisions/0052-an-immutable-record-that-was-wrong-gets-a-successor-never-an-edit.md). Eight declared bank/card/UPI formats over CSV, XLSX and PDF with no new dependency; `POST /api/intake/messages` behind its own token, refusing every request where none is configured; receipt extraction reading the document rather than the row; and a successor-not-an-edit path for a wrong evidence link or a wrong adjustment.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| A message transport for proof packs    | **Done (2026-09-12)** — [ADR-0053](decisions/0053-sending-a-proof-pack-is-a-recorded-outward-act.md). The message body is derived server-side at send time and the route has no field for one; the three review confirmations are enforced in `src/domain` as well as the screen; a pack that changed between reading and sending is refused; a resend of unchanged content sends nothing. **Sending still records no settlement** (ADR-0047 unchanged).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Live bank/card balance adapters        | **Done (2026-09-12)** — [ADR-0054](decisions/0054-a-live-balance-is-a-second-opinion-never-a-boundary.md). A reading is compared and never written: no route sets a closing balance from a provider, and `domain.assertBoundaryIsNotAProviderReading` guards the one that sets boundaries. An unknown ledger figure is `not_comparable` rather than agreeing; a reading with no balance or no `asOf` is `unusable`; a stale match says so.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Splitwise repair (the write half)      | **Done (2026-09-12)** — migration `0017_splitwise_withdrawn_status.sql`, [ADR-0055](decisions/0055-a-correction-edits-the-entry-they-are-looking-at.md). Phase 22's repair corrected a stale entry by creating a second one, leaving the counterparty holding two records for one expense and Splitwise counting both. It now edits the entry they are looking at, at the id this ledger recorded, checked at the adapter and again at the service. `updateExpense`/`deleteEntry`/`updatePayment` are optional port methods: an adapter without them refuses **by name** and never falls back to a create. A net that reaches zero withdraws the entry — the one deletion this system performs, and never for tidying an audit — into a new `withdrawn` status that keeps the external id. A drifted settlement is corrected in place rather than discharged twice. 19 new backend tests and 4 new frontend tests.                                                                                               |
+| Bidirectional Splitwise sync           | **Done (2026-09-12)** — migration `0018_splitwise_remote_changes.sql`, [ADR-0056](decisions/0056-a-change-made-in-splitwise-arrives-as-a-proposal.md). Discovery reads every mapped friend's entries and writes `SplitwiseRemoteChange` proposals carrying both snapshots, the read's completeness and its provenance. Accepting one has a declared effect and **none of them is a figure**: record what they hold and mark the row `drifted`, close it as `externally_deleted`, adopt an external entry against a local expense or settlement the person names, or map a Splitwise account to a person. A deletion is only ever reported from a **complete** listing. A decided change is not reopened by re-observing the same thing; a materially different observation supersedes it and keeps the old row, decision and all. **Still deliberate:** no remote figure becomes a local one — making their ₹500 true here is a person recording an `ExpenseAdjustment` with evidence, under `invariants.md` #6. |
+| A natural-language interface           | **Done (2026-09-12)** — no migration, no table, [ADR-0057](decisions/0057-a-question-is-a-plan-over-reads-the-ledger-already-answers.md). **The model plans; the ledger answers.** A question becomes one of a closed set of query kinds with typed parameters (`domain/ledger-query.ts`), and `services.answerLedgerQuestion` runs it by calling reads that already exist — `getCategorySpend`, `getOwnSpend`, `getBalance`, `listExpensePage`, `listReconciliationRunHistory`, `listAuditFindings` and their neighbours — quoting what they return. The plan has no field that could carry a query; the answerer imports no writer; the question is redacted under a question-specific profile and refused rather than sent if an identifier survives; and every answer leads with how it read the question. **Still deliberate:** natural-language _entry_ is not built, and an instruction is refused by name rather than half-staged.                                                                       |
 
 Still unbuilt, and deliberately so:
 
@@ -765,6 +766,11 @@ Still unbuilt, and deliberately so:
   accepts `modify` with a `modifiedOutput`; the UI offers accept and reject only. A real editor
   means re-authoring structured AI output inside the sanitization boundary, and is its own piece
   of design work.
+- **Natural-language _entry_.** ADR-0057 built the ask-only half on purpose. An instruction is
+  refused by name and pointed at the screen that owns the act; staging one as a confirmable
+  proposal needs the editor above first.
+- **A remote figure becoming a local one.** ADR-0056 reads their side and never copies it. That
+  is principle 9 and `invariants.md` #6, not an unfinished edge.
 
 ## Open questions carried forward from the 2026-08 revision
 
@@ -781,8 +787,8 @@ Documented explicitly so they aren't rediscovered as bugs later — none block s
   represents the obligation correctly; only its _discharge_ is unobservable without Splitwise or
   manual evidence. **The "confirmed vs. believed-settled" distinction is now fully designed**
   (`domain-model.md`'s `ObligationEvidenceStatus`, computed read-only from existing `Evidence`
-  and `ReconciliationRun` data — no schema change needed) — what remains for Phase 13 is wiring
-  it into the actual balance-display UI, not designing it from scratch.
+  and `ReconciliationRun` data — no schema change needed) **and wired into the balance screen**
+  by phase 21, which renders `evidenceStatus` beside the net figure rather than folding it in.
 - ~~**Net-zero expense allocation shape**~~ — **resolved in the 2026-08 implementation-
   readiness pass**, not left open: the superseding `Allocation` keeps one line per original
   beneficiary, each at `amount = 0` (the deterministic output of the Largest Remainder Method

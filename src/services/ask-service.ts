@@ -33,6 +33,7 @@ import type { Database, Executor } from '../db/index.js';
 import {
   assertQueryPlanAnswerable,
   describeQueryInterpretation,
+  formatMajorUnits,
   isNonAnsweringQueryKind,
   LEDGER_QUERY_CAPABILITIES,
   queryRequiresPerson,
@@ -47,6 +48,7 @@ import type {
   LedgerQueryCapability,
   LedgerQueryPeriod,
   LedgerQueryPlan,
+  Paise,
   PersonId,
 } from '../domain/index.js';
 import type { AiService, ModelAvailability, ModelInfo } from '../ai/index.js';
@@ -300,8 +302,8 @@ async function executePlan(db: Database, context: ExecutionContext): Promise<Led
         ...base,
         headline:
           named === null
-            ? `₹ ${result.netTotal.toString()} paise across ${result.categories.length} categories.`
-            : `₹ ${named.netTotal.toString()} paise on ${named.category ?? 'uncategorised'}.`,
+            ? `${rupees(result.netTotal)} across ${result.categories.length} categories.`
+            : `${rupees(named.netTotal)} on ${named.category ?? 'uncategorised'}.`,
         scope: 'every approved expense in the period, whoever ultimately benefited',
         source: 'services.getCategorySpend',
         figures: [
@@ -342,7 +344,7 @@ async function executePlan(db: Database, context: ExecutionContext): Promise<Led
       const result = await getOwnSpend(db, context.userPersonId, requirePeriod(period));
       return {
         ...base,
-        headline: `Your own share came to ₹ ${result.ownShare.toString()} paise.`,
+        headline: `Your own share came to ${rupees(result.ownShare)}.`,
         scope: 'your share of every approved expense in the period, after every recorded refund',
         source: 'services.getOwnSpend',
         figures: [
@@ -388,7 +390,7 @@ async function executePlan(db: Database, context: ExecutionContext): Promise<Led
       const result = await getUnsettledPaidOnBehalf(db, context.userPersonId);
       return {
         ...base,
-        headline: `₹ ${result.totalOwedToUser.toString()} paise is outstanding across ${result.expenses.length} expenses.`,
+        headline: `${rupees(result.totalOwedToUser)} is outstanding across ${result.expenses.length} expenses.`,
         scope: 'expenses you paid for that somebody else still has a share of, per expense',
         source: 'services.getUnsettledPaidOnBehalf',
         figures: [amountFigure('Still owed to you', result.totalOwedToUser)],
@@ -421,7 +423,7 @@ async function executePlan(db: Database, context: ExecutionContext): Promise<Led
             : `You and ${other.displayName} are square`;
       return {
         ...base,
-        headline: `${direction}: ₹ ${absoluteString(result.netBalance)} paise.`,
+        headline: `${direction}: ${rupees(absolute(result.netBalance))}.`,
         scope: `every obligation between you and ${other.displayName}, net of recorded repayments`,
         source: 'services.getBalance',
         figures: [
@@ -591,7 +593,7 @@ async function executePlan(db: Database, context: ExecutionContext): Promise<Led
         headline:
           `The last run covered ${latest.periodStart.toISOString().slice(0, 10)} to ` +
           `${latest.periodEnd.toISOString().slice(0, 10)} and left ` +
-          `₹ ${latest.totals.ledgerUnexplainedTotal.toString()} paise unexplained.`,
+          `${rupees(latest.totals.ledgerUnexplainedTotal)} unexplained.`,
         scope: 'the most recent reconciliation run',
         source: 'services.listReconciliationRunHistory',
         figures: [
@@ -854,8 +856,19 @@ function countFigure(label: string, count: number): LedgerAnswerFigure {
   return { label, amount: null, count, note: null };
 }
 
-function absoluteString(value: bigint): string {
-  return (value < 0n ? -value : value).toString();
+/**
+ * An exact major-unit rendering for the one sentence a person reads first.
+ *
+ * `domain.formatMajorUnits` rather than anything local: this is the same exact `bigint`
+ * rendering every other display of money in the system goes through, and a second one here
+ * would be a second place for a rounding question to be answered (`invariants.md` #12).
+ */
+function rupees(value: bigint): string {
+  return `₹${formatMajorUnits(value as Paise)}`;
+}
+
+function absolute(value: bigint): Paise {
+  return (value < 0n ? -value : value) as Paise;
 }
 
 function pendingRefundUncertainties(expenseIds: readonly string[]): readonly string[] {

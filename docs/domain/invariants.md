@@ -348,6 +348,18 @@ from a percentage and a possibly-stale total.
     difference confidence makes is _how much friction_ the UI puts in front of that transition
     (auto-suggested vs. blocking review), never whether it's required.
 
+16a. **A question is a plan, never an answer a model wrote**
+([ADR-0057](../decisions/0057-a-question-is-a-plan-over-reads-the-ledger-already-answers.md)).
+`ai.planLedgerQuery` returns one member of a closed set of query kinds with typed
+parameters, and that is its whole contribution: it sees no figure, computes none, and
+phrases no answer. Every number in an answer is produced by an existing authoritative read
+— `getCategorySpend`, `getBalance`, `listExpensePage` and their neighbours — and quoted,
+which is #12's rule about arithmetic and ADR-0048's rule about `web/` applied to a third
+surface. The plan has no field that could carry a query, the answering service imports no
+writer, and an instruction is refused by name rather than staged. Confidence here describes
+the _reading of the question_ and waives nothing, because nothing on this path is approved
+(#16).
+
 17. **A `Rule`'s auto-application is still an attributable, approved act.** Every
     `AIInference` accepted via a `Rule` records `decided_by = rule:<id>`, so a systematically
     wrong rule is fixable at its source and every transaction it touched is traceable back to
@@ -391,7 +403,26 @@ from a percentage and a possibly-stale total.
       dismissed or resolved a finding writes the finding's review columns and an `AuditEvent`,
       and nothing else — no ledger row, no fabricated `Settlement` or `Payment`, and no outbound
       write to Splitwise. Re-syncing a `stale` row remains a separate, explicitly approved
-      capability that does not exist yet.
+      capability (ADR-0055 built it; a review still does not authorize it).
+
+    **Extended again per [ADR-0056](../decisions/0056-a-change-made-in-splitwise-arrives-as-a-proposal.md),
+    which is the first thing in this system that reads Splitwise's side back _towards_ this
+    ledger — and still does not trust it.** A change somebody made there becomes a
+    `SplitwiseRemoteChange`: a proposal carrying both snapshots, the completeness of the read it
+    came from, and a declared effect. Accepting one records what Splitwise holds on the sync
+    row, closes that row as `externally_deleted`, joins an external entry to a local record the
+    person names, or maps a Splitwise account to an existing `Person`. **None of those changes an
+    amount, an allocation or a balance**, and there is no path by which one could: making a
+    remote figure true here is a person recording an `ExpenseAdjustment` with evidence, under
+    #6. Two further rules come with it:
+
+    - **Absence still proves nothing under an incomplete read.** A deletion is reported only
+      from a `complete` listing for the pair; positive observations survive a partial one,
+      because an entry that was seen was seen.
+    - **A decided change is not reopened by re-observing the same thing.** Re-running discovery
+      touches when-last-seen; a materially different remote state supersedes the row and keeps
+      the old one, its decision, its actor and its reason exactly as recorded (#22's spirit,
+      applied to proposals).
 
 19. **No Splitwise write from unapproved data, and never a `Group` as the debtor.** A
     `SplitwiseExpense` may only be created from an `Expense` whose `Allocation` has reached

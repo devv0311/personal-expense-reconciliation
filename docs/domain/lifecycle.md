@@ -236,6 +236,11 @@ stale   ──▶ synced
                           entry is deleted rather than left asserting a debt — ADR-0055)
 withdrawn ──▶ synced    (the net came back off zero; this push CREATES, because nothing is
                           standing in Splitwise to correct)
+
+synced   ──▶ externally_deleted  (somebody deleted the entry in Splitwise while this ledger
+drifted  ──▶ externally_deleted   still asserts a figure — a person accepts that observation,
+stale    ──▶ externally_deleted   ADR-0056)
+externally_deleted ──▶ synced    (the repair CREATES, for the same reason `withdrawn` does)
 ```
 
 `drifted` and `stale` are both terminal-until-addressed states surfaced in `ReconciliationRun`
@@ -251,10 +256,21 @@ state and the repair wrote `synced` directly without asserting anything, so the 
 legal and checked. `withdrawn` stays distinct from `stale` precisely because the repair needs to
 know whether an entry is standing: an update sent to a deleted entry is not a correction.
 
+`externally_deleted` ([ADR-0056](../decisions/0056-a-change-made-in-splitwise-arrives-as-a-proposal.md))
+is where a row lands when **somebody else** removed the entry. It is deliberately not
+`withdrawn`: that one is this ledger's own finished act, while this one is a disagreement — the
+local figure still stands and nothing in Splitwise is carrying it. They agree on what the repair
+must do (create, not update), which is why both leave only to `synced`, and they differ in what
+they mean, which is why both exist. The row is only ever moved here by a person accepting a
+discovered change, and only ever from a **complete** external read: an entry missing from a page
+is an entry nobody looked for.
+
 `SplitwiseSettlement` has no `stale` and no `withdrawn` — a settlement's amount cannot move the
-way an adjusted expense's net can, and there is no zero case. `drifted → synced` via
-`services.resyncSettlementToSplitwise` is its only repair, and it corrects the entry in place
-rather than recording a second settlement, which would discharge the debt twice (invariant #9).
+way an adjusted expense's net can, and there is no zero case. It does have
+`externally_deleted`, for the same reason an expense does. `services.resyncSettlementToSplitwise`
+is its only repair: it **corrects** a `drifted` entry in place rather than recording a second
+settlement, which would discharge the debt twice (invariant #9), and **recreates** an
+`externally_deleted` one, because there is nothing standing to correct.
 
 ## Item-refund attribution and account snapshot extensions
 

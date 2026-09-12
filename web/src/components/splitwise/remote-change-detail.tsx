@@ -18,6 +18,7 @@ import {
   remoteChangeEffectLabel,
   remoteChangeKindLabel,
   remoteChangeStatusLabel,
+  sentenceCase,
 } from "@/lib/labels";
 import {
   useDecideRemoteChange,
@@ -292,7 +293,12 @@ function TargetPicker({
   onChange: (next: string) => void;
   people: readonly PersonSummary[];
 }) {
-  const expenses = useExpenses({ state: "approved", limit: 50 });
+  // Deliberately unfiltered by state. An expense may be joined once it is approved *or later*
+  // — allocated, synced, reconciled — and `listExpenses` takes one state at a time, so
+  // filtering to `approved` here hid almost every eligible row. The state is shown per option
+  // and the service is the authority on which are eligible; a screen that decided that for
+  // itself would be a second copy of the rule (ADR-0048).
+  const expenses = useExpenses({ limit: 50 });
   const settlements = useSettlements();
 
   if (effect === "map_person") {
@@ -348,13 +354,15 @@ function TargetPicker({
         <option value="">Choose an expense…</option>
         {(expenses.data?.expenses ?? []).map((expense) => (
           <option key={expense.id} value={expense.id}>
-            {expense.description ?? "Untitled"} — {expense.occurredAt.slice(0, 10)}
+            {expense.description ?? "Untitled"} — {expense.occurredAt.slice(0, 10)} —{" "}
+            {sentenceCase(expense.state)}
           </option>
         ))}
       </Select>
       <p className="text-micro text-ink-faint">
-        Only approved expenses can be joined to a Splitwise entry, and an expense may hold only one
-        link. Adopting creates no expense: if none exists here, author it first.
+        An expense has to be approved before it can be joined, and may hold only one link — one
+        still proposed or under review will be refused. Adopting creates no expense: if none
+        exists here, author it first.
       </p>
     </div>
   );

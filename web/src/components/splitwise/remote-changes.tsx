@@ -69,8 +69,10 @@ export function RemoteChanges() {
             </p>
             <p className="mt-2">
               Nothing was reported as deleted from what could not be read: an entry missing from a
-              page is an entry nobody looked for. {latest.pairsUnchecked} of {latest.pairsRead}{" "}
-              people could not be checked at all.
+              page is an entry nobody looked for.{" "}
+              {latest.pairsRead === 0
+                ? "No pair could even be listed, so nothing on either side was compared."
+                : `${latest.pairsUnchecked} of ${latest.pairsRead} people could not be checked at all.`}
             </p>
           </AlertDescription>
         </Alert>
