@@ -525,6 +525,14 @@ export function useImportBankCsv() {
   });
 }
 
+export function useImportStatement() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.importStatement,
+    onSuccess: () => invalidatePayments(queryClient),
+  });
+}
+
 export function useRecordManualPayment() {
   const queryClient = useQueryClient();
   return useMutation({

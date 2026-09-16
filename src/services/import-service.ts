@@ -46,7 +46,7 @@ import { parseBankStatementCsv } from '../integrations/bank-csv/index.js';
 import type { BankStatementCsvError } from '../integrations/bank-csv/index.js';
 import {
   listStatementFormats,
-  parseStatement,
+  parseStatementFile,
   STATEMENT_PARSER_VERSION,
 } from '../integrations/statement-formats/index.js';
 import type {
@@ -228,7 +228,7 @@ export async function importStatement(
   db: Database,
   input: ImportStatementInput,
 ): Promise<ImportStatementResult> {
-  const parsed = parseStatement({
+  const parsed = await parseStatementFile({
     bytes: input.bytes,
     formatId: input.formatId,
     filename: input.filename ?? null,

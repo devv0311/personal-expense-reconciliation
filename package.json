@@ -36,6 +36,7 @@
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
+    "pdfjs-dist": "^4.10.38",
     "pg": "^8.23.0"
   }
 }

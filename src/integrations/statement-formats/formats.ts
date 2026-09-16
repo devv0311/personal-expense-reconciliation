@@ -296,6 +296,12 @@ export const STATEMENT_FORMATS: readonly StatementFormat[] = [
 export interface PdfLinePattern {
   readonly id: string;
   readonly label: string;
+  /** Identifies a bank-specific document before its transaction-line pattern is considered. */
+  readonly documentPattern?: RegExp;
+  /** Some issuers wrap one transaction over several physical text lines. */
+  readonly recordMode?: 'physical_line' | 'dated_multiline';
+  readonly sectionStartPattern?: RegExp;
+  readonly sectionEndPattern?: RegExp;
   readonly pattern: RegExp;
   readonly dateLayouts: readonly StatementDateLayout[];
   readonly channel: PaymentChannel;
@@ -320,6 +326,24 @@ export const PDF_LINE_FIELDS = [
  * makes them safe to apply line by line: a header, a footer or an address never matches.
  */
 export const PDF_LINE_PATTERNS: readonly PdfLinePattern[] = [
+  {
+    id: 'idfc_first_credit_card_pdf',
+    label: 'IDFC FIRST Bank credit card statement (PDF)',
+    documentPattern: /Credit Card Statement[\s\S]*(?:FIRST WOW!|IDFC FIRST Bank)/i,
+    recordMode: 'dated_multiline',
+    sectionStartPattern: /^YOUR TRANSACTIONS$/i,
+    sectionEndPattern: /^Pay via our Mobile App$/i,
+    // IDFC prints `date narration amount DR/CR`; long UPI and EMI narrations wrap underneath.
+    pattern:
+      /^(?<date>\d{1,2}\/\d{1,2}\/\d{4})\s+(?<description>.+?)\s+(?<amount>[\d,]+\.\d{2})\s+(?<type>DR|CR)$/i,
+    dateLayouts: ['dd/mm/yyyy'],
+    channel: 'card',
+    defaultReferenceType: 'card_reference',
+    referencePrefixes: [
+      ['UPICC/', 'upi_utr'],
+      ['UPI/', 'upi_utr'],
+    ],
+  },
   {
     id: 'pdf_debit_credit_balance',
     label: 'PDF statement — date, narration, debit, credit, balance',

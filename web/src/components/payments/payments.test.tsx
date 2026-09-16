@@ -69,7 +69,7 @@ describe("importing a statement", () => {
   it("says a re-imported file was recognised rather than written twice", async () => {
     mockApi({
       "/api/accounts": { accounts: [ACCOUNT] },
-      "/api/imports/bank-csv": {
+      "/api/imports/statement": {
         outcome: "already_imported",
         importBatchId: "batch-1",
         contentHash: "b1a2c3",
@@ -90,9 +90,9 @@ describe("importing a statement", () => {
     );
     await user.type(within(dialog).getByLabelText(/Where it came from/), "hdfc-export");
     await user.upload(
-      within(dialog).getByLabelText("CSV file"),
-      new File(["date,description,amount_inr,type,reference\n"], "august.csv", {
-        type: "text/csv",
+      within(dialog).getByLabelText("Statement file"),
+      new File(["%PDF-1.4\nsynthetic"], "august.pdf", {
+        type: "application/pdf",
       }),
     );
 
@@ -102,6 +102,10 @@ describe("importing a statement", () => {
     await user.click(within(dialog).getByRole("button", { name: "Import it" }));
 
     expect(await screen.findByText("This file was already imported")).toBeInTheDocument();
+    const body = api.bodyOf("/api/imports/statement");
+    expect(body["formatId"]).toBe("auto");
+    expect(body["filename"]).toBe("august.pdf");
+    expect(body["contentBase64"]).toBe(btoa("%PDF-1.4\nsynthetic"));
   });
 
   it("states the all-or-nothing consequence before the button that does it", async () => {

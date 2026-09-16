@@ -800,6 +800,21 @@ export async function importBankCsv(input: {
   });
 }
 
+/** Uploads the original statement bytes so PDF/XLSX files are never damaged by text decoding. */
+export async function importStatement(input: {
+  readonly accountId: string;
+  readonly sourceSystem: string;
+  readonly formatId: string;
+  readonly contentBase64: string;
+  readonly filename: string;
+  readonly fileReference?: string;
+}): Promise<ImportStatementResult> {
+  return request<ImportStatementResult>("/api/imports/statement", {
+    method: "POST",
+    body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
+  });
+}
+
 export async function listImports(options: {
   readonly limit?: number;
   readonly offset?: number;

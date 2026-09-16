@@ -84,6 +84,102 @@ export function extractPdfText(bytes: Uint8Array): PdfTextResult {
   return { hasTextLayer: true, lines };
 }
 
+/**
+ * Extracts a PDF's text with PDF.js.
+ *
+ * The bounded reader above deliberately implements only simple PDF text operators. Real bank
+ * PDFs often use embedded font maps and object streams, so visible text can be present while
+ * that reader honestly reports an encoding it cannot decode. Statement import uses this
+ * standards-complete local reader; no document bytes leave the process, JavaScript evaluation
+ * is disabled, and PDF.js is not allowed to fetch supporting resources.
+ */
+export async function extractPdfTextWithPdfJs(bytes: Uint8Array): Promise<PdfTextResult> {
+  if (!startsWithPdfHeader(bytes)) {
+    return {
+      hasTextLayer: false,
+      lines: [],
+      reason: 'These bytes do not begin with a %PDF- header, so this is not a PDF.',
+    };
+  }
+
+  let loadingTask:
+    | ReturnType<(typeof import('pdfjs-dist/legacy/build/pdf.mjs'))['getDocument']>
+    | undefined;
+  try {
+    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    loadingTask = getDocument({
+      // PDF.js may transfer the buffer to its worker. Keep the caller's evidence bytes intact.
+      data: bytes.slice(),
+      disableFontFace: true,
+      isEvalSupported: false,
+      useSystemFonts: false,
+      useWorkerFetch: false,
+      verbosity: 0,
+    });
+    const document = await loadingTask.promise;
+    if (document.numPages > 250) {
+      return {
+        hasTextLayer: false,
+        lines: [],
+        reason: `This PDF has ${document.numPages} pages; the local statement reader is limited to 250.`,
+      };
+    }
+
+    const lines: string[] = [];
+    let textLength = 0;
+    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+      const page = await document.getPage(pageNumber);
+      const content = await page.getTextContent({ includeMarkedContent: false });
+      let current = '';
+      for (const item of content.items) {
+        if (!('str' in item)) continue;
+        current += item.str;
+        if (!item.hasEOL) continue;
+        const line = normaliseExtractedLine(current);
+        if (line !== '') lines.push(line);
+        textLength += line.length;
+        current = '';
+        if (textLength > MAX_TEXT_LENGTH) {
+          return {
+            hasTextLayer: false,
+            lines: [],
+            reason: 'This PDF contains more text than the local statement reader permits.',
+          };
+        }
+      }
+      const trailing = normaliseExtractedLine(current);
+      if (trailing !== '') {
+        lines.push(trailing);
+        textLength += trailing.length;
+      }
+      page.cleanup();
+    }
+
+    if (lines.length === 0) {
+      return {
+        hasTextLayer: false,
+        lines: [],
+        reason:
+          'This PDF has no extractable text layer. It may be a scan or photograph rather ' +
+          'than a generated statement. Nothing was read and no transaction was invented.',
+      };
+    }
+    return { hasTextLayer: true, lines };
+  } catch (error) {
+    return {
+      hasTextLayer: false,
+      lines: [],
+      reason: `This PDF could not be decoded locally: ${error instanceof Error ? error.message : 'unknown failure'}.`,
+    };
+  } finally {
+    await loadingTask?.destroy();
+  }
+}
+
+function normaliseExtractedLine(value: string): string {
+  return value.replace(/[ \t]+/g, ' ').trim();
+}
+
 /* ------------------------------------------------------------------------- internals */
 
 function startsWithPdfHeader(bytes: Uint8Array): boolean {

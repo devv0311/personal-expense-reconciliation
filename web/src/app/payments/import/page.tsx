@@ -40,7 +40,7 @@ export default function ImportPage() {
 
       <PageHeader
         title="Import a statement"
-        description="One CSV at a time, all-or-nothing. A file that has already been loaded is recognised and not written twice."
+        description="Upload the bank's original CSV, XLSX or PDF. Every import is all-or-nothing, and a file already loaded is recognised rather than written twice."
       />
 
       <ImportStatementForm />

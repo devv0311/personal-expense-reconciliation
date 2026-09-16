@@ -21,7 +21,7 @@ import type { Paise, PaymentDirection, PaymentReferenceType } from '../../domain
 
 import { PDF_LINE_PATTERNS, STATEMENT_FORMATS } from './formats.js';
 import type { PdfLinePattern, StatementFormat } from './formats.js';
-import { extractPdfText } from './pdf-text.js';
+import { extractPdfText, extractPdfTextWithPdfJs } from './pdf-text.js';
 import {
   detectDelimiter,
   findColumn,
@@ -41,7 +41,7 @@ import type {
 import { readXlsxFirstSheet, XlsxReadError } from './xlsx.js';
 
 /** Bumped when a change here would alter how the same file is read. */
-export const STATEMENT_PARSER_VERSION = 'statement-formats@1';
+export const STATEMENT_PARSER_VERSION = 'statement-formats@2';
 
 /** Every format this build reads, for an import screen to name rather than a person to guess. */
 export function listStatementFormats(): readonly StatementFormatDescriptor[] {
@@ -146,6 +146,21 @@ export function parseStatement(input: ParseStatementInput): StatementParseResult
   }
 
   return parseTable(table, format);
+}
+
+/**
+ * Async statement entry point used by the application service.
+ *
+ * CSV and XLSX remain synchronous. PDFs use PDF.js so generated statements with embedded font
+ * maps and object streams are read locally instead of being rejected as if they had no text.
+ */
+export async function parseStatementFile(
+  input: ParseStatementInput,
+): Promise<StatementParseResult> {
+  const isPdf = new TextDecoder('latin1').decode(input.bytes.subarray(0, 5)) === '%PDF-';
+  if (!isPdf) return parseStatement(input);
+  const text = await extractPdfTextWithPdfJs(input.bytes);
+  return parsePdfText(text, input.formatId);
 }
 
 /* --------------------------------------------------------------------------- tabular */
@@ -543,6 +558,13 @@ function referenceTypeFor(
 
 function parsePdfStatement(bytes: Uint8Array, formatId: string): StatementParseResult {
   const text = extractPdfText(bytes);
+  return parsePdfText(text, formatId);
+}
+
+function parsePdfText(
+  text: ReturnType<typeof extractPdfText>,
+  formatId: string,
+): StatementParseResult {
   if (!text.hasTextLayer) {
     return {
       ok: false,
@@ -561,10 +583,14 @@ function parsePdfStatement(bytes: Uint8Array, formatId: string): StatementParseR
     };
   }
 
-  const patterns =
+  const documentText = text.lines.join('\n');
+  const patterns = (
     formatId === 'auto'
       ? PDF_LINE_PATTERNS
-      : PDF_LINE_PATTERNS.filter((pattern) => pattern.id === formatId);
+      : PDF_LINE_PATTERNS.filter((pattern) => pattern.id === formatId)
+  ).filter(
+    (pattern) => pattern.documentPattern === undefined || pattern.documentPattern.test(documentText),
+  );
   if (patterns.length === 0) {
     return {
       ok: false,
@@ -626,10 +652,15 @@ function parsePdfStatement(bytes: Uint8Array, formatId: string): StatementParseR
   };
 }
 
+interface PreparedPdfLine {
+  readonly lineNumber: number;
+  readonly text: string;
+}
+
 function readPdfRows(lines: readonly string[], pattern: PdfLinePattern): StatementRow[] {
   const rows: StatementRow[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index]!;
+  for (const prepared of preparePdfLines(lines, pattern)) {
+    const line = prepared.text;
     const match = pattern.pattern.exec(line);
     if (match === null || match.groups === undefined) continue;
 
@@ -667,7 +698,7 @@ function readPdfRows(lines: readonly string[], pattern: PdfLinePattern): Stateme
     const balance = balanceGroup === undefined ? null : parseStatementAmount(balanceGroup);
 
     rows.push({
-      lineNumber: index + 1,
+      lineNumber: prepared.lineNumber,
       occurredAt,
       rawDescription: description,
       amount,
@@ -678,6 +709,53 @@ function readPdfRows(lines: readonly string[], pattern: PdfLinePattern): Stateme
     });
   }
   return rows;
+}
+
+/** Joins an IDFC-style wrapped transaction without joining presentation text into it. */
+function preparePdfLines(
+  lines: readonly string[],
+  pattern: PdfLinePattern,
+): readonly PreparedPdfLine[] {
+  if (pattern.recordMode !== 'dated_multiline') {
+    return lines.map((text, index) => ({ lineNumber: index + 1, text }));
+  }
+
+  const prepared: PreparedPdfLine[] = [];
+  let insideSection = pattern.sectionStartPattern === undefined;
+  let pending: { lineNumber: number; parts: string[] } | null = null;
+
+  const finishIfComplete = (): boolean => {
+    if (pending === null) return false;
+    const text = pending.parts.join(' ').replace(/\s+/g, ' ').trim();
+    if (!pattern.pattern.test(text)) return false;
+    prepared.push({ lineNumber: pending.lineNumber, text });
+    pending = null;
+    return true;
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (pattern.sectionStartPattern?.test(line)) {
+      insideSection = true;
+      continue;
+    }
+    if (!insideSection) continue;
+    if (pattern.sectionEndPattern?.test(line)) break;
+
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}\b/.test(line)) {
+      // An incomplete pending record is not guessed into existence. The next dated row starts
+      // a new source claim, and only a fully matched amount+direction row can be imported.
+      pending = { lineNumber: index + 1, parts: [line] };
+      finishIfComplete();
+      continue;
+    }
+    if (pending !== null) {
+      pending.parts.push(line);
+      finishIfComplete();
+    }
+  }
+
+  return prepared;
 }
 
 /**
