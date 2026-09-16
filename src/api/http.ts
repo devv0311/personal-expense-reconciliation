@@ -110,7 +110,8 @@ export function toErrorResponse(error: unknown): Response {
             ? 422
             : error.code === 'IMPORT_SOURCE_INVALID'
               ? 400
-              : error.code === 'EVIDENCE_DOCUMENT_TOO_LARGE'
+              : error.code === 'EVIDENCE_DOCUMENT_TOO_LARGE' ||
+                  error.code === 'STATEMENT_FILE_TOO_LARGE'
                 ? 413
                 : error.code === 'EVIDENCE_STORE_UNAVAILABLE'
                   ? 503

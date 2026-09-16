@@ -10,8 +10,15 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { formatDateTime } from "@/lib/dates";
 import { useAccounts, useImportStatement } from "@/lib/queries";
-import type { ImportStatementResult } from "@/lib/types";
+import type { MultiFormatImportResult, StatementImportWarning } from "@/lib/types";
 
+/**
+ * The largest statement this screen will read into memory and post as base64.
+ *
+ * Base64 inflates a file by roughly a third, so the request body is the number that matters
+ * rather than the file's own size. A personal statement is a few hundred kilobytes; this bound
+ * exists so a mis-selected file fails here, with a sentence, instead of as a stalled upload.
+ */
 const MAX_STATEMENT_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_STATEMENT_FILES =
   ".csv,.xlsx,.pdf,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf";
@@ -42,16 +49,41 @@ export function ImportStatementForm() {
   const [accountId, setAccountId] = useState("");
   const [sourceSystem, setSourceSystem] = useState("");
   const [statement, setStatement] = useState<SelectedStatement | null>(null);
+  const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
-  const [result, setResult] = useState<ImportStatementResult | null>(null);
+  const [result, setResult] = useState<MultiFormatImportResult | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  /**
+   * Which file selection the component is currently reading.
+   *
+   * A `FileReader` finishes when it finishes, so picking a large file and then a small one can
+   * land the *first* read last — and the staged statement would then be the file the person
+   * had already replaced, imported under the name of the one they chose. Every selection takes
+   * the next number and only the holder of the current one is allowed to write state; closing
+   * or clearing takes a number nobody holds, which abandons whatever is still in flight.
+   */
+  const readGeneration = useRef(0);
 
   const accounts = useAccounts();
   const runImport = useImportStatement();
 
-  const ready = accountId !== "" && sourceSystem.trim().length > 0 && statement !== null;
+  const ready =
+    accountId !== "" && sourceSystem.trim().length > 0 && statement !== null && !reading;
+
+  const clearFileInput = () => {
+    if (fileInput.current !== null) fileInput.current.value = "";
+  };
+
+  /** Abandons any read still in flight, and returns the generation this caller owns. */
+  const beginRead = () => {
+    readGeneration.current += 1;
+    return readGeneration.current;
+  };
 
   const close = () => {
+    // A read that resolves after the dialog closed must not stage a file behind it.
+    beginRead();
+    setReading(false);
     setOpen(false);
     runImport.reset();
   };
@@ -91,7 +123,7 @@ export function ImportStatementForm() {
               onSuccess: (imported) => {
                 setResult(imported);
                 setStatement(null);
-                if (fileInput.current !== null) fileInput.current.value = "";
+                clearFileInput();
                 close();
               },
             },
@@ -145,29 +177,53 @@ export function ImportStatementForm() {
               className="text-body text-ink file:mr-3 file:rounded-sm file:border file:border-rule file:bg-panel file:px-3 file:py-1.5 file:text-meta file:text-ink"
               onChange={(event) => {
                 const file = event.target.files?.[0];
+                const generation = beginRead();
+                const isCurrent = () => readGeneration.current === generation;
+
                 setReadError(null);
+                setStatement(null);
                 if (file === undefined) {
-                  setStatement(null);
+                  setReading(false);
                   return;
                 }
                 if (file.size > MAX_STATEMENT_BYTES) {
-                  setStatement(null);
+                  setReading(false);
+                  clearFileInput();
                   setReadError("That statement is larger than the 25 MB local import limit.");
                   return;
                 }
+                setReading(true);
                 readFileAsBase64(file)
-                  .then((contentBase64) => setStatement({ name: file.name, contentBase64 }))
+                  .then((contentBase64) => {
+                    if (!isCurrent()) return;
+                    setStatement({ name: file.name, contentBase64 });
+                  })
                   .catch(() => {
-                    setStatement(null);
+                    if (!isCurrent()) return;
+                    clearFileInput();
                     setReadError("That file could not be read. Try exporting it again.");
+                  })
+                  .finally(() => {
+                    // A superseded read must not clear the state of the one that replaced it.
+                    if (isCurrent()) setReading(false);
                   });
               }}
             />
             <p className="text-micro text-ink-faint">
-              CSV, XLSX or PDF. The local API detects supported bank and card layouts from the
-              file itself; an unknown layout is refused without importing a partial statement.
+              CSV, XLSX or PDF, exactly as the bank produced it. The file is read on this machine
+              and its layout detected from the file itself; a layout this build does not read is
+              refused rather than imported in part.
             </p>
-            {readError !== null && <p className="text-meta text-debit">{readError}</p>}
+            {reading && (
+              <p className="text-meta text-ink-faint" role="status">
+                Reading the file…
+              </p>
+            )}
+            {readError !== null && (
+              <p className="text-meta text-debit" role="alert">
+                {readError}
+              </p>
+            )}
           </div>
         </div>
       </DecisionDialog>
@@ -197,7 +253,7 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
-function ImportOutcome({ result }: { result: ImportStatementResult }) {
+function ImportOutcome({ result }: { result: MultiFormatImportResult }) {
   if (result.outcome === "already_imported") {
     return (
       <Alert variant="attention">
@@ -214,22 +270,53 @@ function ImportOutcome({ result }: { result: ImportStatementResult }) {
 
   const imported = result.paymentIds.length;
   return (
+    <div className="flex flex-col gap-3">
+      <Alert variant="attention">
+        <AlertTitle>
+          Imported {imported} row{imported === 1 ? "" : "s"}
+        </AlertTitle>
+        <AlertDescription>
+          <p>
+            Read with the <span className="font-mono">{result.formatId}</span> layout.
+          </p>
+          <p>
+            {result.duplicates.length === 0
+              ? "No row restated a movement already on record."
+              : `${result.duplicates.length} row${
+                  result.duplicates.length === 1 ? "" : "s"
+                } restated a movement already on record. Each was kept for provenance and marked ignored, so nothing is counted twice.`}
+          </p>
+          <p>
+            They are unexplained until something explains them. Run normalization next, then
+            classification.
+          </p>
+        </AlertDescription>
+      </Alert>
+      <ImportWarnings warnings={result.warnings} />
+    </div>
+  );
+}
+
+/**
+ * What the reader could not read, said on the screen rather than only in the response.
+ *
+ * A PDF has no columns, so the count a reader returns is how many movements it *matched* — not
+ * how many the statement printed. Leaving that in the API and rendering only the count would
+ * turn a partial read into a confident one, which is the exact silence the unexplained-money
+ * pillar exists to break. The warnings are quoted verbatim; nothing here recomputes or judges
+ * them.
+ */
+function ImportWarnings({ warnings }: { warnings: readonly StatementImportWarning[] }) {
+  if (warnings.length === 0) return null;
+  return (
     <Alert variant="attention">
-      <AlertTitle>
-        Imported {imported} row{imported === 1 ? "" : "s"}
-      </AlertTitle>
+      <AlertTitle>Check this against the statement itself</AlertTitle>
       <AlertDescription>
-        <p>
-          {result.duplicates.length === 0
-            ? "No row restated a movement already on record."
-            : `${result.duplicates.length} row${
-                result.duplicates.length === 1 ? "" : "s"
-              } restated a movement already on record. Each was kept for provenance and marked ignored, so nothing is counted twice.`}
-        </p>
-        <p>
-          They are unexplained until something explains them. Run normalization next, then
-          classification.
-        </p>
+        <ul className="flex list-disc flex-col gap-1 pl-4">
+          {warnings.map((warning, index) => (
+            <li key={`${warning.lineNumber ?? "file"}-${index}`}>{warning.message}</li>
+          ))}
+        </ul>
       </AlertDescription>
     </Alert>
   );

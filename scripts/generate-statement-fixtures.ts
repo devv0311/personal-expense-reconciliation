@@ -1,5 +1,5 @@
 /**
- * Writes the binary statement fixtures — one `.xlsx` workbook and one `.pdf` statement.
+ * Writes the binary statement fixtures — one `.xlsx` workbook and two `.pdf` statements.
  *
  * They are binary, so they cannot be reviewed as text in a diff; this script is how they are
  * reproduced and how a reader can see exactly what is in them. **Both are synthetic**, like
@@ -17,6 +17,8 @@
 import { deflateRawSync, deflateSync } from 'node:zlib';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { buildTextPdf } from '../tests/support/synthetic-pdf.js';
 
 const OUT_DIR = join(process.cwd(), 'fixtures', 'statements');
 
@@ -290,6 +292,54 @@ function buildPdf(): Uint8Array {
 
 /* -------------------------------------------------------------------------- write */
 
+/**
+ * An IDFC FIRST credit-card statement's shape, as a two-page PDF.
+ *
+ * **Synthetic throughout.** The issuer and product names are here because they are what the
+ * `idfc_first_credit_card_pdf` layout identifies the *document* by; every card number, date,
+ * merchant, narration and amount below is invented. No real statement was read, copied or
+ * paraphrased to write this, and none may be.
+ *
+ * It carries, deliberately, every shape the layout has to survive:
+ *
+ *  - a preamble and a summary block above the transactions, which must not be read as rows;
+ *  - a plain debit, and a `CR` credit, since a card credit is a refund rather than new spend;
+ *  - a narration long enough to wrap onto a second physical line, which is the whole reason
+ *    the layout is `dated_multiline`;
+ *  - a dated line *after* the section's end marker, which must not be read at all.
+ *
+ * Every transaction in it is **complete**, deliberately. A dated record that never reaches an
+ * amount and a direction fails the whole import (all-or-nothing), so it cannot live in the
+ * fixture that proves a successful one; that case is built inline by the tests that assert the
+ * refusal.
+ */
+const IDFC_PDF_LINES: readonly string[] = [
+  'IDFC FIRST Bank',
+  'Credit Card Statement',
+  'FIRST WOW! Credit Card',
+  'Card Number XXXX XXXX XXXX 0000',
+  'Statement Period 01/07/2026 to 31/07/2026',
+  'Total Amount Due 3,289.50',
+  'Minimum Amount Due 250.00',
+  'Payment Due Date 18/08/2026',
+  'YOUR TRANSACTIONS',
+  'Date Transaction Details Amount (INR)',
+  '02/07/2026 UPICC/301234567890/SAMPLE CAFE 1,240.00 DR',
+  '04/07/2026 UPICC/301234567891/SYNTHETIC GROCERS ORDER WITH A NARRATION LONG',
+  'ENOUGH TO WRAP ONTO THE NEXT PRINTED LINE 2,499.50 DR',
+  '07/07/2026 REFUND SAMPLE ELECTRONICS 450.00 CR',
+  '12/07/2026 IMPS/507012345678/PAYMENT RECEIVED THANK YOU 1,000.00 CR',
+  'Pay via our Mobile App',
+  '15/07/2026 THIS FOOTER LINE IS NOT A TRANSACTION 9,999.00 DR',
+];
+
 writeFileSync(join(OUT_DIR, 'sbi-bank-statement.xlsx'), buildWorkbook());
 writeFileSync(join(OUT_DIR, 'bank-statement.pdf'), buildPdf());
-console.log('Wrote fixtures/statements/sbi-bank-statement.xlsx and bank-statement.pdf');
+writeFileSync(
+  join(OUT_DIR, 'idfc-first-credit-card-statement.pdf'),
+  buildTextPdf(IDFC_PDF_LINES, { pages: 2 }),
+);
+console.log(
+  'Wrote fixtures/statements/sbi-bank-statement.xlsx, bank-statement.pdf and ' +
+    'idfc-first-credit-card-statement.pdf',
+);

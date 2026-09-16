@@ -47,6 +47,7 @@ import type {
   GroupDetail,
   ImportHistoryResult,
   ImportStatementResult,
+  MultiFormatImportResult,
   JobKind,
   JobListResult,
   JobStatus,
@@ -800,7 +801,12 @@ export async function importBankCsv(input: {
   });
 }
 
-/** Uploads the original statement bytes so PDF/XLSX files are never damaged by text decoding. */
+/**
+ * Uploads the original statement bytes so PDF/XLSX files are never damaged by text decoding.
+ *
+ * Bytes rather than text is not a detail: an `.xlsx` is a ZIP and a `.pdf` is a binary
+ * document, and decoding either as UTF-8 before it reaches the parser destroys it.
+ */
 export async function importStatement(input: {
   readonly accountId: string;
   readonly sourceSystem: string;
@@ -808,8 +814,8 @@ export async function importStatement(input: {
   readonly contentBase64: string;
   readonly filename: string;
   readonly fileReference?: string;
-}): Promise<ImportStatementResult> {
-  return request<ImportStatementResult>("/api/imports/statement", {
+}): Promise<MultiFormatImportResult> {
+  return request<MultiFormatImportResult>("/api/imports/statement", {
     method: "POST",
     body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
   });

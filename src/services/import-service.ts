@@ -149,6 +149,10 @@ export async function importBankStatementCsv(
   db: Database,
   input: ImportBankStatementCsvInput,
 ): Promise<ImportBankStatementCsvResult> {
+  const bytes = new TextEncoder().encode(input.fileContent);
+  // The same ceiling as the multi-format route: one limit, not one per entry point.
+  assertStatementWithinLimit(bytes.byteLength);
+
   const parsed = parseBankStatementCsv(input.fileContent);
   if (!parsed.ok) {
     throw new ImportSourceError(parsed.errors);
@@ -160,7 +164,7 @@ export async function importBankStatementCsv(
     sourceChannel: BANK_STATEMENT_SOURCE_CHANNEL,
     parserVersion: BANK_STATEMENT_PARSER_VERSION,
     channel: BANK_STATEMENT_CHANNEL,
-    contentHash: sha256Bytes(new TextEncoder().encode(input.fileContent)),
+    contentHash: sha256Bytes(bytes),
     fileReference: input.fileReference ?? null,
     rows: parsed.rows,
     audit: input.audit,
@@ -168,6 +172,34 @@ export async function importBankStatementCsv(
 }
 
 /* ================================================================ multi-format import */
+
+/**
+ * The largest statement this build will read, in bytes, whatever container it arrived in.
+ *
+ * **The authoritative limit.** The import screen refuses a larger file before reading it and
+ * `POST /api/imports/statement` rejects an obviously oversized body before parsing its JSON,
+ * but both of those are conveniences that save work — neither is a guarantee. A caller that is
+ * not the browser, or one that sends a wrong or absent `Content-Length`, reaches this check,
+ * and this check runs **before the file is parsed or hashed**, so an oversized upload never
+ * costs a PDF decode or a SHA-256 pass over 400 MB.
+ *
+ * 25 MB matches `MAX_EVIDENCE_DOCUMENT_BYTES` deliberately: a person who can store a document
+ * as evidence should not discover a different ceiling when importing the same file as a
+ * statement. A personal statement is a few hundred kilobytes; nothing legitimate is near this.
+ */
+export const MAX_STATEMENT_BYTES = 25 * 1024 * 1024;
+
+/** Refuses an oversized statement by name, before anything expensive touches its bytes. */
+function assertStatementWithinLimit(byteLength: number): void {
+  if (byteLength <= MAX_STATEMENT_BYTES) return;
+  throw new ServiceError(
+    'STATEMENT_FILE_TOO_LARGE',
+    `This statement is ${byteLength} bytes; the limit is ${MAX_STATEMENT_BYTES}. Nothing was ` +
+      'read from it. A bank statement is normally well under a megabyte, so a file this size ' +
+      'is usually the wrong file rather than a long month.',
+    { byteLength: String(byteLength), limit: String(MAX_STATEMENT_BYTES) },
+  );
+}
 
 /** Every statement format this build reads — for an import screen to name (audit row 02). */
 export function listSupportedStatementFormats(): readonly StatementFormatDescriptor[] {
@@ -228,6 +260,10 @@ export async function importStatement(
   db: Database,
   input: ImportStatementInput,
 ): Promise<ImportStatementResult> {
+  // Before the parser and before `sha256Bytes`, so an oversized file is refused rather than
+  // decoded and digested first.
+  assertStatementWithinLimit(input.bytes.byteLength);
+
   const parsed = await parseStatementFile({
     bytes: input.bytes,
     formatId: input.formatId,

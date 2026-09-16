@@ -48,6 +48,8 @@ import {
   listImportHistory,
   listSupportedStatementFormats,
   listPaymentCounterpartyOptions,
+  MAX_STATEMENT_BYTES,
+  ServiceError,
   listPaymentsWorkspace,
   markPaymentCashFlowNormalized,
   normalizePayments,
@@ -146,6 +148,7 @@ export async function postStatementImport(
   deps: ApiDependencies,
   request: Request,
 ): Promise<Response> {
+  refuseObviouslyOversizedStatement(request);
   const body = await readJsonObject(request);
   const actor = requirePersonActor(body, 'import a statement');
   const formatId = requireString(body, 'formatId');
@@ -191,6 +194,43 @@ export async function postStatementImport(
   });
 
   return jsonResponse(result.outcome === 'already_imported' ? 200 : 201, result);
+}
+
+/**
+ * The largest request body that could still carry a statement within `MAX_STATEMENT_BYTES`.
+ *
+ * Base64 costs four characters per three bytes, so the file alone can reach
+ * `4 * ceil(limit / 3)` characters; the surrounding JSON — the actor, the account id, the
+ * source system, a filename — is allowed a generous envelope on top of that.
+ */
+const MAX_STATEMENT_REQUEST_BYTES = 4 * Math.ceil(MAX_STATEMENT_BYTES / 3) + 64 * 1024;
+
+/**
+ * Rejects a body that cannot possibly be within the limit, before it is read into memory.
+ *
+ * A convenience, and deliberately only that. `Content-Length` is the client's claim: it may be
+ * absent (a chunked upload), wrong, or a lie, so this check can be skipped by anybody who
+ * wants to skip it and **is not the limit**. `services.importStatement` re-checks the decoded
+ * bytes and is the guarantee (`MAX_STATEMENT_BYTES`). What this buys is that the ordinary
+ * oversized upload — a browser posting a 300 MB file with an honest header — is refused
+ * without first being buffered and JSON-parsed.
+ *
+ * **It raises the same error the authoritative check does**, so the two answer a caller
+ * identically: `413 STATEMENT_FILE_TOO_LARGE`. Which of the two noticed is an implementation
+ * detail of this server, and a client that has to branch on `400 INVALID_REQUEST` versus
+ * `413` to learn the same fact is a client we made guess.
+ */
+function refuseObviouslyOversizedStatement(request: Request): void {
+  const header = request.headers.get('content-length');
+  if (header === null) return;
+  const declared = Number(header);
+  if (!Number.isFinite(declared) || declared <= MAX_STATEMENT_REQUEST_BYTES) return;
+  throw new ServiceError(
+    'STATEMENT_FILE_TOO_LARGE',
+    `This request is ${declared} bytes, which cannot hold a statement within the ` +
+      `${MAX_STATEMENT_BYTES}-byte limit. Nothing was read from it.`,
+    { declaredRequestBytes: String(declared), limit: String(MAX_STATEMENT_BYTES) },
+  );
 }
 
 export async function getImportsRoute(deps: ApiDependencies, request: Request): Promise<Response> {

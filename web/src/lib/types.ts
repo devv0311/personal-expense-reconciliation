@@ -1059,6 +1059,30 @@ export type ImportStatementResult =
       readonly previouslyImportedAt: string;
     };
 
+/** Something the statement reader read but wants the person to know. Never swallowed. */
+export interface StatementImportWarning {
+  readonly lineNumber: number | null;
+  readonly message: string;
+}
+
+/**
+ * What `POST /api/imports/statement` answers, over and above the CSV endpoint's result.
+ *
+ * `warnings` is the part that has to reach the screen. A PDF has no column structure, so the
+ * reader can only report how many movements it *matched* — and, separately, how many dated
+ * lines it saw and could not read. Dropping either would turn "nine is what we matched" into
+ * "your statement had nine transactions", which is the silent-shortfall this ledger exists to
+ * prevent.
+ *
+ * `closingBalanceCandidate` is a candidate and nothing more: importing never writes a cash
+ * boundary (ADR-0017, 17.5).
+ */
+export type MultiFormatImportResult = ImportStatementResult & {
+  readonly formatId: string;
+  readonly warnings: readonly StatementImportWarning[];
+  readonly closingBalanceCandidate: string | null;
+};
+
 export interface NormalizePaymentsResult {
   readonly normalizedPaymentIds: readonly string[];
   readonly channelRefinedCount: number;

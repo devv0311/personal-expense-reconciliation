@@ -6,6 +6,22 @@
 > before modifying the checkpoint on `wip/idfc-pdf-import`. The user's real statements and all
 > extracted financial data are private local verification material and must never enter Git,
 > fixtures, snapshots, or logs.
+>
+> **[ADR-0058](docs/decisions/0058-a-real-issuers-pdf-needs-a-standards-complete-local-reader.md)
+> amends ADR-0051 and changes two things worth knowing before reading either.** First,
+> **`pdfjs-dist` is now a production dependency** — ADR-0051's "No dependency was added for
+> either binary container" still holds for XLSX and no longer holds for PDF, because a real
+> issuer keeps its text behind embedded font maps and object streams that the dependency-free
+> reader does not implement. It is server-side only, absent from the `web/` bundle, and
+> `npm audit --omit=dev` is clean in both packages. Second, ADR-0051's local-first rule is now
+> _enforced_ rather than only stated: the receipt path tries both local readers before the
+> composite may consider vision, so a PDF only the standards-complete reader can decode never
+> reaches a provider. The OCR opt-in itself is unchanged.
+>
+> **A PDF import is all-or-nothing, like every other import.** A dated line that never reaches
+> an amount and a direction fails the whole file and writes nothing; it is not a warning and not
+> a smaller import. The one warning a _successful_ PDF import still carries is the container's
+> own caveat — a PDF has no columns, so the count is what the layout matched.
 
 > **Current decisions (2026-09-12).** The numbered sequence ended at phase 22; **every
 > capability ADR-0050 left genuinely unbuilt is now built**, each with its own ADR and none of

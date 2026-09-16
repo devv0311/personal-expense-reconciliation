@@ -27,6 +27,15 @@ export type ServiceErrorCode =
   /** A document exceeded `MAX_EVIDENCE_DOCUMENT_BYTES` (`evidence-service.ts`). */
   | 'EVIDENCE_DOCUMENT_TOO_LARGE'
   /**
+   * A statement exceeded `MAX_STATEMENT_BYTES` (`import-service.ts`).
+   *
+   * Refused before the file is parsed *or hashed*, so an oversized upload costs the work of
+   * reading its length and nothing else. Distinct from `EVIDENCE_DOCUMENT_TOO_LARGE` because
+   * the two limits guard different things and a caller fixing one should not be told about the
+   * other: this one is a statement being imported, not a receipt being stored.
+   */
+  | 'STATEMENT_FILE_TOO_LARGE'
+  /**
    * Evidence storage could not be read or written.
    *
    * The ledger row and the document it points at live in different systems by design

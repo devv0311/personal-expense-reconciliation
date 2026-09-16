@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PaymentDecisions } from "@/components/payments/payment-decisions";
@@ -66,16 +66,9 @@ describe("recording a movement by hand", () => {
 });
 
 describe("importing a statement", () => {
-  it("says a re-imported file was recognised rather than written twice", async () => {
-    mockApi({
-      "/api/accounts": { accounts: [ACCOUNT] },
-      "/api/imports/statement": {
-        outcome: "already_imported",
-        importBatchId: "batch-1",
-        contentHash: "b1a2c3",
-        previouslyImportedAt: "2026-09-01T04:30:00.000Z",
-      },
-    });
+  /** Opens the dialog with an account chosen and a source named, ready for a file. */
+  async function openImport(routes: Record<string, unknown> = {}) {
+    const api = mockApi({ "/api/accounts": { accounts: [ACCOUNT] }, ...routes });
     renderWithQuery(<ImportStatementForm />);
     const user = userEvent.setup();
 
@@ -88,24 +81,244 @@ describe("importing a statement", () => {
       within(dialog).getByLabelText(/Account this statement belongs to/),
       ACCOUNT.id,
     );
-    await user.type(within(dialog).getByLabelText(/Where it came from/), "hdfc-export");
-    await user.upload(
-      within(dialog).getByLabelText("Statement file"),
-      new File(["%PDF-1.4\nsynthetic"], "august.pdf", {
-        type: "application/pdf",
-      }),
-    );
+    await user.type(within(dialog).getByLabelText(/Where it came from/), "idfc-first-card");
+    return { api, dialog, user };
+  }
 
+  function pdfFile(name = "august.pdf") {
+    return new File(["%PDF-1.4\nsynthetic"], name, { type: "application/pdf" });
+  }
+
+  async function confirm(dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) {
     await waitFor(() =>
       expect(within(dialog).getByRole("button", { name: "Import it" })).toBeEnabled(),
     );
     await user.click(within(dialog).getByRole("button", { name: "Import it" }));
+  }
+
+  it("sends the file's original bytes, base64-encoded, never its text", async () => {
+    // A PDF or XLSX decoded as text is destroyed before any parser sees it, so what the
+    // browser puts on the wire is the property worth asserting.
+    const { api, dialog, user } = await openImport({
+      "/api/imports/statement": {
+        outcome: "already_imported",
+        importBatchId: "batch-1",
+        contentHash: "b1a2c3",
+        previouslyImportedAt: "2026-09-01T04:30:00.000Z",
+        formatId: "idfc_first_credit_card_pdf",
+        warnings: [],
+        closingBalanceCandidate: null,
+      },
+    });
+
+    await user.upload(within(dialog).getByLabelText("Statement file"), pdfFile());
+    await confirm(dialog, user);
 
     expect(await screen.findByText("This file was already imported")).toBeInTheDocument();
     const body = api.bodyOf("/api/imports/statement");
     expect(body["formatId"]).toBe("auto");
     expect(body["filename"]).toBe("august.pdf");
     expect(body["contentBase64"]).toBe(btoa("%PDF-1.4\nsynthetic"));
+    // The bytes go to the multi-format endpoint, not the CSV-only one.
+    expect(api.callsTo("/api/imports/bank-csv")).toHaveLength(0);
+  });
+
+  it("still sends a CSV the same way, so the older format keeps working", async () => {
+    const { api, dialog, user } = await openImport({
+      "/api/imports/statement": {
+        outcome: "imported",
+        importBatchId: "batch-2",
+        contentHash: "c4d5e6",
+        paymentIds: ["pay-1", "pay-2"],
+        duplicates: [],
+        formatId: "hdfc_bank_csv",
+        warnings: [],
+        closingBalanceCandidate: "4812000",
+      },
+    });
+
+    await user.upload(
+      within(dialog).getByLabelText("Statement file"),
+      new File(["date,description,amount_inr,type,reference\n"], "august.csv", {
+        type: "text/csv",
+      }),
+    );
+    await confirm(dialog, user);
+
+    expect(await screen.findByText("Imported 2 rows")).toBeInTheDocument();
+    const body = api.bodyOf("/api/imports/statement");
+    expect(body["filename"]).toBe("august.csv");
+    expect(body["contentBase64"]).toBe(btoa("date,description,amount_inr,type,reference\n"));
+  });
+
+  it("shows what the reader could not read, rather than only what it matched", async () => {
+    // A PDF has no columns, so a count alone would read as "your statement had four
+    // transactions". The reader's own warnings are quoted instead.
+    const { dialog, user } = await openImport({
+      "/api/imports/statement": {
+        outcome: "imported",
+        importBatchId: "batch-3",
+        contentHash: "f7a8b9",
+        paymentIds: ["pay-1", "pay-2", "pay-3", "pay-4"],
+        duplicates: [],
+        formatId: "idfc_first_credit_card_pdf",
+        warnings: [
+          {
+            lineNumber: null,
+            message:
+              "Read 4 movement(s) from 17 lines of PDF text. A PDF has no column structure, " +
+              "so anything this layout did not match was skipped rather than reported as a " +
+              "bad row — check the count against the statement itself.",
+          },
+        ],
+        closingBalanceCandidate: null,
+      },
+    });
+
+    await user.upload(within(dialog).getByLabelText("Statement file"), pdfFile());
+    await confirm(dialog, user);
+
+    expect(await screen.findByText("Imported 4 rows")).toBeInTheDocument();
+    expect(screen.getByText("Check this against the statement itself")).toBeInTheDocument();
+    expect(
+      screen.getByText(/check the count against the statement/, { selector: "li" }),
+    ).toBeInTheDocument();
+    // The layout that read the file is named, so a wrong detection is visible rather than not.
+    expect(screen.getByText("idfc_first_credit_card_pdf")).toBeInTheDocument();
+  });
+
+  it("refuses a file past the local size limit without reading or sending it", async () => {
+    const { api, dialog, user } = await openImport();
+
+    const oversized = new File(["%PDF-1.4"], "huge.pdf", { type: "application/pdf" });
+    Object.defineProperty(oversized, "size", { value: 26 * 1024 * 1024 });
+    await user.upload(within(dialog).getByLabelText("Statement file"), oversized);
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      /larger than the 25 MB local import limit/,
+    );
+    expect(within(dialog).getByRole("button", { name: "Import it" })).toBeDisabled();
+    expect(api.callsTo("/api/imports/statement")).toHaveLength(0);
+  });
+
+  it("will not import before an account, a source and a file all exist", async () => {
+    mockApi({ "/api/accounts": { accounts: [ACCOUNT] } });
+    renderWithQuery(<ImportStatementForm />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Import a statement" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: "Import it" })).toBeDisabled();
+  });
+
+  it("shows the API's refusal instead of claiming an import that did not happen", async () => {
+    // A scanned statement is refused by name. The screen must say so rather than fall back to
+    // a generic failure, because the two have different fixes.
+    const refusal =
+      "This PDF has no extractable text layer. It may be a scan or photograph rather than a " +
+      "generated statement.";
+    global.fetch = vi.fn((input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes("/api/imports/statement")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: { code: "IMPORT_SOURCE", message: refusal } }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ accounts: [ACCOUNT] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }) as unknown as typeof global.fetch;
+
+    renderWithQuery(<ImportStatementForm />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Import a statement" }));
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() =>
+      expect(within(dialog).getByRole("option", { name: /HDFC Savings/ })).toBeInTheDocument(),
+    );
+    await user.selectOptions(
+      within(dialog).getByLabelText(/Account this statement belongs to/),
+      ACCOUNT.id,
+    );
+    await user.type(within(dialog).getByLabelText(/Where it came from/), "idfc-first-card");
+    await user.upload(within(dialog).getByLabelText("Statement file"), pdfFile("scan.pdf"));
+    await confirm(dialog, user);
+
+    expect(await within(dialog).findByText(/no extractable text layer/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Imported /)).not.toBeInTheDocument();
+  });
+
+  it("imports the file chosen last, even when an earlier read finishes after it", async () => {
+    // A FileReader finishes when it finishes. Picking a large file and then a small one can
+    // land the first read last, and without a guard the staged statement would be the file the
+    // person had already replaced — imported under the name of the one they chose.
+    const readers: FakeFileReader[] = [];
+    class FakeFileReader {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      error: unknown = null;
+      result: string | null = null;
+      private file: File | null = null;
+      constructor() {
+        readers.push(this);
+      }
+      readAsDataURL(file: File) {
+        this.file = file;
+      }
+      /** Completes this read with the contents its own file was given. */
+      finish(contents: string) {
+        this.result = `data:${this.file?.type ?? ""};base64,${btoa(contents)}`;
+        this.onload?.();
+      }
+    }
+    const realFileReader = global.FileReader;
+    global.FileReader = FakeFileReader as unknown as typeof FileReader;
+
+    try {
+      const { api, dialog, user } = await openImport({
+        "/api/imports/statement": {
+          outcome: "imported",
+          importBatchId: "batch-race",
+          contentHash: "r1",
+          paymentIds: ["pay-1"],
+          duplicates: [],
+          formatId: "idfc_first_credit_card_pdf",
+          warnings: [],
+          closingBalanceCandidate: null,
+        },
+      });
+
+      const input = within(dialog).getByLabelText("Statement file");
+      await user.upload(input, new File(["A"], "first.pdf", { type: "application/pdf" }));
+      await user.upload(input, new File(["B"], "second.pdf", { type: "application/pdf" }));
+      expect(readers).toHaveLength(2);
+
+      // Out of order on purpose: the second selection completes, then the first.
+      await act(async () => {
+        readers[1]!.finish("SECOND-FILE-BYTES");
+        await Promise.resolve();
+      });
+      await act(async () => {
+        readers[0]!.finish("FIRST-FILE-BYTES");
+        await Promise.resolve();
+      });
+
+      await confirm(dialog, user);
+      await waitFor(() => expect(api.callsTo("/api/imports/statement")).toHaveLength(1));
+
+      const body = api.bodyOf("/api/imports/statement");
+      expect(body["filename"]).toBe("second.pdf");
+      expect(body["contentBase64"]).toBe(btoa("SECOND-FILE-BYTES"));
+      expect(body["contentBase64"]).not.toBe(btoa("FIRST-FILE-BYTES"));
+    } finally {
+      global.FileReader = realFileReader;
+    }
   });
 
   it("states the all-or-nothing consequence before the button that does it", async () => {
