@@ -1,5 +1,12 @@
 # CLAUDE.md — Engineering Context for This Repository
 
+> **Active handoff (2026-09-16).** Work is in progress on direct website import of original IDFC
+> FIRST credit-card statement PDFs. Read
+> [`docs/superpowers/plans/2026-09-16-native-idfc-pdf-import-handoff.md`](docs/superpowers/plans/2026-09-16-native-idfc-pdf-import-handoff.md)
+> before modifying the checkpoint on `wip/idfc-pdf-import`. The user's real statements and all
+> extracted financial data are private local verification material and must never enter Git,
+> fixtures, snapshots, or logs.
+
 > **Current decisions (2026-09-12).** The numbered sequence ended at phase 22; **every
 > capability ADR-0050 left genuinely unbuilt is now built**, each with its own ADR and none of
 > them a phase. Real statement formats (CSV/XLSX/PDF, eight declared banks) and a token-guarded
