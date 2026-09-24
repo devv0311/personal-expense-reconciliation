@@ -30,7 +30,7 @@ import { createMemoryEvidenceStore } from '../support/evidence-store.js';
 import { createMockSplitwisePort } from '../support/splitwise.js';
 import type { TestDatabase } from '../support/database.js';
 import { scriptedClassificationTransport } from '../support/ai.js';
-import { AS_USER, addPayment, seedCast, seedMerchants } from '../support/ledger.js';
+import { AS_USER, addImportBatch, addPayment, seedCast, seedMerchants } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
 
 const FIXTURE = readFileSync(join(process.cwd(), 'fixtures', 'bank-statement.csv'), 'utf8');
@@ -109,6 +109,8 @@ async function addLookalikePair(): Promise<{ earlier: PaymentId; later: PaymentI
     channel: 'upi',
     state: 'normalized',
   });
+  // The second capture of the same coffee — another channel's copy, thirty seconds off — arrives
+  // in a batch of its own. Two different lines of one batch would be two coffees.
   const later = await addPayment(database.db, cast, {
     accountId,
     amount: paise(45_000n),
@@ -117,6 +119,7 @@ async function addLookalikePair(): Promise<{ earlier: PaymentId; later: PaymentI
     rawDescription: 'UPI-COFFEE-SHOP',
     channel: 'upi',
     state: 'normalized',
+    importBatchId: await addImportBatch(database.db),
   });
   return { earlier, later };
 }
@@ -545,8 +548,22 @@ describe('the surface itself', () => {
       'POST /api/payments/:paymentId/settlements',
       'GET /api/settlements',
       'GET /api/payments/:paymentId/context',
+      'GET /api/connections/:paymentId',
+      'GET /api/attention',
+      'POST /api/analysis',
+      'GET /api/spending',
+      'GET /api/links',
+      'GET /api/instalments',
+      'GET /api/anomalies',
+      'GET /api/rule-proposals',
+      'POST /api/rule-proposals',
+      'POST /api/rule-proposals/dismiss',
+      'POST /api/rule-proposals/restore',
+      'GET /api/people/:personId/balance',
+      'POST /api/expenses/:expenseId/allocation/preview',
       'POST /api/imports/bank-csv',
       'POST /api/imports/statement',
+      'POST /api/imports/preview',
       'GET /api/imports/formats',
       'GET /api/imports',
       'GET /api/imports/:importBatchId',
@@ -566,6 +583,7 @@ describe('the surface itself', () => {
       'POST /api/rules',
       'POST /api/rules/apply',
       'POST /api/rules/:ruleId',
+      'GET /api/overview',
       'GET /api/analytics/spending',
       'GET /api/analytics/monthly',
       'GET /api/analytics/own-spend',

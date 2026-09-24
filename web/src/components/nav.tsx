@@ -3,129 +3,131 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useShortcuts } from "@/components/app-shell/shortcuts";
-import { Button } from "@/components/ui/button";
-import { useReviewQueue, useSession, useSignOut } from "@/lib/queries";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { useAttention, useSession, useSignOut } from "@/lib/queries";
 import type { SessionState } from "@/lib/types";
 
 /**
- * One row, one entry per workflow, with evidence and receipts reached from the queue and the
- * ledger rather than given tabs of their own (a document is always about a payment or an
- * expense; a list of loose documents is not a workflow).
+ * Four places, and one thing you can always do.
  *
- * Phase 21 shipped six, matching `CLAUDE.md`'s six pillars. **Payments** joins them because the
- * pillars all start from a cash movement, and until this row existed there was no screen where
- * an imported statement line could be seen at all — the audit's first finding. **Evidence** is
- * here for the same reason: a document attached to nothing only ever surfaced if the review
- * queue happened to raise it, and a library is not a work queue. **Setup** sits
- * apart with **Analytics** and **Automation**, in a quieter second group: none of the three is
- * a workflow to return to daily. Setup changes what the ledger can say rather than what it
- * says; analytics only reads; and automation is configuration for the workflows above.
+ * The row this replaced had five sections plus More, and before that eight workflow tabs plus
+ * four utilities named after the machinery behind them. Each was a real capability; the row
+ * asked the reader to already know what "reconciliation" produces and how it differs from
+ * "balances" before it would tell them anything.
  *
- * The review count is the product's only live figure outside a screen: it is what makes the
- * queue a place you go back to. It is a count, not money, so it is never toned `debit`.
+ * These four are what somebody arrives wanting:
+ *
+ *  - **Home** — what needs you next, then where things stand.
+ *  - **Spending** — where the money went.
+ *  - **People** — who owes whom.
+ *  - **Records** — everything on file, and every specialist screen behind it.
+ *
+ * **Add records is an action, not a place.** It is the one thing a person does here rather than
+ * reads, so it is a button in the bar on every screen instead of a fifth tab competing with
+ * four questions.
+ *
+ * **Nothing was removed.** Every specialist screen keeps its route, its deep links and its
+ * place; Records lists them, and `/more` still resolves for anything that bookmarked it.
+ *
+ * The count on **Home** is the product's only live figure outside a screen, because what needs
+ * a decision is the reason to come back. It is the count Home itself shows — a badge that
+ * disagreed with the screen it points at would be worse than no badge — and it is a count, not
+ * money, so it is never toned `debit`.
  */
 const SECTIONS = [
-  { href: "/review", label: "Review" },
-  { href: "/payments", label: "Payments" },
-  { href: "/evidence", label: "Evidence" },
-  { href: "/reconciliation", label: "Reconciliation" },
-  { href: "/expenses", label: "Expenses" },
-  { href: "/balances", label: "Balances" },
-  { href: "/splitwise", label: "Splitwise" },
-  { href: "/proof-packs", label: "Proof packs" },
-] as const;
-
-/**
- * Reached often enough to belong in the chrome, rarely enough not to be a workflow tab.
- *
- * **Ask** joins them for the same reason Analytics is here rather than in the row above: it
- * only reads. It answers a question about the ledger from the ledger's own reads and writes
- * nothing at all (ADR-0057), so it is somewhere you drop in on, never a queue you return to.
- */
-const UTILITIES = [
-  { href: "/ask", label: "Ask" },
-  { href: "/analytics", label: "Analytics" },
-  { href: "/automation", label: "Automation" },
-  { href: "/setup", label: "Setup" },
+  { href: "/", label: "Home", exact: true, badge: true },
+  { href: "/spending", label: "Spending", exact: false, badge: false },
+  { href: "/people", label: "People", exact: false, badge: false },
+  { href: "/records", label: "Records", exact: false, badge: false },
 ] as const;
 
 export function Nav() {
   const pathname = usePathname();
   const { openCommandPalette } = useShortcuts();
-  const queue = useReviewQueue({ limit: 1 });
+  // `limit: 1` — this only ever reads the total, and asking for a hundred items to render one
+  // number would make every screen in the product pay for a badge.
+  const queue = useAttention({ limit: 1 });
   const session = useSession();
   const signOut = useSignOut();
+  const waiting = queue.data?.total ?? 0;
 
   return (
     <header className="border-b border-rule bg-paper">
-      <div className="mx-auto flex max-w-5xl flex-col gap-3 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="mx-auto flex max-w-5xl flex-col gap-4 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center justify-between gap-4">
-          <Link href="/" className="text-emphasis font-semibold tracking-tight text-ink">
+          <Link href="/" className="text-emphasis font-serif font-medium tracking-tight text-ink">
             Ledger
           </Link>
-          <button
-            type="button"
-            onClick={openCommandPalette}
-            className="flex items-center gap-2 rounded-sm border border-rule px-2.5 py-1 text-meta text-ink-muted transition-colors hover:border-rule-strong hover:text-ink lg:order-last"
-          >
-            Search
-            <span aria-hidden="true" className="font-mono text-micro text-ink-faint">
-              ⌘K
-            </span>
-            <span className="sr-only">Open the command palette</span>
-          </button>
-          <SessionBadge
-            state={session.data}
-            signingOut={signOut.isPending}
-            onSignOut={() => signOut.mutate()}
-          />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={openCommandPalette}
+              className="flex h-10 items-center gap-2 rounded-sm border border-rule px-3 text-meta text-ink-muted transition-colors hover:border-rule-strong hover:text-ink"
+            >
+              Search
+              <span aria-hidden="true" className="font-mono text-micro text-ink-faint">
+                ⌘K
+              </span>
+              <span className="sr-only">Open the command palette</span>
+            </button>
+            <SessionBadge
+              state={session.data}
+              signingOut={signOut.isPending}
+              onSignOut={() => signOut.mutate()}
+            />
+          </div>
         </div>
-        <nav aria-label="Main" className="flex flex-wrap gap-x-6 gap-y-2 text-body">
-          {SECTIONS.map((section) => {
-            const active = pathname?.startsWith(section.href) ?? false;
-            const pending = section.href === "/review" ? (queue.data?.total ?? 0) : 0;
-            return (
-              <Link
-                key={section.href}
-                href={section.href}
-                aria-current={active ? "page" : undefined}
-                className={`border-b-2 pb-1 transition-colors ${
-                  active
-                    ? "border-accent font-medium text-ink"
-                    : "border-transparent text-ink-muted hover:text-ink"
-                }`}
-              >
-                {section.label}
-                {pending > 0 && (
-                  <span className="ml-1.5 font-mono text-micro text-attention">
-                    {pending}
-                    <span className="sr-only"> items waiting</span>
-                  </span>
-                )}
-              </Link>
-            );
-          })}
-          {UTILITIES.map((utility) => {
-            const active = pathname?.startsWith(utility.href) ?? false;
-            return (
-              <Link
-                key={utility.href}
-                href={utility.href}
-                aria-current={active ? "page" : undefined}
-                className={`border-b-2 pb-1 transition-colors ${
-                  active
-                    ? "border-accent font-medium text-ink"
-                    : "border-transparent text-ink-faint hover:text-ink"
-                }`}
-              >
-                {utility.label}
-              </Link>
-            );
-          })}
-        </nav>
+
+        <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
+          <nav aria-label="Main" className="flex flex-wrap gap-x-7 gap-y-2 text-body">
+            {SECTIONS.map((section) => {
+              const active = isActive(pathname, section.href, section.exact);
+              const pending = section.badge ? waiting : 0;
+              return (
+                <Link
+                  key={section.href}
+                  href={section.href}
+                  aria-current={active ? "page" : undefined}
+                  className={`border-b-2 pb-1 transition-colors ${
+                    active
+                      ? "border-accent font-medium text-ink"
+                      : "border-transparent text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  {section.label}
+                  {pending > 0 && (
+                    <span className="ml-1.5 font-mono text-micro text-attention">
+                      {pending}
+                      <span className="sr-only"> waiting on you</span>
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
+          {/*
+            The persistent action. `size="sm"` rather than the 48px default: it sits in a bar
+            beside four navigation links all day, and a full-height primary button there would
+            read as the most important thing on every screen — including the ones whose whole
+            job is to hand the reader a different decision.
+          */}
+          <Link
+            href="/add"
+            aria-current={isActive(pathname, "/add", false) ? "page" : undefined}
+            className={buttonVariants({ size: "sm" })}
+          >
+            Add records
+          </Link>
+        </div>
       </div>
     </header>
   );
+}
+
+/** `/` would otherwise match every route, so the front door is the one exact match. */
+function isActive(pathname: string | null, href: string, exact: boolean): boolean {
+  if (pathname === null) return false;
+  return exact ? pathname === href : pathname.startsWith(href);
 }
 
 /**

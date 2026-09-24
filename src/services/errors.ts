@@ -27,6 +27,15 @@ export type ServiceErrorCode =
   /** A document exceeded `MAX_EVIDENCE_DOCUMENT_BYTES` (`evidence-service.ts`). */
   | 'EVIDENCE_DOCUMENT_TOO_LARGE'
   /**
+   * A statement exceeded `MAX_STATEMENT_BYTES` (`import-service.ts`).
+   *
+   * Refused before the file is parsed *or hashed*, so an oversized upload costs the work of
+   * reading its length and nothing else. Distinct from `EVIDENCE_DOCUMENT_TOO_LARGE` because
+   * the two limits guard different things and a caller fixing one should not be told about the
+   * other: this one is a statement being imported, not a receipt being stored.
+   */
+  | 'STATEMENT_FILE_TOO_LARGE'
+  /**
    * Evidence storage could not be read or written.
    *
    * The ledger row and the document it points at live in different systems by design
@@ -73,7 +82,31 @@ export type ServiceErrorCode =
    * is a configuration or availability fact. Every figure a question would have reported is
    * still reachable from the screen that owns it either way.
    */
-  | 'LEDGER_QUESTION_UNAVAILABLE';
+  | 'LEDGER_QUESTION_UNAVAILABLE'
+  /**
+   * A statement that says which kind of account it belongs to, imported into another kind
+   * (`import-service.ts`, ADR-0066).
+   *
+   * Refused before anything is written: a bank account's movements written onto a card would
+   * be immutable evidence attributed to the wrong account, and nothing downstream could tell.
+   */
+  | 'STATEMENT_ACCOUNT_MISMATCH'
+  /**
+   * A statement that does not say what kind of account it belongs to, imported without the
+   * person saying so either (`import-service.ts`, ADR-0068).
+   *
+   * Every CSV and XLSX is one: a card's export and a bank account's can carry the same
+   * columns, and the columns are never read as a kind. Refused before anything is written.
+   */
+  | 'STATEMENT_KIND_REQUIRED'
+  /**
+   * A stated kind of account that the statement itself contradicts (ADR-0068).
+   *
+   * The document's own word is not overruled by a caller's, and it is not silently preferred
+   * over one either: two answers to "whose statement is this?" are refused, before anything
+   * is written.
+   */
+  | 'STATEMENT_KIND_CONFLICT';
 
 export class ServiceError extends Error {
   public readonly code: ServiceErrorCode;

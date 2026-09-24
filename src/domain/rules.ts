@@ -90,22 +90,37 @@ export function ruleMatches(rule: RuleDefinition, payment: RuleMatchablePayment)
   const { match } = rule;
 
   if (match.description !== undefined) {
-    const haystack = payment.rawDescription.toUpperCase();
-    const needle = match.description.toUpperCase();
-    const operator = match.descriptionOperator ?? 'contains';
-    const hit =
-      operator === 'equals'
-        ? haystack === needle
-        : operator === 'startsWith'
-          ? haystack.startsWith(needle)
-          : haystack.includes(needle);
-    if (!hit) return false;
+    if (!descriptionMatches(payment.rawDescription, match.description, match.descriptionOperator)) {
+      return false;
+    }
   }
   if (match.direction !== undefined && match.direction !== payment.direction) return false;
   if (match.channel !== undefined && match.channel !== payment.channel) return false;
   if (match.accountId !== undefined && match.accountId !== payment.accountId) return false;
   if (match.amount !== undefined && match.amount !== payment.amount) return false;
   return true;
+}
+
+/**
+ * Whether one payment's wording satisfies one text condition.
+ *
+ * Exported as its own predicate because two callers need it and neither may re-implement it:
+ * `ruleMatches` above, and the purpose reader, which has to decide whether an approved pattern
+ * leads a suggestion (ADR-0064). A second copy would be a second definition of what a rule
+ * matches, and the two would disagree the first time either was touched.
+ *
+ * Case-insensitive throughout — a statement's capitalisation is not a distinction.
+ */
+export function descriptionMatches(
+  rawDescription: string,
+  pattern: string,
+  operator: RuleTextOperator = 'contains',
+): boolean {
+  const haystack = rawDescription.toUpperCase();
+  const needle = pattern.toUpperCase();
+  if (operator === 'equals') return haystack === needle;
+  if (operator === 'startsWith') return haystack.startsWith(needle);
+  return haystack.includes(needle);
 }
 
 /**

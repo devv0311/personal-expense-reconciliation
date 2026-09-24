@@ -16,6 +16,7 @@ import { and, asc, desc, eq, exists, inArray, isNull, not, sql } from 'drizzle-o
 import type { SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
+import { DEBT_CREATING_RELATIONSHIP_TYPES } from '../domain/enums.js';
 import type {
   AiInferenceStatus,
   AiInferenceType,
@@ -125,6 +126,7 @@ import {
   splitwiseExpenses,
   splitwiseSettlements,
   users,
+  ruleProposalDismissals,
 } from './schema.js';
 
 /** A `Database` or an open transaction — both satisfy the same query interface. */
@@ -352,6 +354,15 @@ export interface ListExpensesFilter {
   readonly beneficiaryPersonId?: PersonId;
   /** Only expenses that still have no current allocation — the "who benefited?" backlog. */
   readonly withoutAllocation?: boolean;
+  /**
+   * Only expenses whose relationship type can create an obligation.
+   *
+   * `personal` and `gift` cannot, by construction (`EXPENSE_RELATIONSHIP_TYPES`' own note), so
+   * "who benefited from this?" is a question the record has already answered about them. Asking
+   * it anyway put a question on the screen for every personal purchase somebody confirmed — a
+   * backlog that grew by one every time a person answered something.
+   */
+  readonly onlyObligationCapable?: boolean;
   /** Defaults to `DEFAULT_EXPENSE_LEDGER_LIMIT`; a listing is bounded even with no filter. */
   readonly limit?: number;
   readonly offset?: number;
@@ -365,6 +376,9 @@ function expenseLedgerConditions(filter: ListExpensesFilter): SQL[] {
     conditions.push(eq(expenses.paidByPersonId, filter.paidByPersonId));
   }
   if (filter.expenseId !== undefined) conditions.push(eq(expenses.id, filter.expenseId));
+  if (filter.onlyObligationCapable === true) {
+    conditions.push(inArray(expenses.relationshipType, [...DEBT_CREATING_RELATIONSHIP_TYPES]));
+  }
   if (filter.category !== undefined) conditions.push(eq(expenses.category, filter.category));
   if (filter.occurredFrom !== undefined) {
     conditions.push(sql`${expenses.occurredAt} >= ${filter.occurredFrom}`);
@@ -739,6 +753,8 @@ export async function listSettlementRegister(
   exec: Executor,
   options: {
     readonly counterpartyPersonId?: PersonId;
+    /** Narrows to the settlements one movement discharges — a connection view's question. */
+    readonly paymentId?: PaymentId;
     readonly limit?: number;
     readonly offset?: number;
   } = {},
@@ -760,11 +776,15 @@ export async function listSettlementRegister(
     .innerJoin(people, eq(people.id, settlements.counterpartyPersonId))
     .innerJoin(payments, eq(payments.id, settlements.paymentId));
 
-  const rows = await (
-    options.counterpartyPersonId === undefined
-      ? base
-      : base.where(eq(settlements.counterpartyPersonId, options.counterpartyPersonId))
-  )
+  const conditions: SQL[] = [];
+  if (options.counterpartyPersonId !== undefined) {
+    conditions.push(eq(settlements.counterpartyPersonId, options.counterpartyPersonId));
+  }
+  if (options.paymentId !== undefined) {
+    conditions.push(eq(settlements.paymentId, options.paymentId));
+  }
+
+  const rows = await (conditions.length === 0 ? base : base.where(and(...conditions)))
     .orderBy(desc(payments.occurredAt), desc(settlements.recordedAt))
     .limit(options.limit ?? 100)
     .offset(options.offset ?? 0);
@@ -1301,6 +1321,11 @@ export interface PaymentRow {
   readonly occurredAt: Date;
   readonly externalReference: string | null;
   readonly accountId: string;
+  /**
+   * The statement, export or hand entry that delivered this row. Read by the possible-duplicate
+   * rule, which asks about one movement captured twice, not about two lines of one statement.
+   */
+  readonly importBatchId: ImportBatchId;
   /** Read by normalization to refine it (`domain.refineChannel`). */
   readonly channel: string;
   /** The evidence normalization refines `channel` from (ADR-0020). */
@@ -1326,6 +1351,7 @@ export async function getPaymentById(
       occurredAt: payments.occurredAt,
       externalReference: payments.externalReference,
       accountId: payments.accountId,
+      importBatchId: payments.importBatchId,
       channel: payments.channel,
       referenceType: payments.referenceType,
       rawDescription: payments.rawDescription,
@@ -1358,6 +1384,7 @@ export async function findPaymentsByExternalReference(
       occurredAt: payments.occurredAt,
       externalReference: payments.externalReference,
       accountId: payments.accountId,
+      importBatchId: payments.importBatchId,
       channel: payments.channel,
       referenceType: payments.referenceType,
       rawDescription: payments.rawDescription,
@@ -1400,6 +1427,7 @@ export async function listPaymentsAwaitingNormalization(
       occurredAt: payments.occurredAt,
       externalReference: payments.externalReference,
       accountId: payments.accountId,
+      importBatchId: payments.importBatchId,
       channel: payments.channel,
       referenceType: payments.referenceType,
       rawDescription: payments.rawDescription,
@@ -1775,6 +1803,46 @@ export async function countAdjustmentsForPayment(
     .from(expenseAdjustments)
     .where(and(eq(expenseAdjustments.adjustmentPaymentId, paymentId), ACTIVE_ADJUSTMENT));
   return rows.length;
+}
+
+/**
+ * The adjustments one credit *is* — the expenses this money came back against.
+ *
+ * {@link countAdjustmentsForPayment} answers "is this a refund?"; this answers "a refund of
+ * what?", which is the question a person looking at the credit is actually asking. Reversed
+ * adjustments are excluded, exactly as everywhere else: a reversed refund never reduced
+ * anything, so the money it named is not explained by it (ADR-0052).
+ */
+export async function listAdjustmentsByAdjustmentPayment(
+  exec: Executor,
+  paymentId: PaymentId,
+): Promise<
+  Array<{
+    id: ExpenseAdjustmentId;
+    kind: 'merchant_refund' | 'third_party_reimbursement';
+    amount: Paise;
+    originalExpenseId: ExpenseId;
+    occurredAt: Date;
+  }>
+> {
+  const rows = await exec
+    .select({
+      id: expenseAdjustments.id,
+      kind: expenseAdjustments.kind,
+      amount: expenseAdjustments.amount,
+      originalExpenseId: expenseAdjustments.originalExpenseId,
+      occurredAt: expenseAdjustments.occurredAt,
+    })
+    .from(expenseAdjustments)
+    .where(and(eq(expenseAdjustments.adjustmentPaymentId, paymentId), ACTIVE_ADJUSTMENT))
+    .orderBy(asc(expenseAdjustments.occurredAt), asc(expenseAdjustments.id));
+  return rows.map((row) => ({
+    id: row.id as ExpenseAdjustmentId,
+    kind: row.kind as 'merchant_refund' | 'third_party_reimbursement',
+    amount: row.amount as Paise,
+    originalExpenseId: row.originalExpenseId as ExpenseId,
+    occurredAt: row.occurredAt,
+  }));
 }
 
 /** Whether the account a payment moved through belongs to this user (17.2's transfer gate). */
@@ -3145,6 +3213,32 @@ export async function listEvidenceMatchCandidatesForEvidenceIds(
   return rows.map(toEvidenceMatchCandidateRow);
 }
 
+/**
+ * Every candidate recorded **against one payment**, with the document each one is about.
+ *
+ * The inverse of {@link listEvidenceMatchCandidatesByEvidence}, and it did not exist until a
+ * screen had to answer "what is being proposed about this movement?". Reading it the other way
+ * round — every document, then filter — would be a table scan for one payment's question.
+ *
+ * The evidence row is joined in rather than fetched per candidate: a proposal a person has to
+ * judge is unreadable without knowing what kind of document is making it.
+ */
+export async function listEvidenceMatchCandidatesByPayment(
+  exec: Executor,
+  paymentId: PaymentId,
+): Promise<Array<{ candidate: EvidenceMatchCandidateRow; evidence: EvidenceRow }>> {
+  const rows = await exec
+    .select({ candidate: evidenceMatchCandidates, evidenceRow: evidence })
+    .from(evidenceMatchCandidates)
+    .innerJoin(evidence, eq(evidence.id, evidenceMatchCandidates.evidenceId))
+    .where(eq(evidenceMatchCandidates.paymentId, paymentId))
+    .orderBy(asc(evidenceMatchCandidates.createdAt), asc(evidenceMatchCandidates.id));
+  return rows.map((row) => ({
+    candidate: toEvidenceMatchCandidateRow(row.candidate),
+    evidence: toEvidenceRow(row.evidenceRow),
+  }));
+}
+
 function toEvidenceMatchCandidateRow(
   row: typeof evidenceMatchCandidates.$inferSelect,
 ): EvidenceMatchCandidateRow {
@@ -3395,6 +3489,7 @@ export async function listUnlinkedDebitPaymentsNear(
       occurredAt: payments.occurredAt,
       externalReference: payments.externalReference,
       accountId: payments.accountId,
+      importBatchId: payments.importBatchId,
       channel: payments.channel,
       referenceType: payments.referenceType,
       rawDescription: payments.rawDescription,
@@ -4151,6 +4246,7 @@ export async function listPossibleDuplicateCandidates(exec: Executor): Promise<P
       occurredAt: payments.occurredAt,
       externalReference: payments.externalReference,
       accountId: payments.accountId,
+      importBatchId: payments.importBatchId,
       channel: payments.channel,
       referenceType: payments.referenceType,
       rawDescription: payments.rawDescription,
@@ -5092,4 +5188,148 @@ export async function updateSplitwiseSettlementSync(
       syncStatus: next.syncStatus,
     })
     .where(eq(splitwiseSettlements.id, id));
+}
+
+/* ============================================================ purpose context */
+
+/**
+ * Every payment's own words, plus any category a person has already confirmed for it.
+ *
+ * The one read `domain.inferPurpose` needs to see beyond the row in front of it: how often the
+ * same merchant appears, whether an instalment plan has other rows, and what the reader
+ * decided the last time they met this shop. It is deliberately narrow — no amounts, no
+ * accounts, no state — because a purpose reading may not depend on anything it does not
+ * explain on the screen.
+ *
+ * The category comes from an **approved** expense only. A category sitting on a `proposed`
+ * expense is a suggestion nobody has agreed to, and treating one suggestion as evidence for
+ * the next is how a guess bootstraps itself into a pattern.
+ */
+export async function listPaymentPurposeContext(exec: Executor): Promise<
+  readonly {
+    readonly paymentId: PaymentId;
+    readonly rawDescription: string;
+    readonly direction: 'debit' | 'credit';
+    readonly occurredAt: Date;
+    readonly amount: Paise;
+    readonly confirmedCategory: string | null;
+  }[]
+> {
+  const rows = await exec
+    .select({
+      paymentId: payments.id,
+      rawDescription: payments.rawDescription,
+      direction: payments.direction,
+      occurredAt: payments.occurredAt,
+      // Added for the instalment and anomaly readers (ADR-0062/0063), which compare amounts
+      // across rows. One query serves all three readings rather than three passes over the same
+      // table producing three snapshots that can disagree.
+      amount: payments.amount,
+      confirmedCategory: sql<
+        string | null
+      >`max(case when ${expenses.state} = 'approved' then ${expenses.category} end)`,
+    })
+    .from(payments)
+    .leftJoin(paymentExpenseLinks, eq(paymentExpenseLinks.paymentId, payments.id))
+    .leftJoin(expenses, eq(expenses.id, paymentExpenseLinks.expenseId))
+    .groupBy(
+      payments.id,
+      payments.rawDescription,
+      payments.direction,
+      payments.occurredAt,
+      payments.amount,
+    )
+    .orderBy(asc(payments.occurredAt), asc(payments.id));
+
+  return rows.map((row) => ({
+    paymentId: row.paymentId as PaymentId,
+    rawDescription: row.rawDescription,
+    direction: row.direction as 'debit' | 'credit',
+    occurredAt: row.occurredAt,
+    amount: row.amount as Paise,
+    confirmedCategory: row.confirmedCategory,
+  }));
+}
+
+/* ------------------------------------------- ADR-0065 — patterns somebody declined */
+
+export interface RuleProposalDismissalRow {
+  readonly id: string;
+  readonly proposalKey: string;
+  readonly wording: string;
+  readonly category: string;
+  readonly dismissedAt: Date;
+  readonly dismissedBy: string;
+  readonly reason: string;
+  readonly restoredAt: Date | null;
+}
+
+/**
+ * Every dismissal ever recorded, newest first — including the ones since restored.
+ *
+ * The restored ones are returned rather than filtered out because the caller decides what a
+ * dismissal still means: `listRuleProposals` looks only at the ones in force, and the dismissed
+ * list on screen shows both so "declined, then changed my mind" is legible.
+ */
+export async function listRuleProposalDismissals(
+  exec: Executor,
+): Promise<readonly RuleProposalDismissalRow[]> {
+  const rows = await exec
+    .select()
+    .from(ruleProposalDismissals)
+    .orderBy(desc(ruleProposalDismissals.dismissedAt));
+  return rows.map((row) => ({
+    id: row.id,
+    proposalKey: row.proposalKey,
+    wording: row.wording,
+    category: row.category,
+    dismissedAt: row.dismissedAt,
+    dismissedBy: row.dismissedBy,
+    reason: row.reason,
+    restoredAt: row.restoredAt,
+  }));
+}
+
+export async function insertRuleProposalDismissal(
+  exec: Executor,
+  input: {
+    readonly proposalKey: string;
+    readonly wording: string;
+    readonly category: string;
+    readonly dismissedBy: string;
+    readonly reason: string;
+  },
+): Promise<string> {
+  const [row] = await exec
+    .insert(ruleProposalDismissals)
+    .values(input)
+    .returning({ id: ruleProposalDismissals.id });
+  return row!.id;
+}
+
+/**
+ * Closes every dismissal in force for one pattern, rather than deleting it.
+ *
+ * Plural because a pattern may have been declined, restored and declined again; restoring closes
+ * whatever is currently open. Nothing is removed, so the whole sequence survives in the table.
+ */
+export async function restoreRuleProposalDismissal(
+  exec: Executor,
+  proposalKey: string,
+  restoredBy: string,
+  at: Date,
+): Promise<readonly string[]> {
+  const updated = await exec
+    .update(ruleProposalDismissals)
+    .set({ restoredAt: at, restoredBy })
+    .where(
+      and(
+        eq(ruleProposalDismissals.proposalKey, proposalKey),
+        isNull(ruleProposalDismissals.restoredAt),
+      ),
+    )
+    .returning({ id: ruleProposalDismissals.id });
+  // The row ids, not a count: the caller audits each restored row by its own identity, and
+  // `audit_events.entity_id` is a uuid — a proposal key is not one.
+  return updated.map((row) => row.id);
 }

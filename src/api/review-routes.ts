@@ -52,8 +52,9 @@ import type { ApiDependencies, RouteParams } from './router.js';
 /**
  * `GET /api/review` — everything waiting for a human, in the order it should be looked at.
  *
- * Query parameters are all optional: `limit`, `kinds` (comma-separated),
- * `materialityThreshold` (minor units), `duplicateWindowSeconds`.
+ * Query parameters are all optional: `limit`, `kinds` (comma-separated) and
+ * `materialityThreshold` (minor units). Which lookalikes are paired is not a parameter: it is
+ * the duplicate policy, `domain.isPossibleDuplicate` (ADR-0070).
  */
 export async function getReviewQueue(deps: ApiDependencies, request: Request): Promise<Response> {
   const params = new URL(request.url).searchParams;
@@ -63,10 +64,6 @@ export async function getReviewQueue(deps: ApiDependencies, request: Request): P
     ...withOptional(
       'materialityThreshold',
       asPaise(optionalMinorUnits(params, 'materialityThreshold')),
-    ),
-    ...withOptional(
-      'duplicateWindowSeconds',
-      optionalPositiveInteger(params, 'duplicateWindowSeconds'),
     ),
   };
 
@@ -143,7 +140,7 @@ const DUPLICATE_DECISIONS = ['confirm', 'dismiss'] as const;
 /**
  * `POST /api/review/payments/:paymentId/duplicate` — confirm or dismiss a resemblance.
  *
- * Body: `{ actor, decision: "confirm" | "dismiss", duplicateOfPaymentId, windowSeconds?, reason? }`.
+ * Body: `{ actor, decision: "confirm" | "dismiss", duplicateOfPaymentId, reason? }`.
  * Two services rather than one flag deep in a service: confirming discards a payment and
  * dismissing changes nothing, and collapsing them into one call would make the destructive
  * branch reachable by a typo.
@@ -161,12 +158,10 @@ export async function postPaymentDuplicateDecision(
   const duplicateOfPaymentId = asId<'payment'>(
     requireUuid(requireString(body, 'duplicateOfPaymentId'), 'duplicateOfPaymentId'),
   );
-  const windowSeconds = optionalWindowSeconds(body);
 
   const input = {
     paymentId: paymentId satisfies PaymentId,
     duplicateOfPaymentId,
-    ...(windowSeconds === undefined ? {} : { windowSeconds }),
     audit: {
       actor,
       source: 'api POST /api/review/payments/:paymentId/duplicate',
@@ -204,16 +199,4 @@ function parseKinds(raw: string | null): readonly ReviewItemKind[] | undefined {
     }
   }
   return kinds as readonly ReviewItemKind[];
-}
-
-function optionalWindowSeconds(body: Record<string, unknown>): number | undefined {
-  const value = body['windowSeconds'];
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-    throw new ApiRequestError(
-      '"windowSeconds", when present, must be a non-negative integer.',
-      'windowSeconds',
-    );
-  }
-  return value;
 }

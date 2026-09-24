@@ -196,3 +196,22 @@ export function scriptedQueryPlanTransport(
     },
   };
 }
+
+/**
+ * A transport that declares itself unconfigured and refuses every call.
+ *
+ * The same shape `src/server.ts` installs when `ANTHROPIC_API_KEY` is absent, which is the
+ * default for this product. Tests that exercise the analysis journey need it because that
+ * journey's whole point is that it still works without a model — the deterministic stages run,
+ * and the one that cannot is reported by name rather than taking the run down with it.
+ */
+export function unconfiguredTransport(): ModelTransport {
+  return {
+    modelInfo: { provider: 'none', model: 'unconfigured' },
+    availability: {
+      configured: false,
+      unavailableReason: 'No model is configured in this test environment.',
+    },
+    complete: () => Promise.reject(new Error('No AI provider is configured.')),
+  };
+}

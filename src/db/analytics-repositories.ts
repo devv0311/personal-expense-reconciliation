@@ -13,6 +13,7 @@
 
 import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
 
+import { DEBT_CREATING_RELATIONSHIP_TYPES } from '../domain/enums.js';
 import type { ExpenseAdjustmentId, ExpenseId, PersonId } from '../domain/ids.js';
 import type { Paise } from '../domain/money.js';
 
@@ -37,6 +38,17 @@ import {
  * decision that it did not happen.
  */
 const COUNTED_STATES = ['approved', 'allocated', 'ready_to_sync', 'synced', 'reconciled'];
+
+/**
+ * The relationship types an obligation can arise from at all.
+ *
+ * `domain.computeObligations` skips every other one by construction (`invariants.md` #2a,
+ * `domain-model.md`'s Obligation section): a `personal` or `gift` expense divides among
+ * beneficiaries without anybody owing anything. Any balance traversal that runs in SQL rather
+ * than through that function has to apply the same rule, or the two answers disagree — and the
+ * one that disagrees is the one on the summary screen, which is the worse place to be wrong.
+ */
+const DEBT_CREATING_RELATIONSHIPS = [...DEBT_CREATING_RELATIONSHIP_TYPES];
 
 export interface AnalyticsPeriodInput {
   readonly start: Date;
@@ -233,7 +245,16 @@ export async function loadCounterpartyBalanceRows(
       allocationLineGroupExpansions,
       eq(allocationLineGroupExpansions.allocationLineId, allocationLines.id),
     )
-    .where(and(isNull(allocations.supersededAt), inArray(expenses.state, COUNTED_STATES)));
+    .where(
+      and(
+        isNull(allocations.supersededAt),
+        inArray(expenses.state, COUNTED_STATES),
+        // Without this, dividing a `personal` or `gift` expense among other people invents a
+        // debt here that `domain.computeObligations` — and therefore `/api/balances` and the
+        // person detail screen — correctly says does not exist.
+        inArray(expenses.relationshipType, DEBT_CREATING_RELATIONSHIPS),
+      ),
+    );
 
   const balances = new Map<string, { net: bigint; expenses: Set<string> }>();
   const bump = (personId: string, amount: bigint, expenseId: string): void => {
@@ -330,7 +351,15 @@ export async function loadUnsettledPaidOnBehalfRows(
       allocationLineGroupExpansions,
       eq(allocationLineGroupExpansions.allocationLineId, allocationLines.id),
     )
-    .where(and(eq(expenses.paidByPersonId, userPersonId), inArray(expenses.state, COUNTED_STATES)))
+    .where(
+      and(
+        eq(expenses.paidByPersonId, userPersonId),
+        inArray(expenses.state, COUNTED_STATES),
+        // "Paid on behalf and not yet repaid" is a statement about debt, so it obeys the same
+        // rule: nobody owes the user for something recorded as personal or as a gift.
+        inArray(expenses.relationshipType, DEBT_CREATING_RELATIONSHIPS),
+      ),
+    )
     .orderBy(asc(expenses.occurredAt));
 
   const byExpense = new Map<

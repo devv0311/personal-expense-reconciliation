@@ -11,7 +11,7 @@
  * expressed. `parseStatement` reads all of them with one code path, which is what makes adding
  * the next bank a five-line declaration rather than a new file to keep in step.
  *
- * Two rules hold for every entry:
+ * Three rules hold for every entry:
  *
  *  - **A format may not say what a payment was for.** There is no field for it here and none on
  *    {@link StatementRow}. `NEFT TRANSFER TO SELF` is a debit with that narration until
@@ -19,9 +19,14 @@
  *  - **A format names its own institution, never guesses one.** `sourceSystem` still comes from
  *    the caller, because the same column shape is exported by more than one bank and inventing
  *    a provenance is worse than asking.
+ *  - **A column map never says what kind of account a file is from** — not in data and not in
+ *    words. A card's export and a bank account's can carry the same headings, so a table claims
+ *    no `accountKind` and its `label` describes how the columns are arranged, never a card, a
+ *    bank account or its type. The label is the first thing the import screen says about a
+ *    file, and the person importing it is the one who says whose it is (ADR-0068).
  */
 
-import type { PaymentChannel, PaymentReferenceType } from '../../domain/index.js';
+import type { AccountType, PaymentChannel, PaymentReferenceType } from '../../domain/index.js';
 
 import type { StatementDateLayout } from './table.js';
 import type { StatementContainer } from './types.js';
@@ -126,7 +131,7 @@ export const STATEMENT_FORMATS: readonly StatementFormat[] = [
   {
     ...BASE,
     id: 'generic_bank_csv',
-    label: 'Generic bank CSV (date, description, amount, type, reference)',
+    label: 'Generic export — date, description, amount, type and reference columns (CSV or XLSX)',
     container: 'delimited',
     channel: 'bank_transfer',
     headerHint: 'date,description,amount_inr,type,reference',
@@ -147,7 +152,7 @@ export const STATEMENT_FORMATS: readonly StatementFormat[] = [
   {
     ...BASE,
     id: 'hdfc_bank_csv',
-    label: 'HDFC Bank — account statement (CSV/XLSX)',
+    label: 'HDFC Bank export layout — withdrawal and deposit columns (CSV or XLSX)',
     container: 'delimited',
     channel: 'bank_transfer',
     headerHint:
@@ -166,7 +171,7 @@ export const STATEMENT_FORMATS: readonly StatementFormat[] = [
   {
     ...BASE,
     id: 'icici_bank_csv',
-    label: 'ICICI Bank — account statement (CSV/XLSX)',
+    label: 'ICICI Bank export layout — withdrawal and deposit columns (CSV or XLSX)',
     container: 'delimited',
     channel: 'bank_transfer',
     headerHint:
@@ -185,7 +190,7 @@ export const STATEMENT_FORMATS: readonly StatementFormat[] = [
   {
     ...BASE,
     id: 'sbi_bank_csv',
-    label: 'State Bank of India — account statement (CSV/XLSX)',
+    label: 'State Bank of India export layout — debit and credit columns (CSV or XLSX)',
     container: 'delimited',
     channel: 'bank_transfer',
     headerHint: 'Txn Date, Value Date, Description, Ref No./Cheque No., Debit, Credit, Balance',
@@ -203,7 +208,7 @@ export const STATEMENT_FORMATS: readonly StatementFormat[] = [
   {
     ...BASE,
     id: 'axis_bank_csv',
-    label: 'Axis Bank — account statement (CSV/XLSX)',
+    label: 'Axis Bank export layout — DR and CR columns (CSV or XLSX)',
     container: 'delimited',
     channel: 'bank_transfer',
     headerHint: 'Tran Date, CHQNO, PARTICULARS, DR, CR, BAL, SOL',
@@ -221,7 +226,7 @@ export const STATEMENT_FORMATS: readonly StatementFormat[] = [
   {
     ...BASE,
     id: 'card_statement_csv',
-    label: 'Credit/debit card statement (CSV)',
+    label: 'Amount with a debit/credit marker column (CSV or XLSX)',
     container: 'delimited',
     channel: 'card',
     headerHint: 'Transaction Date, Transaction Description, Amount, Debit/Credit',
@@ -243,7 +248,7 @@ export const STATEMENT_FORMATS: readonly StatementFormat[] = [
   {
     ...BASE,
     id: 'upi_app_export_csv',
-    label: 'UPI app export (PhonePe / Google Pay / Paytm history CSV)',
+    label: 'UPI app history export — PhonePe, Google Pay or Paytm (CSV or XLSX)',
     container: 'delimited',
     channel: 'upi',
     headerHint: 'Date, Transaction Details, Type, Amount, UTR',
@@ -267,7 +272,7 @@ export const STATEMENT_FORMATS: readonly StatementFormat[] = [
   {
     ...BASE,
     id: 'signed_amount_csv',
-    label: 'Single signed-amount CSV (negative is a debit)',
+    label: 'One signed amount column, negative for money out (CSV or XLSX)',
     container: 'delimited',
     channel: 'bank_transfer',
     headerHint: 'Date, Description, Amount, Reference — amount negative for money out',
@@ -296,11 +301,67 @@ export const STATEMENT_FORMATS: readonly StatementFormat[] = [
 export interface PdfLinePattern {
   readonly id: string;
   readonly label: string;
+  /** Identifies a bank-specific document before its transaction-line pattern is considered. */
+  readonly documentPattern?: RegExp;
+  /**
+   * The kind of account the document says it is a statement of, when it says so.
+   *
+   * Declared only by a layout whose document names it — "Savings Account Transactions" is a bank
+   * account's statement and "Credit Card Statement" a card's, whatever account a person picks
+   * for it — so that `services.importStatement` can refuse to write one kind of account's
+   * movements onto another before anything is written (ADR-0066, ADR-0067). A layout that
+   * declares one must also declare `documentPattern`, because that is how the parser tells a
+   * document is this layout's even when a caller asked a different layout to read it. A layout
+   * that cannot tell leaves it unset.
+   */
+  readonly accountKind?: AccountType;
+  /**
+   * Read the document as a table, by where each value sits, instead of line by line.
+   *
+   * Set for a layout whose text alone cannot say which way money went: a withdrawal and a
+   * deposit are two columns, only one is filled, and the empty one leaves no trace in the text.
+   * `pattern` is then documentation of a row's printed shape and is not used to read it.
+   */
+  readonly columns?: PdfColumnLayout;
+  /** What a person choosing between layouts sees, when `pattern` is not readable prose. */
+  readonly headerHint?: string;
+  /** Some issuers wrap one transaction over several physical text lines. */
+  readonly recordMode?: 'physical_line' | 'dated_multiline';
+  readonly sectionStartPattern?: RegExp;
+  readonly sectionEndPattern?: RegExp;
   readonly pattern: RegExp;
   readonly dateLayouts: readonly StatementDateLayout[];
   readonly channel: PaymentChannel;
   readonly defaultReferenceType: PaymentReferenceType | null;
   readonly referencePrefixes: ReadonlyArray<readonly [string, PaymentReferenceType]>;
+}
+
+/**
+ * A statement printed as a table, described by its column headings (ADR-0066).
+ *
+ * Every heading is matched against the **first word** PDF.js returns for it, because a heading
+ * such as `Withdrawal (Dr.)` may arrive as one text item or as two. A heading's left edge is
+ * where its column's text starts, give or take `cellInset`; money is right-aligned, so an
+ * amount belongs to whichever money heading its right edge is nearest.
+ */
+export interface PdfColumnLayout {
+  readonly headers: {
+    readonly serial: RegExp;
+    readonly date: RegExp;
+    readonly description: RegExp;
+    readonly reference: RegExp;
+    readonly debit: RegExp;
+    readonly credit: RegExp;
+    readonly balance: RegExp;
+  };
+  /** How far left of its heading a cell's text starts: the renderer's padding. */
+  readonly cellInset: number;
+  /** Lines every page repeats that are never part of a row. */
+  readonly furniture: readonly RegExp[];
+  /** The description a row prints to state the balance the statement opened at. */
+  readonly openingBalance: RegExp;
+  /** The first line of the statement's own summary, after the last row. */
+  readonly tableEnd: RegExp;
 }
 
 export const PDF_LINE_FIELDS = [
@@ -320,6 +381,65 @@ export const PDF_LINE_FIELDS = [
  * makes them safe to apply line by line: a header, a footer or an address never matches.
  */
 export const PDF_LINE_PATTERNS: readonly PdfLinePattern[] = [
+  {
+    id: 'idfc_first_credit_card_pdf',
+    label: 'IDFC FIRST Bank credit card statement (PDF)',
+    documentPattern: /Credit Card Statement[\s\S]*(?:FIRST WOW!|IDFC FIRST Bank)/i,
+    // The document calls itself a credit card statement, so it goes onto a card and nowhere else.
+    accountKind: 'card',
+    recordMode: 'dated_multiline',
+    sectionStartPattern: /^YOUR TRANSACTIONS$/i,
+    sectionEndPattern: /^Pay via our Mobile App$/i,
+    // IDFC prints `date narration amount DR/CR`; long UPI and EMI narrations wrap underneath.
+    pattern:
+      /^(?<date>\d{1,2}\/\d{1,2}\/\d{4})\s+(?<description>.+?)\s+(?<amount>[\d,]+\.\d{2})\s+(?<type>DR|CR)$/i,
+    dateLayouts: ['dd/mm/yyyy'],
+    channel: 'card',
+    defaultReferenceType: 'card_reference',
+    referencePrefixes: [
+      ['UPICC/', 'upi_utr'],
+      ['UPI/', 'upi_utr'],
+    ],
+  },
+  {
+    id: 'idfc_first_bank_account_pdf',
+    label: 'IDFC FIRST Bank — savings or current account statement (PDF)',
+    headerHint:
+      '# · Date · Description · Chq/Ref. No. · Withdrawal (Dr.) · Deposit (Cr.) · Balance',
+    // The section title and the exact heading row, in order. A table with these columns but no
+    // "… Account Transactions" title is some other document and is not claimed.
+    documentPattern:
+      /(?:Savings|Current) Account Transactions[\s\S]*?#\s+Date\s+Description\s+Chq\/Ref\.?\s*No\.?\s+Withdrawal/,
+    accountKind: 'bank',
+    // Documentation only: a row's printed shape. The row is read by `columns`, because which of
+    // the two money columns an amount sits in is not in the text.
+    pattern:
+      /^(?<serial>\d{1,6})\s+(?<date>\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\s+(?<description>.+?)\s+(?<amount>[\d,]+\.\d{2})\s+(?<balance>-?[\d,]+\.\d{2})$/,
+    columns: {
+      headers: {
+        serial: /^#$/,
+        date: /^Date$/i,
+        description: /^Description$/i,
+        reference: /^Chq\/Ref\.?/i,
+        debit: /^Withdrawals?\b/i,
+        credit: /^Deposits?\b/i,
+        balance: /^Balance$/i,
+      },
+      cellInset: 5,
+      furniture: [
+        /^(?:Savings|Current) Account Transactions$/i,
+        /^Account Statement\b/i,
+        /^Account No\.?\s/i,
+        /^Statement Generated on\b/i,
+      ],
+      openingBalance: /^Opening Balance$/i,
+      tableEnd: /^Account Summary$|\bClosing Balance\b/i,
+    },
+    dateLayouts: ['dd mon yyyy'],
+    channel: 'bank_transfer',
+    defaultReferenceType: 'bank_reference',
+    referencePrefixes: BANK_PREFIXES,
+  },
   {
     id: 'pdf_debit_credit_balance',
     label: 'PDF statement — date, narration, debit, credit, balance',

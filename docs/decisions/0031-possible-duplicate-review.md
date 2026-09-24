@@ -1,6 +1,9 @@
 # 0031. A possible duplicate is confirmed or dismissed by a human, and both are recorded
 
-**Status:** Accepted
+**Status:** Accepted — **amended in part by
+[ADR-0069](0069-two-lines-of-one-statement-are-two-movements.md)** (which pairs are offered) and
+**[ADR-0070](0070-one-movement-recorded-twice-is-one-day-one-amount-one-name.md)** (the calendar day
+and the name replace the 24-hour window, which is no longer a caller option)
 
 ## Context
 
@@ -43,7 +46,8 @@ Both require an attributable human actor (`domain.parseDecisionActor`). A `linke
 never a candidate: the lifecycle draws no `linked → ignored` edge, because discarding an
 explained payment would orphan the expense it funds.
 
-The queue's default pairing window is **24 hours**, not `isPossibleDuplicate`'s own 60 seconds,
+_Superseded by ADR-0070, which pairs by calendar day and name and withdraws the option._ The
+queue's default pairing window is **24 hours**, not `isPossibleDuplicate`'s own 60 seconds,
 for the reason the importer widened its own: a bank statement carries a _date_, so two captures
 of one transaction are the same calendar day rather than seconds apart. It is a caller option,
 not a new domain rule.

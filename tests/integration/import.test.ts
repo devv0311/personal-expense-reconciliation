@@ -468,7 +468,10 @@ describe('database constraints still hold against imported data', () => {
       }),
     );
 
-    expect(error.message).toMatch(/foreign key|violates/i);
+    // The import reads the account before it writes anything — it has to know the account's
+    // kind (ADR-0068) — so a missing one is refused by name, ahead of the foreign key that still
+    // stands underneath it.
+    expect(error.message).toContain('No account with id');
     expect(await storedPayments()).toEqual([]);
   });
 

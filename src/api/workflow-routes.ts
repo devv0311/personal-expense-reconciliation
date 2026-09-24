@@ -54,6 +54,7 @@ import {
   getJob,
   getMonthlySpend,
   getOutstandingBalances,
+  getOverview,
   getOwnSpend,
   getUnsettledPaidOnBehalf,
   listJobs,
@@ -204,6 +205,39 @@ export async function getOwnSpendRoute(deps: ApiDependencies, request: Request):
 export async function getOutstandingRoute(deps: ApiDependencies): Promise<Response> {
   const userPerson = await requireUserPerson(deps);
   return jsonResponse(200, await getOutstandingBalances(deps.db, userPerson.personId));
+}
+
+/**
+ * `GET /api/overview` — the end results, for the front page.
+ *
+ * `from`/`to` are optional here, unlike the analytics reads: a summary screen has to open with
+ * *some* period, and choosing one is a calendar decision rather than a financial one, so it is
+ * made here rather than in the browser. The period actually used comes back in the response, so
+ * the screen names it instead of implying the figure is all-time.
+ */
+export async function getOverviewRoute(deps: ApiDependencies, request: Request): Promise<Response> {
+  const params = new URL(request.url).searchParams;
+  const start = optionalTimestampParam(params, 'from');
+  const end = optionalTimestampParam(params, 'to');
+  if (start !== undefined && end !== undefined && end <= start) {
+    throw new ApiRequestError('"to" must be after "from".', 'to');
+  }
+
+  const userPerson = await requireUserPerson(deps);
+  const period = start === undefined || end === undefined ? currentMonthPeriod() : { start, end };
+
+  return jsonResponse(
+    200,
+    await getOverview(deps.db, { userPersonId: userPerson.personId, period }),
+  );
+}
+
+/** The calendar month now falls in, at the UTC boundaries every period in this system uses. */
+function currentMonthPeriod(): { start: Date; end: Date } {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return { start, end };
 }
 
 export async function getUnsettledRoute(deps: ApiDependencies): Promise<Response> {

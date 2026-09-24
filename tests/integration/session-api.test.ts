@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createAiService } from '../../src/ai/index.js';
-import { createApi } from '../../src/api/index.js';
+import { API_ROUTES, SESSION_ROUTES, createApi } from '../../src/api/index.js';
 import type { Api } from '../../src/api/index.js';
 import { hashPassword, verifyPassword } from '../../src/services/index.js';
 import { schema, setUserPasswordHash } from '../../src/db/index.js';
@@ -116,6 +116,32 @@ describe('the door', () => {
       displayName: 'Should not exist',
     });
     expect(response.status).toBe(401);
+  });
+
+  it('protects every route it serves except the ones that let a first run happen', async () => {
+    // The gate is default-deny over a closed public list, which is only a guarantee if
+    // something checks it. A route added without noticing is a leak of somebody's entire
+    // financial history, and it is exactly the kind of mistake a new surface introduces.
+    const publicPaths = new Set(SESSION_ROUTES.map((route) => route.path));
+    // Authenticated by its own shared secret rather than a session (`security-model.md`).
+    const tokenPaths = new Set(['/api/intake/messages']);
+
+    const open: string[] = [];
+    for (const route of API_ROUTES) {
+      if (publicPaths.has(route.path) || tokenPaths.has(route.path)) continue;
+      const url = `${BASE}${route.path.replace(/:[^/]+/g, '00000000-0000-4000-8000-000000000000')}`;
+      const response = await guarded.handle(
+        new Request(url, {
+          method: route.method,
+          ...(route.method === 'GET'
+            ? {}
+            : { headers: { 'content-type': 'application/json' }, body: '{}' }),
+        }),
+      );
+      if (response.status !== 401) open.push(`${route.method} ${route.path} → ${response.status}`);
+    }
+
+    expect(open).toEqual([]);
   });
 
   it('lets the session routes through, so a first run is possible', async () => {

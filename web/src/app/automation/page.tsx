@@ -1,5 +1,6 @@
 import { JobsPanel } from "@/components/automation/jobs-panel";
 import { RulesAdmin } from "@/components/automation/rules-admin";
+import { PatternsToApprove } from "@/components/learning/patterns-to-approve";
 import { PageHeader } from "@/components/page-header";
 
 /**
@@ -17,6 +18,11 @@ export default function AutomationPage() {
         title="Automation"
         description="Standing rules, and the background queue. Nothing here decides an amount or approves a financial decision — both only ever produce a label or a queue item."
       />
+      {/*
+        Above the rules themselves: a pattern the ledger is offering is the thing a person came
+        here to decide, and the list of rules they already have is the reference beside it.
+      */}
+      <PatternsToApprove />
       <RulesAdmin />
       <JobsPanel />
     </div>

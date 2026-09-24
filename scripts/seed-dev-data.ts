@@ -12,9 +12,23 @@
  * Idempotent: does nothing if a `User` already exists, so re-running (or running against a
  * database that already has real data) is always safe.
  *
- * Run with `npx tsx scripts/seed-dev-data.ts`. Uses `DATABASE_URL`/`PGLITE_DATA_DIR` exactly the
- * way `src/server.ts` does, so run this against the same environment (or none — both default to
- * the same on-disk `./local-data/pglite-dev`) and the two processes see the same database.
+ * Run with `npx tsx scripts/seed-dev-data.ts`, having named a scratch database:
+ *
+ *     PGLITE_DATA_DIR=<scratch>/qa-db EVIDENCE_STORAGE_PATH=<scratch>/qa-evidence \
+ *       npx tsx scripts/seed-dev-data.ts
+ *
+ * **It refuses to run without one, and it refuses to run with `DATABASE_URL` set.** Two gaps,
+ * closed in that order. The PGlite path used to default to `./local-data/pglite-dev` — the
+ * owner's real ledger — so a forgotten environment variable pointed a seeding script at their own
+ * records, and `createPgliteDatabase` would `mkdirSync` and `migrate()` them before the
+ * "a `User` already exists" check below ever ran. And the Postgres branch beside it read
+ * `DATABASE_URL` and connected with no check at all, so a shell already configured to point
+ * somewhere real could take a synthetic seed straight into it.
+ *
+ * `resolveSyntheticTarget` now makes that one decision before anything is opened, and the
+ * "a `User` already exists" check stays what it always was: a second line, not a first.
+ * To seed a Postgres database deliberately, use `SYNTHETIC_DATABASE_URL`, which nothing but a
+ * person sets. See `docs/testing/process-isolation.md`.
  */
 
 import { eq } from 'drizzle-orm';
@@ -22,6 +36,7 @@ import { eq } from 'drizzle-orm';
 import { createAiService } from '../src/ai/index.js';
 import type { ModelTransport } from '../src/ai/index.js';
 import { createPgliteDatabase, createPostgresDatabase, schema } from '../src/db/index.js';
+import { resolveSyntheticTarget } from '../src/db/real-ledger-guard.js';
 import { asId, paise } from '../src/domain/index.js';
 import type { SplitwiseFriendBalance, SplitwisePort } from '../src/integrations/splitwise/index.js';
 import {
@@ -41,11 +56,14 @@ import {
 const AS_SEED = { actor: 'system', source: 'scripts/seed-dev-data' } as const;
 
 async function main(): Promise<void> {
-  const connectionString = process.env.DATABASE_URL;
+  // Every refusal happens here, before a database of any kind is opened. `resolveSyntheticTarget`
+  // returns a *description* of where to write, so there is no branch in which a connection is
+  // made first and checked afterwards — which is exactly what the Postgres branch used to do.
+  const target = resolveSyntheticTarget(process.env, process.cwd(), 'scripts/seed-dev-data');
   const database =
-    connectionString !== undefined && connectionString !== ''
-      ? await createPostgresDatabase(connectionString)
-      : await createPgliteDatabase(process.env.PGLITE_DATA_DIR ?? './local-data/pglite-dev');
+    target.kind === 'postgres'
+      ? await createPostgresDatabase(target.connectionString)
+      : await createPgliteDatabase(target.dataDir);
   await database.migrate();
   const db = database.db;
 

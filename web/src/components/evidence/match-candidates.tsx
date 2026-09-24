@@ -50,15 +50,15 @@ export function EvidenceMatchCandidates({
 
       {candidates.length === 0 ? (
         <EmptyBlock>
-          No payment has been offered for this document. That is a real answer, not a failure — run
-          &ldquo;Find candidates&rdquo; if nothing has looked yet.
+          No payment has been suggested for this record. That is a real answer rather than a failure
+          — choose <strong>Look for matches</strong> if nothing has looked yet.
         </EmptyBlock>
       ) : (
         <>
           {open.length > 1 && (
             <p className="text-meta text-attention">
-              More than one payment is eligible. The evidence does not distinguish them, so this
-              system will not either — a person has to.
+              More than one payment could be the right one, and nothing on the record tells them
+              apart. This will not guess between them — only you can say which it is.
             </p>
           )}
           <ul className="flex flex-col gap-5">
@@ -72,7 +72,7 @@ export function EvidenceMatchCandidates({
           </ul>
           {decided.length > 0 && (
             <div>
-              <h4 className="mb-2 text-meta text-ink-muted">Already decided</h4>
+              <h4 className="mb-2 text-meta text-ink-muted">Already answered</h4>
               <ul className="flex flex-col">
                 {decided.map((candidate) => (
                   <li
@@ -109,24 +109,24 @@ export function EvidenceMatchCandidates({
           mutation.reset();
         }}
         title={
-          pending?.decision === "accept" ? "Attach this document" : "Record that it does not belong"
+          pending?.decision === "accept" ? "Connect these two records" : "Say these are not related"
         }
         consequence={
           pending?.decision === "accept" ? (
             <>
-              Attaching this document to that payment is <strong>permanent</strong>: evidence
-              linkage is write-once, so it cannot later be re-pointed at a different payment.
-              Everything extracted from the document inherits the link, and the other offers for
-              this document are answered at the same time.
+              This says the record and that payment are the same real thing, and it is{" "}
+              <strong>permanent</strong>: a record can be connected once, and cannot later be moved
+              to a different payment. Anything read off the record comes with it, and the other
+              suggestions for this record are answered at the same time.
             </>
           ) : (
             <>
-              This records that the document does not belong to that payment. The other offers stay
-              open, and nothing about the payment changes.
+              This records that the two are not about the same thing. Any other suggestion for this
+              record stays open, and nothing about the payment changes.
             </>
           )
         }
-        confirmLabel={pending?.decision === "accept" ? "Attach permanently" : "Dismiss"}
+        confirmLabel={pending?.decision === "accept" ? "Connect them" : "Not related"}
         confirmVariant={pending?.decision === "accept" ? "default" : "outline"}
         pending={mutation.isPending}
         error={mutation.error}
@@ -142,8 +142,12 @@ export function EvidenceMatchCandidates({
           );
         }}
       >
-        <p className="text-meta text-ink-muted">
-          Evidence <span className="font-mono">{evidenceId.slice(0, 8)}</span> →{" "}
+        {/*
+          The two ids, kept because a permanent act should name exactly what it acts on — but
+          said as a reference line under the sentence, never as the sentence itself.
+        */}
+        <p className="text-micro text-ink-faint">
+          Record <span className="font-mono">{evidenceId.slice(0, 8)}</span>, payment{" "}
           <span className="font-mono">{pending?.candidate.paymentId.slice(0, 8)}</span>
         </p>
       </DecisionDialog>
@@ -159,14 +163,16 @@ function CandidateCard({
   onDecide: (decision: "accept" | "dismiss") => void;
 }) {
   const signals = candidate.signals ?? [];
+  const agreed = signals.filter((signal) => signal.verdict === "matched");
+  const disagreed = signals.filter((signal) => signal.verdict === "conflicted");
   return (
     <li className="border-t border-rule pt-4 first:border-t-0 first:pt-0">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <Link
-          href={`/payments/${candidate.paymentId}`}
-          className="font-mono text-body text-accent underline underline-offset-2"
+          href={`/connections/${candidate.paymentId}`}
+          className="text-body text-accent underline underline-offset-2"
         >
-          Payment {candidate.paymentId.slice(0, 8)}
+          This payment
         </Link>
         <span className="flex flex-wrap items-baseline gap-3">
           <span className="text-meta text-ink-muted">{matchStrengthLabel(candidate.strength)}</span>
@@ -174,62 +180,98 @@ function CandidateCard({
         </span>
       </div>
 
+      {/*
+        What agrees and what does not, before the table that proves it. The comparison is the
+        evidence for the suggestion and somebody checking a doubtful one needs every column of
+        it — but it is not how a person decides, and leading with it asked them to read a matrix
+        before they could read a sentence.
+      */}
+      {(agreed.length > 0 || disagreed.length > 0) && (
+        <dl className="mt-2 flex flex-col gap-1">
+          {agreed.length > 0 && (
+            <div className="flex flex-wrap items-baseline gap-2">
+              <dt className="text-micro text-ink-faint">What matches</dt>
+              <dd className="text-meta text-ink">
+                {agreed.map((signal) => matchSignalLabel(signal.signal).toLowerCase()).join(", ")}
+              </dd>
+            </div>
+          )}
+          {disagreed.length > 0 && (
+            <div className="flex flex-wrap items-baseline gap-2">
+              <dt className="text-micro text-ink-faint">What does not</dt>
+              <dd className="text-meta text-attention">
+                {disagreed
+                  .map((signal) => matchSignalLabel(signal.signal).toLowerCase())
+                  .join(", ")}
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+
       <ReasonRow reasons={candidate.reviewReasons} label={matchReviewReasonLabel} />
 
       {signals.length > 0 && (
-        <div className="mt-3">
-          <ResponsiveTable
-            caption="Signal-by-signal comparison for this candidate"
-            minWidth="420px"
-            rows={signals}
-            rowKey={(signal) => signal.signal}
-            columns={[
-              {
-                key: "signal",
-                header: "Signal",
-                render: (signal) => (
-                  <span className="whitespace-nowrap">{matchSignalLabel(signal.signal)}</span>
-                ),
-              },
-              {
-                key: "verdict",
-                header: "Verdict",
-                render: (signal) => (
-                  <>
-                    <SignalVerdict verdict={signal.verdict} />
-                    <span className="mt-0.5 block text-micro text-ink-faint">{signal.detail}</span>
-                  </>
-                ),
-              },
-              {
-                key: "evidence",
-                header: "Evidence says",
-                render: (signal) => (
-                  <span className="font-mono text-meta break-all">
-                    {signal.evidenceValue ?? "—"}
-                  </span>
-                ),
-              },
-              {
-                key: "payment",
-                header: "Payment says",
-                render: (signal) => (
-                  <span className="font-mono text-meta break-all">
-                    {signal.paymentValue ?? "—"}
-                  </span>
-                ),
-              },
-            ]}
-          />
-        </div>
+        <details className="mt-3">
+          <summary className="cursor-pointer text-meta text-ink-muted">
+            Compare them side by side
+          </summary>
+          <div className="mt-2">
+            <ResponsiveTable
+              caption="Signal-by-signal comparison for this candidate"
+              minWidth="420px"
+              rows={signals}
+              rowKey={(signal) => signal.signal}
+              columns={[
+                {
+                  key: "signal",
+                  header: "Signal",
+                  render: (signal) => (
+                    <span className="whitespace-nowrap">{matchSignalLabel(signal.signal)}</span>
+                  ),
+                },
+                {
+                  key: "verdict",
+                  header: "Verdict",
+                  render: (signal) => (
+                    <>
+                      <SignalVerdict verdict={signal.verdict} />
+                      <span className="mt-0.5 block text-micro text-ink-faint">
+                        {signal.detail}
+                      </span>
+                    </>
+                  ),
+                },
+                {
+                  key: "evidence",
+                  header: "The record says",
+                  render: (signal) => (
+                    <span className="font-mono text-meta break-all">
+                      {signal.evidenceValue ?? "—"}
+                    </span>
+                  ),
+                },
+                {
+                  key: "payment",
+                  header: "The payment says",
+                  render: (signal) => (
+                    <span className="font-mono text-meta break-all">
+                      {signal.paymentValue ?? "—"}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          </div>
+        </details>
       )}
 
       <div className="mt-3 flex flex-wrap gap-3">
         <Button size="sm" onClick={() => onDecide("accept")}>
-          Attach to this payment
+          Yes, they go together
         </Button>
         <Button size="sm" variant="outline" onClick={() => onDecide("dismiss")}>
-          Not this one
+          No, different thing
         </Button>
       </div>
     </li>

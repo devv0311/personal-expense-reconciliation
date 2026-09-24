@@ -65,7 +65,7 @@ export async function postAllocation(
   const reason = optionalString(body, 'reason');
   const decidedBy = optionalString(body, 'decidedBy') ?? 'manual';
   const decidedAt = optionalTimestamp(body, 'decidedAt');
-  const decision = parseDecision(body);
+  const decision = parseAllocationDecision(body);
   const groupShareOverrides = parseGroupShareOverrides(body);
 
   const result = await approveAllocation(deps.db, {
@@ -110,7 +110,13 @@ function requireBeneficiary(raw: unknown, field: string): BeneficiaryRef {
     : { type: 'group', id: asId<'group'>(id) };
 }
 
-function parseDecision(body: Record<string, unknown>): AllocationDecision {
+/**
+ * Exported so the preview parses a decision the approval would accept, by construction.
+ *
+ * A second, independent parser would be free to accept a shape the approval rejects, which
+ * would make the preview a preview of something that cannot happen.
+ */
+export function parseAllocationDecision(body: Record<string, unknown>): AllocationDecision {
   const method: AllocationMethod = requireOneOf(body, 'method', ALLOCATION_METHODS);
   switch (method) {
     case 'equal':
@@ -215,7 +221,8 @@ function requireWeight(raw: Record<string, unknown>, field: string): bigint {
   return value;
 }
 
-function parseGroupShareOverrides(
+/** Exported for the same reason {@link parseAllocationDecision} is. */
+export function parseGroupShareOverrides(
   body: Record<string, unknown>,
 ): readonly GroupShareOverride[] | undefined {
   const raw = body['groupShareOverrides'];

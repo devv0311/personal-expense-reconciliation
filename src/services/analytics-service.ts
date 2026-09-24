@@ -73,6 +73,14 @@ export interface CategorySpendResult {
   readonly period: AnalyticsPeriod;
   readonly categories: readonly CategorySpend[];
   readonly netTotal: Paise;
+  /**
+   * The same expenses before any refund or reimbursement was netted off.
+   *
+   * Carried beside the net figure so a caller can say what came back without a second query
+   * over the adjustment table — and, more importantly, so the two figures are the same
+   * traversal of the same rows and cannot disagree about which expenses were in the period.
+   */
+  readonly grossTotal: Paise;
   readonly caveats: AnalyticsCaveats;
 }
 
@@ -95,11 +103,13 @@ export async function getCategorySpend(
     expenseCount: row.expenseCount,
   }));
   const total = categories.reduce<bigint>((sum, entry) => sum + entry.netTotal, 0n);
+  const gross = categories.reduce<bigint>((sum, entry) => sum + entry.grossTotal, 0n);
 
   return {
     period,
     categories: [...categories].sort((a, b) => (b.netTotal > a.netTotal ? 1 : -1)),
     netTotal: total as Paise,
+    grossTotal: gross as Paise,
     caveats: await buildCaveats(
       db,
       rows.flatMap((row) => row.expenseIds),
@@ -230,6 +240,15 @@ export interface CounterpartyBalance {
 
 export interface OutstandingResult {
   readonly counterparties: readonly CounterpartyBalance[];
+  /**
+   * People this ledger has shared something with whose balance is now exactly zero.
+   *
+   * Carried beside the outstanding ones rather than in place of them: "you are square with
+   * Alex" and "you have never shared anything with Alex" are different answers, and a screen
+   * that only lists what is outstanding cannot tell them apart. Nobody here is owed anything,
+   * so none of them is ever totalled.
+   */
+  readonly settled: readonly CounterpartyBalance[];
   /** Everything owed **to** the user, and everything the user owes, as two totals. */
   readonly totalOwedToUser: Paise;
   readonly totalOwedByUser: Paise;
@@ -253,6 +272,7 @@ export async function getOutstandingBalances(
 
   return {
     counterparties,
+    settled: rows.filter((row) => row.netBalance === 0n && row.contributingExpenseCount > 0),
     totalOwedToUser: counterparties
       .filter((row) => row.netBalance > 0n)
       .reduce<bigint>((sum, row) => sum + row.netBalance, 0n) as Paise,

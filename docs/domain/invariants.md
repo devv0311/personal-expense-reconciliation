@@ -194,6 +194,37 @@ never a mutation of `NetBalance` itself, and never treated as equivalent to a re
     Confirming re-checks the pair against the rule first: a reviewer's say-so is not evidence
     that two unrelated payments are the same money. Import-time behaviour is untouched.
 
+    **Two different lines of one statement are never a possible duplicate (ADR-0069).** The
+    rule guards against one movement arriving _twice_ — an overlapping statement, a second
+    channel, a re-downloaded file — and each of those is an import batch of its own. Within one
+    batch, a pair is offered only when nothing the batch printed tells the two apart: same
+    `occurred_at`, same `raw_description`, same `external_reference`, i.e. a line printed twice
+    with no reference to settle it. Across batches the rule is unchanged, and a row whose batch
+    or words are unknown is judged as before. Without this, one bank statement's ordinary
+    same-amount days became questions — `k` lines at one amount make `k(k−1)/2` pairs, and a
+    printed date puts consecutive days exactly 24 hours apart — and answering any of them would
+    have deleted a real movement. Two tax components of one statement are never asked about,
+    even word for word: a statement prints one for every charge it taxes, and the two GST halves
+    of one charge are equal by construction.
+
+    **Across imports, one movement is one day, one amount and one name (ADR-0070 — the owner's
+    policy, accepted 22 September 2026).** Two lines from different imports are a possible
+    duplicate only on the **same calendar day** (the date a statement printed — no longer a
+    24-hour window, which paired every line with the next day's), and only when nothing on them
+    tells them apart: the same transaction number in two packagings is asked about whatever the
+    names say; two different numbers of one known kind (two UTRs) are two movements; otherwise
+    the two lines must be the same kind of line (the purpose reader's reading) and name the same
+    or a sufficiently similar payee — every name word of one appears in the other, the same
+    letters once spaces are ignored, or the payee a `/`-separated narration names (`UPI / payee /
+number / note`) appears in the other line; a word the issuer cut short (four letters or
+    more) counts as the word it begins. This holds whichever accounts the lines came from. A
+    line that names nobody is judged by its kind; unknown words or kinds never remove a
+    question. A tax component is compared only with a tax component, and across imports only
+    with the same tax (`CGST` beside `CGST`, never `SGST`), so a statement downloaded again
+    cannot count its tax twice unasked. A pair one reference proves is asked about while both
+    are still counted — the importer settles such pairs itself, so one that survives was typed
+    by hand. Nothing is merged, and confirming re-checks the pair with the same rule.
+
     **A candidate that is itself `ignored` is still a match.** It is tempting to exclude
     ignored rows from the candidate set instead; that is wrong. A payment ignored for a
     non-duplicate reason (`out_of_scope`) is still the first copy this ledger saw, and skipping

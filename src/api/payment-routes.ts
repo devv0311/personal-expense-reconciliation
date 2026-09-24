@@ -26,6 +26,7 @@
  */
 
 import {
+  ACCOUNT_TYPES,
   CASH_FLOW_CATEGORIES,
   CASH_FLOW_STATES,
   PAYMENT_CHANNELS,
@@ -35,7 +36,7 @@ import {
   PAYMENT_STATES,
   asId,
 } from '../domain/index.js';
-import type { Paise } from '../domain/index.js';
+import type { ImportBatchId, Paise } from '../domain/index.js';
 import { getPrimaryUserPerson } from '../db/index.js';
 import {
   approvePaymentCashFlow,
@@ -46,15 +47,20 @@ import {
   importBankStatementCsv,
   importStatement,
   listImportHistory,
+  previewStatement,
   listSupportedStatementFormats,
   listPaymentCounterpartyOptions,
+  MAX_STATEMENT_BYTES,
+  ServiceError,
   listPaymentsWorkspace,
   markPaymentCashFlowNormalized,
   normalizePayments,
   recordManualPayment,
   rejectPaymentCashFlow,
   setPaymentCounterparty,
+  prepareRecords,
 } from '../services/index.js';
+import type { AnalysisResult } from '../services/index.js';
 
 import {
   ApiRequestError,
@@ -89,6 +95,11 @@ import type { ApiDependencies, RouteParams } from './router.js';
  * All-or-nothing. A file with any unreadable row imports **nothing** and reports every bad
  * row, because a partially imported statement leaves the ledger quietly missing movements —
  * which is the exact condition cash reconciliation exists to detect.
+ *
+ * A bank account's statement by this route's own contract — every row is recorded as a bank
+ * transfer — so an `accountId` of any other kind is refused before anything is written
+ * (`STATEMENT_ACCOUNT_MISMATCH`, ADR-0068). A CSV from anywhere else goes through
+ * `POST /api/imports/statement`, where the person says what kind of account it is from.
  */
 export async function postBankCsvImport(
   deps: ApiDependencies,
@@ -128,7 +139,14 @@ export function getStatementFormatsRoute(): Promise<Response> {
  * `POST /api/imports/statement` — import one statement in any supported format.
  *
  * Body: `{ actor, accountId, sourceSystem, formatId, contentBase64 | fileContent, filename?,
- * fileReference? }`.
+ * fileReference?, statementKind? }`.
+ *
+ * `statementKind` is the kind of account the person says this is a statement of — one of the
+ * account types. It is **required for a statement that does not name its own kind**, which is
+ * every CSV and XLSX: their columns fit a card's export as well as a bank account's and are
+ * never read as an answer. The import is refused before anything is written without it
+ * (`STATEMENT_KIND_REQUIRED`), when the document says otherwise (`STATEMENT_KIND_CONFLICT`),
+ * or when the account chosen is another kind (`STATEMENT_ACCOUNT_MISMATCH`) — ADR-0068.
  *
  * `contentBase64` rather than only text, because two of the three containers are binary: an
  * `.xlsx` is a ZIP and a `.pdf` is a binary document, and either one decoded as UTF-8 first is
@@ -146,12 +164,57 @@ export async function postStatementImport(
   deps: ApiDependencies,
   request: Request,
 ): Promise<Response> {
+  refuseObviouslyOversizedStatement(request);
   const body = await readJsonObject(request);
   const actor = requirePersonActor(body, 'import a statement');
   const formatId = requireString(body, 'formatId');
   const filename = optionalString(body, 'filename');
   const fileReference = optionalString(body, 'fileReference');
+  const statementKind = optionalOneOf(body, 'statementKind', ACCOUNT_TYPES);
 
+  const bytes = statementBytes(body);
+
+  const result = await importStatement(deps.db, {
+    accountId: asId<'account'>(requireUuidField(body, 'accountId')),
+    sourceSystem: requireString(body, 'sourceSystem'),
+    formatId,
+    bytes,
+    ...(filename === undefined ? {} : { filename }),
+    ...(fileReference === undefined ? {} : { fileReference }),
+    ...(statementKind === undefined ? {} : { statementKind }),
+    audit: { actor, source: 'api POST /api/imports/statement' },
+  });
+
+  const prepared = await prepareImported(deps, actor, result);
+  return jsonResponse(result.outcome === 'already_imported' ? 200 : 201, { ...result, prepared });
+}
+
+/**
+ * `POST /api/imports/preview` — read a statement and say what is on it. **Writes nothing.**
+ *
+ * The website calls this the moment a file is chosen, before anybody has picked an account or
+ * confirmed anything, so the dialog can say what the file is, what is on it, whether it is
+ * already on record — and, for a statement that names its kind of account, which accounts it
+ * can go into (ADR-0066). No actor is required because nothing is recorded; a file that cannot
+ * be read is a `200` with `readable: false`, since saying so is this route's whole job.
+ */
+export async function postStatementPreview(
+  deps: ApiDependencies,
+  request: Request,
+): Promise<Response> {
+  refuseObviouslyOversizedStatement(request);
+  const body = await readJsonObject(request);
+  const filename = optionalString(body, 'filename');
+  const preview = await previewStatement(deps.db, {
+    formatId: optionalString(body, 'formatId') ?? 'auto',
+    bytes: statementBytes(body),
+    ...(filename === undefined ? {} : { filename }),
+  });
+  return jsonResponse(200, preview);
+}
+
+/** The statement's bytes, from exactly one of `contentBase64` or `fileContent`. */
+function statementBytes(body: Record<string, unknown>): Uint8Array {
   const base64 = optionalString(body, 'contentBase64');
   const text = optionalString(body, 'fileContent');
   if ((base64 === undefined) === (text === undefined)) {
@@ -179,18 +242,99 @@ export async function postStatementImport(
   } else {
     bytes = new TextEncoder().encode(text ?? '');
   }
+  return bytes;
+}
 
-  const result = await importStatement(deps.db, {
-    accountId: asId<'account'>(requireUuidField(body, 'accountId')),
-    sourceSystem: requireString(body, 'sourceSystem'),
-    formatId,
-    bytes,
-    ...(filename === undefined ? {} : { filename }),
-    ...(fileReference === undefined ? {} : { fileReference }),
-    audit: { actor, source: 'api POST /api/imports/statement' },
-  });
+/**
+ * Reading what just arrived, in the request that imported it.
+ *
+ * Importing a statement and being told what is on it were two separate acts, and the second one
+ * was a button named after the machinery that a person had to know to press. Until they did,
+ * the rows sat unread and the front page reported nothing spent over a statement it had in
+ * full. So the import does it, scoped to the batch it just wrote.
+ *
+ * **It approves nothing.** Every stage calls a service that already refuses to write an
+ * authoritative category, match, duplicate, split or debt without a person; the most this can
+ * do unattended is fill the question list.
+ *
+ * **A failure here never fails the import.** The rows are committed by the time this runs, and
+ * reporting an import as failed because the reading afterwards did not finish would be a lie
+ * about the one thing that is now permanently true. It comes back as `prepared: null` with a
+ * sentence, and the records stay waiting for the next run — which is idempotent, so nothing is
+ * lost and nothing is written twice.
+ */
+async function prepareImported(
+  deps: ApiDependencies,
+  actor: string,
+  result: { readonly outcome: string; readonly importBatchId?: ImportBatchId },
+): Promise<PreparedImport> {
+  // A re-import wrote nothing, so there is no batch of its own to read; anything still
+  // outstanding is picked up by the ordinary unscoped run the next screen asks for.
+  if (result.outcome === 'already_imported' || result.importBatchId === undefined) {
+    return {
+      ran: false,
+      reason: 'This file was already on record, so there was nothing new to read.',
+    };
+  }
 
-  return jsonResponse(result.outcome === 'already_imported' ? 200 : 201, result);
+  try {
+    const analysis = await prepareRecords(deps.db, {
+      ai: deps.ai,
+      audit: { actor, source: 'api POST /api/imports/statement (reading what arrived)' },
+      importBatchId: result.importBatchId,
+    });
+    return { ran: true, analysis };
+  } catch (error) {
+    return {
+      ran: false,
+      reason:
+        error instanceof Error
+          ? `The statement was imported, but reading it did not finish: ${error.message}`
+          : 'The statement was imported, but reading it did not finish.',
+    };
+  }
+}
+
+/** What the import did about reading the rows it just wrote. */
+export type PreparedImport =
+  | { readonly ran: true; readonly analysis: AnalysisResult }
+  | { readonly ran: false; readonly reason: string };
+
+/**
+ * The largest request body that could still carry a statement within `MAX_STATEMENT_BYTES`.
+ *
+ * Base64 costs four characters per three bytes, so the file alone can reach
+ * `4 * ceil(limit / 3)` characters; the surrounding JSON — the actor, the account id, the
+ * source system, a filename — is allowed a generous envelope on top of that.
+ */
+const MAX_STATEMENT_REQUEST_BYTES = 4 * Math.ceil(MAX_STATEMENT_BYTES / 3) + 64 * 1024;
+
+/**
+ * Rejects a body that cannot possibly be within the limit, before it is read into memory.
+ *
+ * A convenience, and deliberately only that. `Content-Length` is the client's claim: it may be
+ * absent (a chunked upload), wrong, or a lie, so this check can be skipped by anybody who
+ * wants to skip it and **is not the limit**. `services.importStatement` re-checks the decoded
+ * bytes and is the guarantee (`MAX_STATEMENT_BYTES`). What this buys is that the ordinary
+ * oversized upload — a browser posting a 300 MB file with an honest header — is refused
+ * without first being buffered and JSON-parsed.
+ *
+ * **It raises the same error the authoritative check does**, so the two answer a caller
+ * identically: `413 STATEMENT_FILE_TOO_LARGE`. Which of the two noticed is an implementation
+ * detail of this server, and a client that has to branch on `400 INVALID_REQUEST` versus
+ * `413` to learn the same fact is a client we made guess.
+ */
+function refuseObviouslyOversizedStatement(request: Request): void {
+  const header = request.headers.get('content-length');
+  if (header === null) return;
+  const declared = Number(header);
+  if (!Number.isFinite(declared) || declared <= MAX_STATEMENT_REQUEST_BYTES) return;
+  throw new ServiceError(
+    'STATEMENT_FILE_TOO_LARGE',
+    `This request is ${declared} bytes, which cannot hold a statement within the ` +
+      `${MAX_STATEMENT_BYTES}-byte limit. Nothing was read from it.`,
+    { declaredRequestBytes: String(declared), limit: String(MAX_STATEMENT_BYTES) },
+  );
 }
 
 export async function getImportsRoute(deps: ApiDependencies, request: Request): Promise<Response> {

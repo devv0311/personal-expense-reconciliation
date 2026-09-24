@@ -38,6 +38,7 @@ import type { IncomingMessage } from 'node:http';
 import { Readable } from 'node:stream';
 
 import { createApi } from './api/index.js';
+import { createGracefulShutdown } from './server-shutdown.js';
 import type { ApiDependencies } from './api/index.js';
 import { createAiService } from './ai/index.js';
 import type { ModelTransport } from './ai/index.js';
@@ -386,11 +387,13 @@ async function main(): Promise<void> {
     });
   });
 
-  const shutdown = async (): Promise<void> => {
-    server.close();
-    await database.close();
-    process.exit(0);
-  };
+  // Drain, then close the ledger, then exit — each step waited for, and safe to signal twice.
+  // See `src/server-shutdown.ts` for why the order and the waiting both matter here.
+  const shutdown = createGracefulShutdown({
+    server,
+    closeDatabase: () => database.close(),
+    exit: (code) => process.exit(code),
+  });
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
 

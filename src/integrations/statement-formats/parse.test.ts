@@ -12,8 +12,9 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { listStatementFormats, parseStatement } from './parse.js';
-import { extractPdfText } from './pdf-text.js';
+import { buildTextPdf } from '../../../tests/support/synthetic-pdf.js';
+
+import { listStatementFormats, parseStatement, parseStatementFile } from './parse.js';
 import { parseStatementAmount, parseStatementDate, splitDelimitedLine } from './table.js';
 import { readXlsxFirstSheet, XlsxReadError } from './xlsx.js';
 
@@ -217,6 +218,54 @@ describe('refusals', () => {
     expect(result.errors[0]?.message).toContain('No supported format matched');
   });
 
+  it('says a file whose columns fit two layouts fits two, rather than that none matched', () => {
+    // Under the generic layout a "D" is a deposit; under the debit/credit-marker layout it is a
+    // debit. A tie is refused because the two disagree about which way money went — and saying
+    // "no format matched" about it would send somebody looking for the wrong problem.
+    const result = parseStatement({
+      bytes: new TextEncoder().encode(
+        'date,description,amount_inr,type,reference\n2026-08-01,SYNTHETIC ENTRY,100.00,D,REF1\n',
+      ),
+      formatId: 'auto',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const message = result.errors[0]?.message ?? '';
+    expect(message).toContain('more than one layout');
+    // Named in the words the import screen uses for a layout, never by internal id.
+    expect(message).toContain('Generic export');
+    expect(message).toContain('debit/credit marker');
+    expect(message).not.toContain('generic_bank_csv');
+    expect(message).toContain('Nothing was imported');
+    expect(message).not.toContain('No supported format matched');
+  });
+
+  it('reads the same file once its layout is named explicitly', () => {
+    const result = parseStatement({
+      bytes: new TextEncoder().encode(
+        'date,description,amount_inr,type,reference\n2026-08-01,SYNTHETIC ENTRY,100.00,D,REF1\n',
+      ),
+      formatId: 'card_statement_csv',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rows[0]?.direction).toBe('debit');
+  });
+
+  it('never claims a kind of account for a table, whichever layout read it', () => {
+    for (const name of [
+      'hdfc-bank-statement.csv',
+      'card-statement.csv',
+      'upi-app-export.csv',
+      'sbi-bank-statement.xlsx',
+    ]) {
+      const result = parseFixture(name);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.accountKind).toBeNull();
+    }
+  });
+
   it('names an unknown format id rather than falling back to a default', () => {
     const result = parseStatement({
       bytes: new TextEncoder().encode('date,description,amount_inr,type,reference\n'),
@@ -271,8 +320,15 @@ describe('xlsx', () => {
 });
 
 describe('pdf', () => {
-  it('lifts the text layer off a generated statement and reads its movements', () => {
-    const result = parseFixture('bank-statement.pdf');
+  // Through `parseStatementFile`, which is the one path that reads a PDF and the one
+  // `services.importStatement` uses. `parseStatement` refuses a PDF outright, so a test that
+  // called it here would be exercising a reader production never reaches.
+  function parsePdfFixture(name: string, formatId = 'auto') {
+    return parseStatementFile({ bytes: load(name), formatId, filename: name });
+  }
+
+  it('lifts the text layer off a generated statement and reads its movements', async () => {
+    const result = await parsePdfFixture('bank-statement.pdf');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.formatId).toBe('pdf_debit_credit_balance');
@@ -286,22 +342,32 @@ describe('pdf', () => {
     expect(result.warnings[0]?.message).toContain('check the count against the statement');
   });
 
-  it('says a scanned PDF has no text layer instead of reporting no transactions', () => {
-    // A PDF header with no content stream at all — the shape of an image-only scan as far as
-    // text extraction is concerned.
-    const bytes = new TextEncoder().encode('%PDF-1.4\n%%EOF\n');
-    const text = extractPdfText(bytes);
-    expect(text.hasTextLayer).toBe(false);
-    expect(text.reason).toContain('no extractable text layer');
-
-    const result = parseStatement({ bytes, formatId: 'auto' });
+  it('says a scanned PDF has no text layer instead of reporting no transactions', async () => {
+    // A real PDF whose pages carry no content stream: the shape of an image-only scan as far
+    // as text extraction is concerned, and never the same fact as "no transactions".
+    const result = await parseStatementFile({
+      bytes: buildTextPdf(['drawn as an image'], { withoutTextLayer: true }),
+      formatId: 'auto',
+      filename: 'scan.pdf',
+    });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.errors[0]?.message).toContain('no extractable text layer');
   });
 
-  it('is not fooled into reading a header or a footer line as a movement', () => {
-    const result = parseFixture('bank-statement.pdf');
+  it('refuses a PDF at the synchronous entry point rather than reading it differently', () => {
+    const result = parseStatement({
+      bytes: load('bank-statement.pdf'),
+      formatId: 'auto',
+      filename: 'bank-statement.pdf',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[0]?.message).toContain('parseStatementFile()');
+  });
+
+  it('is not fooled into reading a header or a footer line as a movement', async () => {
+    const result = await parsePdfFixture('bank-statement.pdf');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     for (const row of result.rows) {
@@ -320,5 +386,17 @@ describe('listStatementFormats', () => {
     // The one format detection may not choose on its own is still offered explicitly.
     const signed = listStatementFormats().find((format) => format.id === 'signed_amount_csv');
     expect(signed?.detectable).toBe(false);
+  });
+
+  it('names a table layout by how its columns are arranged, never by a kind of account', () => {
+    // A column map is matched by its headings alone, and a card's export and a bank account's can
+    // share them. The layout's name is what a person reads first about their file, so it must not
+    // say what the columns cannot (ADR-0068).
+    const tabular = listStatementFormats().filter((format) => format.container !== 'pdf_text');
+    expect(tabular.length).toBeGreaterThan(0);
+    for (const format of tabular) {
+      expect(format.accountKind).toBeNull();
+      expect(format.label).not.toMatch(/\b(card|account|savings|current)\b/i);
+    }
   });
 });

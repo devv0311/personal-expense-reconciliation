@@ -8,7 +8,11 @@
  */
 
 import type {
+  OverviewResult,
   AccountSnapshotsResult,
+  AttentionItem,
+  AttentionResult,
+  ConnectionResult,
   AccountSummary,
   AnalyticsCaveats,
   BalanceResult,
@@ -196,6 +200,238 @@ export const UNMATCHED_EVIDENCE_ITEM: UnmatchedEvidenceItem = {
     derivation: "parsed_from_text",
   },
   matchCandidates: [MATCH_CANDIDATE],
+};
+
+/* --------------------------------------------------- phase C — questions and one event */
+
+/**
+ * The review queue re-expressed as questions, exactly as `/api/attention` sends it.
+ *
+ * The question text and the facts are the API's, not this package's — that is the whole point
+ * of the read — so they are written out here rather than derived, the same way every other
+ * figure in this file is.
+ */
+export const CLASSIFICATION_QUESTION: AttentionItem = {
+  id: "inf-1",
+  source: "review_queue",
+  kind: "classification_decision",
+  question: "What was this payment for?",
+  why: "There is a suggestion for what this payment was, and nothing becomes true until you agree with it.",
+  reasons: ["low_confidence"],
+  amount: { known: true, value: "64000" },
+  occurredAt: "2026-08-08T11:31:00.000Z",
+  facts: [
+    { label: "Payment", kind: "money", value: "64000" },
+    { label: "When", kind: "date", value: "2026-08-08T11:31:00.000Z" },
+    { label: "What the record says", kind: "text", value: "UPI-BLINKIT9821PAYTM" },
+  ],
+  subject: { kind: "payment", paymentId: "pay-1" },
+  item: CLASSIFICATION_ITEM,
+  // A confidence-aware suggestion read from the payment's own words, with the plain reason and
+  // the other answers worth offering. `inferenceId` is what a confirmation decides.
+  suggestion: {
+    inferenceId: "inf-1",
+    category: "Gym & fitness",
+    confidence: "medium",
+    why: [
+      "The description says “Q SYN FITNESS”.",
+      "“fitness” in the description usually means a gym, a studio or something else fitness-related.",
+    ],
+    alternatives: [{ category: "Health", why: "It could also be health or medicine." }],
+    everyCategory: [
+      "Gym & fitness",
+      "Groceries",
+      "Dining",
+      "Transport",
+      "Shopping",
+      "Health",
+      "Education",
+      "Home",
+      "Bills & subscriptions",
+      "Transfer",
+      "Other",
+    ],
+    countsAsPurchase: true,
+  },
+};
+
+/** The same question about a line that is *not* a purchase — instalment interest. */
+export const INTEREST_QUESTION: AttentionItem = {
+  ...CLASSIFICATION_QUESTION,
+  id: "inf-2",
+  facts: [
+    { label: "Payment", kind: "money", value: "31200" },
+    { label: "When", kind: "date", value: "2026-08-08T11:31:00.000Z" },
+    { label: "What the record says", kind: "text", value: "Q SYN FITNESS - INTEREST 2 - <2/6>" },
+  ],
+  suggestion: {
+    inferenceId: "inf-2",
+    category: "Bills & subscriptions",
+    confidence: "medium",
+    why: [
+      "This is the interest of instalment 2 of 6 on a purchase from “Q SYN FITNESS”.",
+      "Interest is what the card charged you for paying over time. The purchase itself is a separate line.",
+    ],
+    alternatives: [{ category: "Other", why: "If you would rather keep it separate." }],
+    everyCategory: CLASSIFICATION_QUESTION.suggestion?.everyCategory ?? [],
+    countsAsPurchase: false,
+  },
+};
+
+export const DOCUMENT_QUESTION: AttentionItem = {
+  id: "ev-1",
+  source: "review_queue",
+  kind: "unmatched_evidence",
+  question: "What payment is this document about?",
+  why: "This document is on file and attached to nothing.",
+  reasons: ["evidence_unmatched"],
+  // Nothing has read a total off it — `known: false`, never a confident zero.
+  amount: { known: false, value: null },
+  occurredAt: "2026-08-08T11:31:00.000Z",
+  facts: [
+    { label: "Kind of record", kind: "text", value: "Payment message" },
+    { label: "Total on it", kind: "unknown", value: null },
+    { label: "Added", kind: "date", value: "2026-08-08T11:31:00.000Z" },
+    { label: "Payments it could be about", kind: "text", value: "None suggested yet" },
+  ],
+  subject: { kind: "evidence", evidenceId: "ev-1" },
+  item: UNMATCHED_EVIDENCE_ITEM,
+  // A document question is about which payment it belongs to, never about a category.
+  suggestion: null,
+};
+
+/** A kind this package has never been taught, under the generic question the API wrote. */
+export const UNKNOWN_QUESTION: AttentionItem = {
+  id: "future-1",
+  source: "review_queue",
+  kind: "something_added_later",
+  question: "Does this still need your judgement?",
+  why: "Something is waiting on a decision that this screen cannot describe in plain words yet.",
+  reasons: [],
+  amount: { known: true, value: "12500" },
+  occurredAt: "2026-08-09T09:00:00.000Z",
+  facts: [{ label: "Amount", kind: "money", value: "12500" }],
+  subject: { kind: "payment", paymentId: "pay-9" },
+  item: {
+    ...CLASSIFICATION_ITEM,
+    kind: "something_added_later",
+  } as unknown as AttentionItem["item"],
+  // A kind this build has never met carries no reading either — and still renders.
+  suggestion: null,
+};
+
+export function attentionResult(
+  items: readonly AttentionItem[] = [CLASSIFICATION_QUESTION, DOCUMENT_QUESTION],
+): AttentionResult {
+  const counts = {
+    classification_decision: 0,
+    possible_duplicate: 0,
+    rejected_classification: 0,
+    unmatched_evidence: 0,
+  };
+  for (const item of items) {
+    if (item.kind in counts) counts[item.kind as keyof typeof counts] += 1;
+  }
+  return {
+    items,
+    counts,
+    reviewQueueTotal: items.filter((item) => item.source === "review_queue").length,
+    total: items.length,
+    truncated: false,
+  };
+}
+
+/** One event: a payment, the two records describing it, the expense it funded, and its shares. */
+export const CONNECTION: ConnectionResult = {
+  paymentId: "pay-1",
+  nature: "spending",
+  title: { text: "Peppermill Cafe", source: "counterparty" },
+  merchantName: "Peppermill Cafe",
+  narration: "UPI-BLINKIT9821PAYTM",
+  occurredAt: "2026-08-08T11:31:00.000Z",
+  amount: "64000",
+  direction: "debit",
+  accountName: "HDFC Savings",
+  countsAsSpending: true,
+  whyNotSpending: null,
+  spendingContribution: "64000",
+  unaccountedFor: { known: true, amount: "0" },
+  fullyAccountedFor: true,
+  duplicate: { isDuplicate: false, ofPaymentId: null },
+  supportingRecords: [
+    {
+      evidenceId: "ev-1",
+      label: "Bill or receipt",
+      evidenceType: "receipt_image",
+      capturedAt: "2026-08-08T11:35:00.000Z",
+      reading: {
+        name: "Peppermill Cafe",
+        amount: "64000",
+        reference: "884120993741",
+        occurredAt: null,
+      },
+    },
+    {
+      evidenceId: "ev-2",
+      label: "Screenshot",
+      evidenceType: "screenshot",
+      capturedAt: "2026-08-08T11:36:00.000Z",
+      reading: null,
+    },
+  ],
+  proposals: [
+    {
+      candidateId: "cand-1",
+      evidenceId: "ev-3",
+      label: "Bill or receipt",
+      evidenceType: "receipt_image",
+      capturedAt: "2026-08-08T12:00:00.000Z",
+      status: "proposed",
+      whyRelated: ["The amount is the same.", "They happened at about the same time."],
+      whyUnsure: ["The name on it is a different one."],
+      decidedAt: null,
+    },
+  ],
+  disagreements: [],
+  expenses: [
+    {
+      expenseId: "exp-1",
+      whatItWas: "Dinner",
+      category: "food",
+      grossAmount: "64000",
+      netAmount: "64000",
+      fundedByThisPayment: "64000",
+      paidBy: { personId: "person-2", name: "Flatmate A", isYou: false },
+      shares: [
+        {
+          name: "Flatmate A",
+          isYou: false,
+          amount: "32000",
+          beneficiaryKind: "person",
+          members: null,
+        },
+        { name: "Dev", isYou: true, amount: "32000", beneficiaryKind: "person", members: null },
+      ],
+      sharesUnknownReason: null,
+      obligationNote: "Everybody other than Flatmate A owes them their share.",
+      refunds: [],
+      state: "allocated",
+    },
+  ],
+  settlements: [],
+  refundOf: [],
+  openQuestions: [],
+  details: {
+    channel: "upi",
+    reference: "884120993741",
+    referenceType: "upi_utr",
+    counterpartyType: "merchant",
+    paymentState: "linked",
+    cashFlowCategory: null,
+    cashFlowState: "normalized",
+    importBatchId: "batch-1",
+    currency: "INR",
+  },
 };
 
 export function reviewQueue(
@@ -1079,4 +1315,46 @@ export const EXPENSE_HISTORY: ExpenseHistoryResult = {
     },
   ],
   sources: { allocationIds: [], adjustmentIds: [], evidenceIds: [], settlementIds: [] },
+};
+
+/**
+ * A front page with everything on it: money spent, money unaccounted for, a person on each side
+ * of a balance, and a recent payment. Synthetic throughout — these are invented rupee figures
+ * chosen to be obviously not a real ledger's.
+ */
+export const OVERVIEW: OverviewResult = {
+  spending: {
+    period: { start: "2026-09-01T00:00:00.000Z", end: "2026-10-01T00:00:00.000Z" },
+    total: { known: true, amount: "400000" },
+    categories: [{ category: "food", netTotal: "400000", expenseCount: 2 }],
+    caveats: { excludes: ["transfers between own accounts"] },
+  },
+  unexplained: {
+    total: { known: true, amount: "169000" },
+    movementCount: 2,
+    scanned: 10,
+    complete: true,
+    movements: [],
+  },
+  attention: { total: 0, reviewQueueTotal: 0, counts: {} as OverviewResult["attention"]["counts"] },
+  readiness: { recordsAwaitingAnalysis: 0, documentsAwaitingAnalysis: 0 },
+  people: {
+    toCollect: { known: true, amount: "60000" },
+    toPay: { known: true, amount: "0" },
+    counterparties: [
+      { personId: "p1", displayName: "Priya", netBalance: "60000", contributingExpenseCount: 1 },
+    ],
+    settled: [],
+  },
+  recent: [
+    {
+      paymentId: "pay-1",
+      occurredAt: "2026-09-02T10:00:00.000Z",
+      description: "UPI-SAMPLE MERCHANT",
+      amount: "124000",
+      direction: "debit",
+      status: "needs_context",
+    },
+  ],
+  empty: false,
 };

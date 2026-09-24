@@ -20,12 +20,14 @@
  */
 
 import {
+  asId,
   assertAiInferenceTransition,
   assertExpenseTransition,
   classificationEligibility,
   deriveReattachedContext,
   findSelfTransferCounterLeg,
   routeClassificationForReview,
+  ruleActor,
 } from '../domain/index.js';
 import type {
   AiInferenceId,
@@ -41,6 +43,7 @@ import type {
   PaymentId,
   PersonId,
   ProposedKind,
+  RelatedPayment,
   ReviewRoute,
   TransferLeg,
 } from '../domain/index.js';
@@ -65,6 +68,12 @@ import {
 } from '../db/index.js';
 import type { AiInferenceRow, Database, Executor, PaymentRow } from '../db/index.js';
 
+import { loadApprovedCategoryRules } from './learning-service.js';
+import {
+  LOCAL_PURPOSE_READER,
+  loadPurposeContext,
+  readPurposeFor,
+} from './purpose-proposal-service.js';
 import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
 import { ServiceError } from './errors.js';
 import { requirePayment } from './loaders.js';
@@ -77,6 +86,24 @@ export interface ClassifyPaymentInput {
   readonly ai: AiService;
   /** Overrides `domain.DEFAULT_MATERIALITY_THRESHOLD_PAISE` for this run. */
   readonly materialityThreshold?: Paise;
+  /**
+   * Run the deterministic leg and stop there.
+   *
+   * For an installation with no model configured. The self-transfer rule is what keeps a
+   * credit-card bill payment and every other movement between the user's own accounts out of
+   * spending, and it is pure arithmetic over two rows — there is no reason it should be
+   * unreachable because a provider is absent. Everything the rule has no opinion about comes
+   * back `skipped` with `no_model_configured`, which is the honest answer: nobody asked.
+   */
+  readonly deterministicOnly?: boolean;
+  /**
+   * Every payment's words and confirmed categories, for the local description reader.
+   *
+   * Passed in by `classifyPayments` so a run loads it once: recurrence is a property of the
+   * ledger rather than of the row, and re-reading it per payment asks the same question as
+   * many times as there are rows. Omitted, this loads it itself.
+   */
+  readonly context?: readonly RelatedPayment[];
   readonly audit: AuditMeta;
 }
 
@@ -85,6 +112,8 @@ export interface ClassifyPaymentsInput {
   readonly importBatchId?: ImportBatchId;
   readonly ai: AiService;
   readonly materialityThreshold?: Paise;
+  /** See {@link ClassifyPaymentInput.deterministicOnly}. */
+  readonly deterministicOnly?: boolean;
   readonly audit: AuditMeta;
 }
 
@@ -158,6 +187,8 @@ export async function classifyPayments(
 ): Promise<ClassifyPaymentsResult> {
   const awaiting = await listPaymentsAwaitingClassification(db, input.importBatchId);
   const outcomes: ClassificationOutcome[] = [];
+  // Read once for the run, not once per payment (see `ClassifyPaymentInput.context`).
+  const context = input.deterministicOnly === true ? await loadPurposeContext(db) : undefined;
 
   for (const payment of awaiting) {
     try {
@@ -166,6 +197,10 @@ export async function classifyPayments(
           paymentId: payment.id,
           ai: input.ai,
           audit: input.audit,
+          ...(context === undefined ? {} : { context }),
+          ...(input.deterministicOnly === undefined
+            ? {}
+            : { deterministicOnly: input.deterministicOnly }),
           ...(input.materialityThreshold === undefined
             ? {}
             : { materialityThreshold: input.materialityThreshold }),
@@ -218,10 +253,84 @@ export async function classifyPayment(
     return { outcome: 'skipped', paymentId: payment.id, reason: eligibility.reason };
   }
 
+  // Leg 2, also deterministic and also local: what does the line's own wording say it was for?
+  //
+  // It runs only when there is no model to ask, so a payment never collects two proposals. The
+  // point of it is that this product ships with no provider configured, and before it existed
+  // every row on an imported statement came back `no_model_configured` — 120 payments with
+  // nothing to confirm, and an Overview reporting nothing spent over a statement it had read.
+  if (input.deterministicOnly === true) {
+    return proposeFromDescription(db, {
+      payment,
+      audit: input.audit,
+      ...(input.context === undefined ? {} : { context: input.context }),
+      ...(input.materialityThreshold === undefined
+        ? {}
+        : { materialityThreshold: input.materialityThreshold }),
+    });
+  }
+
   return proposeClassification(db, {
     payment,
     ai: input.ai,
     audit: input.audit,
+    ...(input.materialityThreshold === undefined
+      ? {}
+      : { materialityThreshold: input.materialityThreshold }),
+  });
+}
+
+interface ProposeFromDescriptionInput {
+  readonly payment: PaymentRow;
+  readonly context?: readonly RelatedPayment[];
+  readonly materialityThreshold?: Paise;
+  readonly audit: AuditMeta;
+}
+
+/**
+ * The local description reader's leg: read the line, and propose only what is safe to propose.
+ *
+ * `relationshipType` is always `personal`, deliberately. A statement line says what left an
+ * account and nothing whatever about who else benefited, so proposing anything else would put
+ * a debt nobody mentioned in front of somebody to approve — and `personal` is the one
+ * relationship that creates no obligation by construction (`domain-model.md`, Obligation).
+ * Saying an expense was shared stays a separate, explicit act on its own screen.
+ */
+async function proposeFromDescription(
+  db: Database,
+  input: ProposeFromDescriptionInput,
+): Promise<ClassificationOutcome> {
+  const { payment } = input;
+  const context = input.context ?? (await loadPurposeContext(db));
+  const approvedRules = await loadApprovedCategoryRules(db);
+  const read = readPurposeFor(payment, context, approvedRules);
+
+  if (read.outcome === 'no_proposal') {
+    return { outcome: 'skipped', paymentId: payment.id, reason: read.reason };
+  }
+
+  return recordClassificationProposal(db, {
+    payment,
+    inference: {
+      proposedOutput: {
+        proposedKind: 'expense',
+        relationshipType: 'personal',
+        category: read.category,
+        paidByPersonHint: null,
+      },
+      confidence: read.confidence,
+      modelInfo: LOCAL_PURPOSE_READER,
+    },
+    // `invariants.md` #17: a fact a rule produced is attributable to that rule forever after.
+    // The proposal is still the local reader's — the rule chose the category, not the write —
+    // so the rule is named in the reason rather than replacing the actor.
+    audit:
+      read.appliedRule === undefined
+        ? input.audit
+        : {
+            ...input.audit,
+            reason: `${ruleActor(asId<'rule'>(read.appliedRule.ruleId))}: ${read.appliedRule.why}`,
+          },
     ...(input.materialityThreshold === undefined
       ? {}
       : { materialityThreshold: input.materialityThreshold }),
@@ -274,6 +383,49 @@ export async function proposeClassification(
     },
     context,
   );
+
+  return recordClassificationProposal(db, {
+    payment,
+    inference,
+    audit: input.audit,
+    ...(input.materialityThreshold === undefined
+      ? {}
+      : { materialityThreshold: input.materialityThreshold }),
+    ...(input.supersede === undefined ? {} : { supersede: input.supersede }),
+  });
+}
+
+export interface RecordClassificationProposalInput {
+  readonly payment: PaymentRow;
+  /** A validated-in-shape proposal, from a model or from the local description reader. */
+  readonly inference: {
+    readonly proposedOutput: TransactionClassification;
+    readonly confidence: ConfidenceLevel;
+    readonly modelInfo: {
+      readonly provider: string;
+      readonly model: string;
+      readonly promptVersion: string;
+    };
+  };
+  readonly materialityThreshold?: Paise;
+  readonly audit: AuditMeta;
+  readonly supersede?: AiInferenceRow;
+}
+
+/**
+ * Gate 2, the review route and the write — everything after *something* produced a proposal.
+ *
+ * Extracted so the local description reader (`services.readPurposeFor`) reaches the ledger
+ * through exactly this path rather than growing one of its own. A locally-read proposal is
+ * checked against the same ledger by the same function, routed for review by the same rule,
+ * stored in the same table and confirmed by the same `decideInference`. What differs is only
+ * `modelInfo`, which says plainly that no model was involved (ADR-0060).
+ */
+export async function recordClassificationProposal(
+  db: Database,
+  input: RecordClassificationProposalInput,
+): Promise<ClassificationOutcome> {
+  const { payment, inference } = input;
 
   // Gate 2: the proposal is well-formed, but does it name things that exist and agree with
   // what the payment itself already proves?

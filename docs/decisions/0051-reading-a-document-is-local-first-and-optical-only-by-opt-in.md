@@ -1,6 +1,18 @@
 # 0051. Reading a document is local first, and optical only by opt-in
 
-**Status:** Accepted
+**Status:** Accepted — **amended in part by
+[ADR-0058](0058-a-real-issuers-pdf-needs-a-standards-complete-local-reader.md)**
+
+> **Amendment note.** Every rule below still governs: local first, optical only by opt-in, a
+> refusal by name rather than an empty result, and recorded provenance. What changed is the
+> _reader_ that carries them out. This ADR's "No dependency was added for either binary
+> container" holds for XLSX and **no longer holds for PDF**: a real issuer's statement keeps its
+> text behind embedded font maps, object streams and filter chains, which the dependency-free
+> reader described here does not implement. It answered `hasTextLayer: false` for documents that
+> plainly have one — which made a real statement unimportable and, worse, would have sent a
+> locally-readable document to a vision provider on an opted-in installation, defeating the
+> ordering this ADR calls a privacy decision. ADR-0058 adds `pdfjs-dist` for PDFs only, keeps
+> this reader as the first attempt, and leaves the OCR policy below exactly as written.
 
 ## Context
 

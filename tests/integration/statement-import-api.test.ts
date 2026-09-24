@@ -13,6 +13,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createAiService } from '../../src/ai/index.js';
 import { createApi } from '../../src/api/index.js';
+import { MAX_STATEMENT_BYTES } from '../../src/services/index.js';
 import type { Api } from '../../src/api/index.js';
 import { schema } from '../../src/db/index.js';
 import { scriptedClassificationTransport } from '../support/ai.js';
@@ -22,6 +23,7 @@ import { createMemoryEvidenceStore } from '../support/evidence-store.js';
 import { seedCast } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
 import { createMockSplitwisePort } from '../support/splitwise.js';
+import { buildTextPdf } from '../support/synthetic-pdf.js';
 
 const BASE = 'http://localhost';
 const STATEMENTS = join(process.cwd(), 'fixtures', 'statements');
@@ -94,6 +96,8 @@ describe('POST /api/imports/statement', () => {
       formatId: 'auto',
       contentBase64: bytes.toString('base64'),
       filename: 'sbi-bank-statement.xlsx',
+      // A workbook does not say what kind of account it is from; the person does (ADR-0068).
+      statementKind: 'bank',
     });
     expect(response.status).toBe(201);
     const body = (await response.json()) as { formatId: string; paymentIds: string[] };
@@ -108,10 +112,276 @@ describe('POST /api/imports/statement', () => {
       sourceSystem: 'synthetic_bank',
       formatId: 'auto',
       fileContent: readFileSync(join(STATEMENTS, 'axis-bank-statement.csv'), 'utf8'),
+      statementKind: 'bank',
     });
     expect(response.status).toBe(201);
     const body = (await response.json()) as { formatId: string };
     expect(body.formatId).toBe('axis_bank_csv');
+  });
+
+  it('imports a base64 IDFC FIRST credit-card PDF, exactly as the browser sends it', async () => {
+    // What the website posts: the original file's bytes, base64-encoded, never text-decoded.
+    // Decoding a PDF as UTF-8 first would corrupt it before any parser saw it, so the test
+    // asserts the *bytes* survived by asserting what the parser made of them.
+    const bytes = readFileSync(join(STATEMENTS, 'idfc-first-credit-card-statement.pdf'));
+    const response = await post('/api/imports/statement', {
+      actor: 'user',
+      accountId: cast.account['account_icici_credit_card'],
+      sourceSystem: 'idfc_first_card',
+      formatId: 'auto',
+      contentBase64: bytes.toString('base64'),
+      filename: 'idfc-first-credit-card-statement.pdf',
+      fileReference: 'idfc-first-credit-card-statement.pdf',
+    });
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      formatId: string;
+      paymentIds: string[];
+      warnings: { message: string }[];
+      closingBalanceCandidate: string | null;
+    };
+    expect(body.formatId).toBe('idfc_first_credit_card_pdf');
+    expect(body.paymentIds).toHaveLength(4);
+    // An import never writes a cash boundary, and this layout prints no running balance.
+    expect(body.closingBalanceCandidate).toBeNull();
+    // The container's own caveat still travels: a PDF count is what matched.
+    expect(body.warnings.some((warning) => warning.message.includes('check the count'))).toBe(true);
+  });
+
+  it('refuses a PDF with an unreadable transaction and writes nothing', async () => {
+    // All-or-nothing over HTTP, exactly as `POST /api/imports/bank-csv` promises it.
+    const bytes = buildTextPdf([
+      'IDFC FIRST Bank',
+      'Credit Card Statement',
+      'FIRST WOW! Credit Card',
+      'YOUR TRANSACTIONS',
+      '02/07/2026 A COMPLETE PURCHASE 1,240.00 DR',
+      '09/07/2026 EMI CONVERSION SAMPLE APPLIANCE',
+      '12/07/2026 ANOTHER COMPLETE PURCHASE 1,000.00 DR',
+      'Pay via our Mobile App',
+    ]);
+    const response = await post('/api/imports/statement', {
+      actor: 'user',
+      accountId: cast.account['account_hdfc_savings'],
+      sourceSystem: 'idfc_first_card',
+      formatId: 'auto',
+      contentBase64: Buffer.from(bytes).toString('base64'),
+      filename: 'incomplete.pdf',
+    });
+
+    expect(response.status).toBe(400);
+    const text = await response.text();
+    expect(text).toContain('never reaches an amount and a direction');
+    // The line's own text is the statement's content; only its number is reported.
+    expect(text).not.toContain('EMI CONVERSION');
+    expect(await database.db.select().from(schema.payments)).toHaveLength(0);
+  });
+
+  it('recognises the same PDF sent twice rather than importing the month again', async () => {
+    const bytes = readFileSync(join(STATEMENTS, 'idfc-first-credit-card-statement.pdf'));
+    const send = () =>
+      post('/api/imports/statement', {
+        actor: 'user',
+        accountId: cast.account['account_icici_credit_card'],
+        sourceSystem: 'idfc_first_card',
+        formatId: 'auto',
+        contentBase64: bytes.toString('base64'),
+        filename: 'idfc-first-credit-card-statement.pdf',
+      });
+
+    const first = await send();
+    expect(first.status).toBe(201);
+    const second = await send();
+    expect(second.status).toBe(200);
+    const body = (await second.json()) as { outcome: string; importBatchId: string };
+    expect(body.outcome).toBe('already_imported');
+    expect(await database.db.select().from(schema.payments)).toHaveLength(4);
+  });
+
+  it('refuses a PDF it cannot read and writes nothing', async () => {
+    const response = await post('/api/imports/statement', {
+      actor: 'user',
+      accountId: cast.account['account_hdfc_savings'],
+      sourceSystem: 'idfc_first_card',
+      formatId: 'auto',
+      contentBase64: Buffer.from('%PDF-1.4\nnot a real document\n', 'latin1').toString('base64'),
+      filename: 'broken.pdf',
+    });
+    expect(response.status).toBe(400);
+    expect(await database.db.select().from(schema.payments)).toHaveLength(0);
+  });
+
+  it('never answers a failed PDF read with the document’s own text', async () => {
+    // A decode failure travels as a fixed sentence. Whatever the file contained, the response
+    // is not a place for it (`security-model.md`, the sixth pillar).
+    const response = await post('/api/imports/statement', {
+      actor: 'user',
+      accountId: cast.account['account_hdfc_savings'],
+      sourceSystem: 'idfc_first_card',
+      formatId: 'auto',
+      contentBase64: Buffer.from('%PDF-1.4\nMERCHANT SECRET 4821\n', 'latin1').toString('base64'),
+      filename: 'broken.pdf',
+    });
+    expect(response.status).toBe(400);
+    const text = await response.text();
+    expect(text).not.toContain('MERCHANT');
+    expect(text).not.toContain('4821');
+  });
+
+  it('refuses a PDF whose matched record will not convert, and writes nothing', async () => {
+    const bytes = buildTextPdf([
+      'IDFC FIRST Bank',
+      'Credit Card Statement',
+      'FIRST WOW! Credit Card',
+      'YOUR TRANSACTIONS',
+      '02/07/2026 A GOOD PURCHASE 100.00 DR',
+      '99/99/2026 BAD DATE PURCHASE 200.00 DR',
+      'Pay via our Mobile App',
+    ]);
+    const response = await post('/api/imports/statement', {
+      actor: 'user',
+      accountId: cast.account['account_hdfc_savings'],
+      sourceSystem: 'idfc_first_card',
+      formatId: 'auto',
+      contentBase64: Buffer.from(bytes).toString('base64'),
+      filename: 'bad-date.pdf',
+    });
+
+    expect(response.status).toBe(400);
+    const text = await response.text();
+    expect(text).toContain('not a real calendar date');
+    expect(text).not.toContain('BAD DATE PURCHASE');
+    expect(await database.db.select().from(schema.payments)).toHaveLength(0);
+  });
+
+  it('names the unreadable record over HTTP when it is the file’s only transaction', async () => {
+    const bytes = buildTextPdf([
+      'IDFC FIRST Bank',
+      'Credit Card Statement',
+      'FIRST WOW! Credit Card',
+      'YOUR TRANSACTIONS',
+      '99/99/2026 BAD DATE PURCHASE 200.00 DR',
+      'Pay via our Mobile App',
+    ]);
+    const response = await post('/api/imports/statement', {
+      actor: 'user',
+      accountId: cast.account['account_hdfc_savings'],
+      sourceSystem: 'idfc_first_card',
+      formatId: 'auto',
+      contentBase64: Buffer.from(bytes).toString('base64'),
+      filename: 'only-bad.pdf',
+    });
+
+    expect(response.status).toBe(400);
+    const text = await response.text();
+    expect(text).toContain('not a real calendar date');
+    expect(text).not.toContain('none of its lines matched');
+    expect(text).not.toContain('BAD DATE PURCHASE');
+    expect(await database.db.select().from(schema.payments)).toHaveLength(0);
+  });
+
+  it('refuses an oversized statement and writes nothing', async () => {
+    // The authoritative check is in the service, on the decoded bytes.
+    const oversized = new Uint8Array(MAX_STATEMENT_BYTES + 1);
+    oversized.set(new TextEncoder().encode('%PDF-1.4\n'), 0);
+    const response = await post('/api/imports/statement', {
+      actor: 'user',
+      accountId: cast.account['account_hdfc_savings'],
+      sourceSystem: 'idfc_first_card',
+      formatId: 'auto',
+      contentBase64: Buffer.from(oversized).toString('base64'),
+      filename: 'huge.pdf',
+    });
+    expect(response.status).toBe(413);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('STATEMENT_FILE_TOO_LARGE');
+    expect(await database.db.select().from(schema.payments)).toHaveLength(0);
+  });
+
+  it('refuses an obviously oversized body before reading it, on the declared length alone', async () => {
+    // A cheap precheck: the body here is tiny, but the client claims a size that could not
+    // hold a statement within the limit even after base64 expansion. It answers with the same
+    // status and code the authoritative check does, so a caller learns one fact one way.
+    const response = await api.handle(
+      new Request(`${BASE}/api/imports/statement`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(500 * 1024 * 1024),
+        },
+        body: JSON.stringify({ actor: 'user', formatId: 'auto', contentBase64: 'JVBERi0=' }),
+      }),
+    );
+    expect(response.status).toBe(413);
+    const body = (await response.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('STATEMENT_FILE_TOO_LARGE');
+    expect(body.error.message).toContain('cannot hold a statement');
+    expect(await database.db.select().from(schema.payments)).toHaveLength(0);
+  });
+
+  it('answers both oversize paths with one code, whichever check noticed', async () => {
+    // Which of the two refused is an implementation detail of this server. A client that had
+    // to branch on 400-versus-413 to learn "too large" is a client we made guess.
+    const oversized = new Uint8Array(MAX_STATEMENT_BYTES + 1);
+    oversized.set(new TextEncoder().encode('%PDF-1.4\n'), 0);
+    const honest = await post('/api/imports/statement', {
+      actor: 'user',
+      accountId: cast.account['account_hdfc_savings'],
+      sourceSystem: 'idfc_first_card',
+      formatId: 'auto',
+      contentBase64: Buffer.from(oversized).toString('base64'),
+      filename: 'huge.pdf',
+    });
+    const declared = await api.handle(
+      new Request(`${BASE}/api/imports/statement`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(500 * 1024 * 1024),
+        },
+        body: JSON.stringify({ actor: 'user', formatId: 'auto', contentBase64: 'JVBERi0=' }),
+      }),
+    );
+
+    expect(honest.status).toBe(declared.status);
+    const honestBody = (await honest.json()) as { error: { code: string } };
+    const declaredBody = (await declared.json()) as { error: { code: string } };
+    expect(honestBody.error.code).toBe(declaredBody.error.code);
+    expect(honestBody.error.code).toBe('STATEMENT_FILE_TOO_LARGE');
+  });
+
+  it('still refuses an oversized statement when the declared length lies about it', async () => {
+    // `Content-Length` is the client's claim, so the precheck can be skipped by anybody who
+    // wants to. The service limit is what actually holds, and this proves it does.
+    const oversized = new Uint8Array(MAX_STATEMENT_BYTES + 1);
+    oversized.set(new TextEncoder().encode('%PDF-1.4\n'), 0);
+    const response = await api.handle(
+      new Request(`${BASE}/api/imports/statement`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'content-length': '10' },
+        body: JSON.stringify({
+          actor: 'user',
+          accountId: cast.account['account_hdfc_savings'],
+          sourceSystem: 'idfc_first_card',
+          formatId: 'auto',
+          contentBase64: Buffer.from(oversized).toString('base64'),
+        }),
+      }),
+    );
+    expect(response.status).toBe(413);
+    expect(await database.db.select().from(schema.payments)).toHaveLength(0);
+  });
+
+  it('applies the same ceiling to the CSV-only route', async () => {
+    const response = await post('/api/imports/bank-csv', {
+      actor: 'user',
+      accountId: cast.account['account_hdfc_savings'],
+      sourceSystem: 'synthetic_bank',
+      fileContent: 'x'.repeat(MAX_STATEMENT_BYTES + 1),
+    });
+    expect(response.status).toBe(413);
+    expect(await database.db.select().from(schema.payments)).toHaveLength(0);
   });
 
   it('refuses a body that sends both or neither content field', async () => {

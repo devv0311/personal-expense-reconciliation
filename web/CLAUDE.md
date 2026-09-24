@@ -39,6 +39,32 @@ it, what the answer does not know, and a footer naming the service read every fi
 With no provider configured it disables the box and says where each figure still lives, rather
 than offering something that fails on submit.
 
+**The 2026-09-19 calm pass** replaced the visual system and the shape of two screens, and fixed
+one thing that was not cosmetic at all.
+
+- **The surface is warm and editorial.** Bone canvas, charcoal ink, one restrained moss accent,
+  a serif for headings only. `Design.md` carries the tokens and the rewritten neutral rule; the
+  only thing to remember here is that a figure is still mono and a colour still means one thing.
+- **The nav is four questions plus one action**: Home, Spending, People, Records, with **Add
+  records** as a button in the bar. `/more` became `/records`, and both routes still render it —
+  no specialist screen moved, and `records/page.test.tsx` lists every one of them so a future
+  reshuffle cannot quietly drop one.
+- **Home hands over one decision, then reports.** The four figures used to lead; four numbers of
+  equal weight ask the reader to work out which matters, which is this page's job. The decision
+  is first and largest, and the period's spending total is still the one hero figure.
+- **Needs attention is a queue, not a list.** One question on screen, the facts beside it, and a
+  **Decide later** that writes nothing at all — it is client-only state, gone on reload, and the
+  button says so. Anything durable there would be a decision recorded by a button whose whole
+  promise is that it records none.
+- **Opening a screen no longer writes to the ledger.** This is the important one. The front page
+  mounted a component that fired a ledger-wide `POST /api/analysis` from an effect whenever any
+  record was unread — a write against every record on file, caused by somebody looking at a page.
+  [ADR-0061](../docs/decisions/0061-an-import-reads-what-it-just-wrote.md) is unchanged and still
+  right, because it is about **the import path**, where the run is scoped to the batch the same
+  request committed. Opening Home is not that. It is now an offer behind a `DecisionDialog`
+  (`components/analysis/prepare-records.tsx`), and three test files assert that merely rendering
+  a primary screen issues no POST.
+
 The short version, if you only read one paragraph: this is a ledger, not a dashboard. One hero
 figure per screen, sized `text-display`/`text-figure`; every other number stays quiet. Color is
 semantic and single-purpose (`debit`/`credit`/`accent`/`attention` each mean exactly one thing —

@@ -27,6 +27,7 @@ import {
   validateRuleDefinition,
 } from '../domain/index.js';
 import type {
+  RuleOrigin,
   PaymentChannel,
   PaymentId,
   RuleAssertion,
@@ -87,6 +88,15 @@ export interface CreateRuleInput {
   readonly match: RuleMatchPattern;
   readonly assertion: RuleAssertion;
   readonly effect?: RuleEffect;
+  /**
+   * Where this rule came from. Defaults to `manual`, which is what a person typing one in is.
+   *
+   * `promoted_from_repeated_ai_suggestion` is written by `approveRuleProposal` (ADR-0064) and by
+   * nothing else. The column has carried that value since phase 22 and had no writer until then;
+   * it exists so a reader can always tell a rule somebody composed from one the product offered
+   * and they agreed to.
+   */
+  readonly origin?: RuleOrigin;
   readonly audit: AuditMeta;
 }
 
@@ -108,7 +118,7 @@ export async function createRule(
       proposedClassification: input.assertion,
       action: input.assertion.action,
       effect: input.effect ?? 'propose',
-      origin: 'manual',
+      origin: input.origin ?? 'manual',
     });
     await record({
       entityType: 'rule',
@@ -119,6 +129,7 @@ export async function createRule(
         match: input.match,
         assertion: input.assertion,
         effect: input.effect ?? 'propose',
+        origin: input.origin ?? 'manual',
       },
     });
     return { ruleId };

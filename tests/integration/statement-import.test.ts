@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { schema } from '../../src/db/index.js';
-import type { AccountId } from '../../src/domain/index.js';
+import type { AccountId, AccountType } from '../../src/domain/index.js';
 import {
   importStatement,
   ingestForwardedMessages,
@@ -15,6 +15,7 @@ import { captureError, createTestDatabase } from '../support/database.js';
 import type { TestDatabase } from '../support/database.js';
 import { AS_USER, seedCast } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
+import { buildTextPdf } from '../support/synthetic-pdf.js';
 
 /**
  * Multi-format statement import and automated notification intake, end to end against a real
@@ -29,6 +30,10 @@ const STATEMENTS = join(process.cwd(), 'fixtures', 'statements');
 let database: TestDatabase;
 let cast: Cast;
 let accountId: AccountId;
+/** Where a card statement goes: a bank account refuses one (ADR-0067). */
+let cardAccountId: AccountId;
+/** Where a UPI app's export goes when the person says it is their UPI account's. */
+let upiAccountId: AccountId;
 
 beforeAll(async () => {
   database = await createTestDatabase();
@@ -42,16 +47,30 @@ beforeEach(async () => {
   await database.truncateAll();
   cast = await seedCast(database.db);
   accountId = cast.account['account_hdfc_savings']!;
+  cardAccountId = cast.account['account_icici_credit_card']!;
+  upiAccountId = cast.account['account_hdfc_upi']!;
 });
 
-function importFixture(name: string, formatId = 'auto') {
+/**
+ * Imports one synthetic fixture the way the website does.
+ *
+ * A table — and a PDF read by a generic layout — does not say what kind of account it is from,
+ * so the import states one, as a person does in the dialog (ADR-0068). A PDF whose layout names
+ * its own kind is imported with `null`: the document answers for itself.
+ */
+function importFixture(
+  name: string,
+  into: AccountId = accountId,
+  statementKind: AccountType | null = 'bank',
+) {
   return importStatement(database.db, {
-    accountId,
+    accountId: into,
     sourceSystem: 'synthetic_bank',
-    formatId,
+    formatId: 'auto',
     bytes: new Uint8Array(readFileSync(join(STATEMENTS, name))),
     filename: name,
     fileReference: `fixtures/statements/${name}`,
+    ...(statementKind === null ? {} : { statementKind }),
     audit: AS_USER,
   });
 }
@@ -103,7 +122,8 @@ describe('importStatement', () => {
   });
 
   it('imports a card statement, where a credit is a refund rather than new spend', async () => {
-    const result = await importFixture('card-statement.csv');
+    // Onto the card, because the person says it is the card's: its columns do not say (ADR-0068).
+    const result = await importFixture('card-statement.csv', cardAccountId, 'card');
     if (result.outcome !== 'imported') throw new Error('expected an import');
     expect(result.formatId).toBe('card_statement_csv');
     const rows = await payments();
@@ -112,7 +132,7 @@ describe('importStatement', () => {
   });
 
   it('imports a UPI app export on the upi channel', async () => {
-    const result = await importFixture('upi-app-export.csv');
+    const result = await importFixture('upi-app-export.csv', upiAccountId, 'upi');
     if (result.outcome !== 'imported') throw new Error('expected an import');
     const rows = await payments();
     expect(rows).toHaveLength(3);
@@ -139,6 +159,162 @@ describe('importStatement', () => {
     expect(result.warnings.some((warning) => warning.message.includes('check the count'))).toBe(
       true,
     );
+  });
+
+  it('imports an original IDFC FIRST credit-card PDF, wrapped narration and all', async () => {
+    // The user outcome this work exists for: the file the issuer generated, selected as it
+    // arrived, with no conversion, renaming or editing step in front of it.
+    const result = await importFixture('idfc-first-credit-card-statement.pdf', cardAccountId, null);
+    if (result.outcome !== 'imported') throw new Error('expected an import');
+    expect(result.formatId).toBe('idfc_first_credit_card_pdf');
+
+    const rows = await payments();
+    expect(rows).toHaveLength(4);
+    // A card statement's credits are a refund and a payment to the card, never new spend.
+    const credits = rows
+      .filter((row) => row.direction === 'credit')
+      .map((row) => row.amount)
+      .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+    expect(credits).toEqual([45000n, 100000n]);
+    expect(rows.every((row) => row.channel === 'card')).toBe(true);
+
+    // The narration the issuer wrapped over two printed lines arrived as one movement.
+    const wrapped = rows.find((row) => row.amount === 249950n);
+    expect(wrapped?.rawDescription).toContain('WRAP ONTO THE NEXT PRINTED LINE');
+
+    // Importing never writes a boundary, and this layout prints no running balance at all.
+    expect(result.closingBalanceCandidate).toBeNull();
+  });
+
+  it('says the count is what it matched, because a PDF has no columns to be sure from', async () => {
+    const result = await importFixture('idfc-first-credit-card-statement.pdf', cardAccountId, null);
+    if (result.outcome !== 'imported') throw new Error('expected an import');
+    expect(result.warnings.some((warning) => warning.message.includes('check the count'))).toBe(
+      true,
+    );
+  });
+
+  it('imports nothing at all when one dated line never reaches an amount', async () => {
+    // All-or-nothing holds for a PDF exactly as it does for a CSV. Importing the complete
+    // records around an unread one would leave the ledger short by that movement while
+    // reporting success — the silent shortfall cash reconciliation exists to catch.
+    const error = await captureError(() =>
+      importStatement(database.db, {
+        accountId,
+        sourceSystem: 'synthetic_bank',
+        formatId: 'auto',
+        bytes: buildTextPdf([
+          'IDFC FIRST Bank',
+          'Credit Card Statement',
+          'FIRST WOW! Credit Card',
+          'YOUR TRANSACTIONS',
+          '02/07/2026 A COMPLETE PURCHASE 1,240.00 DR',
+          '09/07/2026 EMI CONVERSION SAMPLE APPLIANCE',
+          '12/07/2026 ANOTHER COMPLETE PURCHASE 1,000.00 DR',
+          'Pay via our Mobile App',
+        ]),
+        filename: 'incomplete.pdf',
+        audit: AS_USER,
+      }),
+    );
+    expect(error.message).toContain('never reaches an amount and a direction');
+    expect(await payments()).toHaveLength(0);
+  });
+
+  it('recognises a re-imported IDFC PDF rather than counting the month twice', async () => {
+    const first = await importFixture('idfc-first-credit-card-statement.pdf', cardAccountId, null);
+    const second = await importFixture('idfc-first-credit-card-statement.pdf', cardAccountId, null);
+    expect(second.outcome).toBe('already_imported');
+    if (first.outcome !== 'imported' || second.outcome !== 'already_imported') return;
+    expect(second.importBatchId).toBe(first.importBatchId);
+    expect(await payments()).toHaveLength(4);
+  });
+
+  it('imports nothing when a matched record carries an impossible calendar date', async () => {
+    // The layout matches the line; it is the conversion that fails. Importing the good row
+    // beside it would report a successful import of a statement missing one movement.
+    const error = await captureError(() =>
+      importStatement(database.db, {
+        accountId,
+        sourceSystem: 'synthetic_bank',
+        formatId: 'auto',
+        bytes: buildTextPdf([
+          'IDFC FIRST Bank',
+          'Credit Card Statement',
+          'FIRST WOW! Credit Card',
+          'YOUR TRANSACTIONS',
+          '02/07/2026 A GOOD PURCHASE 100.00 DR',
+          '99/99/2026 BAD DATE PURCHASE 200.00 DR',
+          'Pay via our Mobile App',
+        ]),
+        filename: 'bad-date.pdf',
+        audit: AS_USER,
+      }),
+    );
+    expect(error.message).toContain('not a real calendar date');
+    // Sanitized: the rejected line's own text never travels with the refusal.
+    expect(error.message).not.toContain('BAD DATE PURCHASE');
+    expect(await payments()).toHaveLength(0);
+  });
+
+  it('names the unreadable record even when it is the only transaction in the file', async () => {
+    // A statement whose every transaction is invalid must not come back as "no layout matched"
+    // — that is a claim about the format, and it would send somebody looking for the wrong
+    // problem while the actual defect has a line number.
+    const error = await captureError(() =>
+      importStatement(database.db, {
+        accountId,
+        sourceSystem: 'synthetic_bank',
+        formatId: 'auto',
+        bytes: buildTextPdf([
+          'IDFC FIRST Bank',
+          'Credit Card Statement',
+          'FIRST WOW! Credit Card',
+          'YOUR TRANSACTIONS',
+          '99/99/2026 BAD DATE PURCHASE 200.00 DR',
+          'Pay via our Mobile App',
+        ]),
+        filename: 'only-bad.pdf',
+        audit: AS_USER,
+      }),
+    );
+    expect(error.message).toContain('not a real calendar date');
+    expect(error.message).not.toContain('none of its lines matched');
+    expect(error.message).not.toContain('BAD DATE PURCHASE');
+    expect(await payments()).toHaveLength(0);
+  });
+
+  it('refuses a PDF with no text layer by name, rather than importing an empty month', async () => {
+    const error = await captureError(() =>
+      importStatement(database.db, {
+        accountId,
+        sourceSystem: 'synthetic_bank',
+        formatId: 'auto',
+        bytes: buildTextPdf(['IDFC FIRST Bank', 'Credit Card Statement'], {
+          withoutTextLayer: true,
+        }),
+        filename: 'scan.pdf',
+        audit: AS_USER,
+      }),
+    );
+    expect(error.message).toContain('no extractable text layer');
+    expect(await payments()).toHaveLength(0);
+  });
+
+  it('imports nothing from a PDF whose bytes are not a readable document', async () => {
+    const error = await captureError(() =>
+      importStatement(database.db, {
+        accountId,
+        sourceSystem: 'synthetic_bank',
+        formatId: 'auto',
+        bytes: new TextEncoder().encode('%PDF-1.4\nnot really a pdf\n'),
+        filename: 'broken.pdf',
+        audit: AS_USER,
+      }),
+    );
+    // The refusal names what happened without quoting the document back at the person.
+    expect(error.message.length).toBeGreaterThan(0);
+    expect(await payments()).toHaveLength(0);
   });
 
   it('treats a byte-identical re-import as a recognised no-op, not a second copy', async () => {

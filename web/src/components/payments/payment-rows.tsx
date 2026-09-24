@@ -74,7 +74,7 @@ export function PaymentRows({ payments }: { payments: readonly PaymentWorkspaceI
           <li key={payment.id} className="border-b border-rule pb-3 last:border-b-0">
             <div className="flex items-baseline justify-between gap-3">
               <PaymentLink payment={payment} />
-              <span className="text-right whitespace-nowrap">
+              <span className="shrink-0 text-right whitespace-nowrap">
                 <Money paise={payment.amount} />
                 <span className="ml-1 text-micro text-ink-faint">
                   {payment.direction === "debit" ? "out" : "in"}
@@ -98,7 +98,12 @@ export function PaymentRows({ payments }: { payments: readonly PaymentWorkspaceI
 
 function PaymentLink({ payment }: { payment: PaymentWorkspaceItem }) {
   return (
-    <Link href={`/payments/${payment.id}`} className="text-accent underline underline-offset-2">
+    // `min-w-0` and `wrap-anywhere`: a bank prints a UPI line as one unbroken token, and without
+    // both the phone list's amount is pushed off the screen (Design.md, "Responsive").
+    <Link
+      href={`/payments/${payment.id}`}
+      className="min-w-0 text-accent underline underline-offset-2 wrap-anywhere"
+    >
       {payment.rawDescription}
     </Link>
   );

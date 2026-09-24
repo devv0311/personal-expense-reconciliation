@@ -1,5 +1,5 @@
 /**
- * Writes the binary statement fixtures — one `.xlsx` workbook and one `.pdf` statement.
+ * Writes the binary statement fixtures — one `.xlsx` workbook and two `.pdf` statements.
  *
  * They are binary, so they cannot be reviewed as text in a diff; this script is how they are
  * reproduced and how a reader can see exactly what is in them. **Both are synthetic**, like
@@ -14,219 +14,49 @@
  * Run with `npx tsx scripts/generate-statement-fixtures.ts`.
  */
 
-import { deflateRawSync, deflateSync } from 'node:zlib';
+import { deflateSync } from 'node:zlib';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { buildTextPdf } from '../tests/support/synthetic-pdf.js';
+import { buildWorkbook } from '../tests/support/synthetic-workbook.js';
+import type { SheetRows } from '../tests/support/synthetic-workbook.js';
 
 const OUT_DIR = join(process.cwd(), 'fixtures', 'statements');
 
 /* --------------------------------------------------------------------------- xlsx */
 
-interface SheetCell {
-  readonly text: string;
-}
-
 /** An SBI-shaped statement, as a workbook — the shape a bank's "Download as Excel" produces. */
-const SHEET_ROWS: readonly (readonly SheetCell[])[] = [
+const SHEET_ROWS: SheetRows = [
+  ['Txn Date', 'Value Date', 'Description', 'Ref No./Cheque No.', 'Debit', 'Credit', 'Balance'],
   [
-    { text: 'Txn Date' },
-    { text: 'Value Date' },
-    { text: 'Description' },
-    { text: 'Ref No./Cheque No.' },
-    { text: 'Debit' },
-    { text: 'Credit' },
-    { text: 'Balance' },
+    '01 Jul 2026',
+    '01 Jul 2026',
+    'TO TRANSFER UPI/DR/2607011234/BLINKIT',
+    'UPI/2607011234/BLINKIT',
+    '1240.00',
+    '',
+    '48120.00',
   ],
   [
-    { text: '01 Jul 2026' },
-    { text: '01 Jul 2026' },
-    { text: 'TO TRANSFER UPI/DR/2607011234/BLINKIT' },
-    { text: 'UPI/2607011234/BLINKIT' },
-    { text: '1240.00' },
-    { text: '' },
-    { text: '48120.00' },
+    '02 Jul 2026',
+    '02 Jul 2026',
+    'BY TRANSFER NEFT FROM SELF',
+    'NEFT/N072026001',
+    '',
+    '15000.00',
+    '63120.00',
   ],
   [
-    { text: '02 Jul 2026' },
-    { text: '02 Jul 2026' },
-    { text: 'BY TRANSFER NEFT FROM SELF' },
-    { text: 'NEFT/N072026001' },
-    { text: '' },
-    { text: '15000.00' },
-    { text: '63120.00' },
-  ],
-  [
-    { text: '05 Jul 2026' },
-    { text: '05 Jul 2026' },
-    { text: 'ACH REFUND SAMPLE ELECTRONICS STORE' },
-    { text: 'ACH/REF9981' },
-    { text: '' },
-    { text: '450.00' },
-    { text: '63570.00' },
+    '05 Jul 2026',
+    '05 Jul 2026',
+    'ACH REFUND SAMPLE ELECTRONICS STORE',
+    'ACH/REF9981',
+    '',
+    '450.00',
+    '63570.00',
   ],
 ];
-
-function columnName(index: number): string {
-  let name = '';
-  let value = index + 1;
-  while (value > 0) {
-    const remainder = (value - 1) % 26;
-    name = String.fromCharCode(65 + remainder) + name;
-    value = Math.floor((value - remainder) / 26);
-  }
-  return name;
-}
-
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function buildWorkbook(): Uint8Array {
-  const shared: string[] = [];
-  const indexOf = (text: string): number => {
-    const found = shared.indexOf(text);
-    if (found !== -1) return found;
-    shared.push(text);
-    return shared.length - 1;
-  };
-
-  const rowsXml = SHEET_ROWS.map((cells, rowIndex) => {
-    const cellsXml = cells
-      .map((cell, columnIndex) => {
-        const ref = `${columnName(columnIndex)}${rowIndex + 1}`;
-        if (cell.text === '') return `<c r="${ref}"/>`;
-        return `<c r="${ref}" t="s"><v>${indexOf(cell.text)}</v></c>`;
-      })
-      .join('');
-    return `<row r="${rowIndex + 1}">${cellsXml}</row>`;
-  }).join('');
-
-  const sheetXml =
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-    `<sheetData>${rowsXml}</sheetData></worksheet>`;
-
-  const sharedXml =
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${shared.length}" uniqueCount="${shared.length}">` +
-    shared.map((text) => `<si><t>${escapeXml(text)}</t></si>`).join('') +
-    '</sst>';
-
-  const contentTypes =
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
-    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
-    '<Default Extension="xml" ContentType="application/xml"/>' +
-    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
-    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
-    '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>' +
-    '</Types>';
-
-  const rootRels =
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
-    '</Relationships>';
-
-  const workbookXml =
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
-    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-    '<sheets><sheet name="Statement" sheetId="1" r:id="rId1"/></sheets></workbook>';
-
-  const workbookRels =
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
-    '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>' +
-    '</Relationships>';
-
-  return buildZip([
-    { name: '[Content_Types].xml', data: Buffer.from(contentTypes, 'utf8') },
-    { name: '_rels/.rels', data: Buffer.from(rootRels, 'utf8') },
-    { name: 'xl/workbook.xml', data: Buffer.from(workbookXml, 'utf8') },
-    { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from(workbookRels, 'utf8') },
-    { name: 'xl/sharedStrings.xml', data: Buffer.from(sharedXml, 'utf8') },
-    { name: 'xl/worksheets/sheet1.xml', data: Buffer.from(sheetXml, 'utf8') },
-  ]);
-}
-
-interface ZipEntry {
-  readonly name: string;
-  readonly data: Buffer;
-}
-
-/** A minimal but specification-shaped ZIP: local headers, a central directory, an EOCD. */
-function buildZip(entries: readonly ZipEntry[]): Uint8Array {
-  const locals: Buffer[] = [];
-  const centrals: Buffer[] = [];
-  let offset = 0;
-
-  for (const entry of entries) {
-    const name = Buffer.from(entry.name, 'utf8');
-    const compressed = deflateRawSync(entry.data);
-    const crc = crc32(entry.data);
-
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0, 6);
-    local.writeUInt16LE(8, 8);
-    local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(compressed.length, 18);
-    local.writeUInt32LE(entry.data.length, 22);
-    local.writeUInt16LE(name.length, 26);
-    locals.push(local, name, compressed);
-
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(20, 4);
-    central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(8, 10);
-    central.writeUInt32LE(crc, 16);
-    central.writeUInt32LE(compressed.length, 20);
-    central.writeUInt32LE(entry.data.length, 24);
-    central.writeUInt16LE(name.length, 28);
-    central.writeUInt32LE(offset, 42);
-    centrals.push(central, name);
-
-    offset += local.length + name.length + compressed.length;
-  }
-
-  const centralBuffer = Buffer.concat(centrals);
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0);
-  eocd.writeUInt16LE(entries.length, 8);
-  eocd.writeUInt16LE(entries.length, 10);
-  eocd.writeUInt32LE(centralBuffer.length, 12);
-  eocd.writeUInt32LE(offset, 16);
-
-  return new Uint8Array(Buffer.concat([...locals, centralBuffer, eocd]));
-}
-
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let index = 0; index < 256; index += 1) {
-    let value = index;
-    for (let bit = 0; bit < 8; bit += 1) {
-      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-    }
-    table[index] = value >>> 0;
-  }
-  return table;
-})();
-
-function crc32(data: Buffer): number {
-  let crc = 0xffffffff;
-  for (const byte of data) {
-    crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ byte) & 0xff]!;
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
 
 /* ---------------------------------------------------------------------------- pdf */
 
@@ -290,6 +120,54 @@ function buildPdf(): Uint8Array {
 
 /* -------------------------------------------------------------------------- write */
 
-writeFileSync(join(OUT_DIR, 'sbi-bank-statement.xlsx'), buildWorkbook());
+/**
+ * An IDFC FIRST credit-card statement's shape, as a two-page PDF.
+ *
+ * **Synthetic throughout.** The issuer and product names are here because they are what the
+ * `idfc_first_credit_card_pdf` layout identifies the *document* by; every card number, date,
+ * merchant, narration and amount below is invented. No real statement was read, copied or
+ * paraphrased to write this, and none may be.
+ *
+ * It carries, deliberately, every shape the layout has to survive:
+ *
+ *  - a preamble and a summary block above the transactions, which must not be read as rows;
+ *  - a plain debit, and a `CR` credit, since a card credit is a refund rather than new spend;
+ *  - a narration long enough to wrap onto a second physical line, which is the whole reason
+ *    the layout is `dated_multiline`;
+ *  - a dated line *after* the section's end marker, which must not be read at all.
+ *
+ * Every transaction in it is **complete**, deliberately. A dated record that never reaches an
+ * amount and a direction fails the whole import (all-or-nothing), so it cannot live in the
+ * fixture that proves a successful one; that case is built inline by the tests that assert the
+ * refusal.
+ */
+const IDFC_PDF_LINES: readonly string[] = [
+  'IDFC FIRST Bank',
+  'Credit Card Statement',
+  'FIRST WOW! Credit Card',
+  'Card Number XXXX XXXX XXXX 0000',
+  'Statement Period 01/07/2026 to 31/07/2026',
+  'Total Amount Due 3,289.50',
+  'Minimum Amount Due 250.00',
+  'Payment Due Date 18/08/2026',
+  'YOUR TRANSACTIONS',
+  'Date Transaction Details Amount (INR)',
+  '02/07/2026 UPICC/301234567890/SAMPLE CAFE 1,240.00 DR',
+  '04/07/2026 UPICC/301234567891/SYNTHETIC GROCERS ORDER WITH A NARRATION LONG',
+  'ENOUGH TO WRAP ONTO THE NEXT PRINTED LINE 2,499.50 DR',
+  '07/07/2026 REFUND SAMPLE ELECTRONICS 450.00 CR',
+  '12/07/2026 IMPS/507012345678/PAYMENT RECEIVED THANK YOU 1,000.00 CR',
+  'Pay via our Mobile App',
+  '15/07/2026 THIS FOOTER LINE IS NOT A TRANSACTION 9,999.00 DR',
+];
+
+writeFileSync(join(OUT_DIR, 'sbi-bank-statement.xlsx'), buildWorkbook(SHEET_ROWS));
 writeFileSync(join(OUT_DIR, 'bank-statement.pdf'), buildPdf());
-console.log('Wrote fixtures/statements/sbi-bank-statement.xlsx and bank-statement.pdf');
+writeFileSync(
+  join(OUT_DIR, 'idfc-first-credit-card-statement.pdf'),
+  buildTextPdf(IDFC_PDF_LINES, { pages: 2 }),
+);
+console.log(
+  'Wrote fixtures/statements/sbi-bank-statement.xlsx, bank-statement.pdf and ' +
+    'idfc-first-credit-card-statement.pdf',
+);

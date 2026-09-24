@@ -1142,6 +1142,65 @@ export const rules = pgTable(
   ],
 );
 
+/**
+ * A pattern somebody was offered and declined
+ * ([ADR-0065](../../docs/decisions/0065-declining-a-pattern-is-a-decision-and-approving-one-shows-its-reach-first.md)).
+ *
+ * DERIVED nothing and SOURCE nothing: this records a **decision about an offer**. The approved
+ * expenses that produced the pattern are untouched and keep teaching `inferPurpose` exactly as
+ * before; only the suggestion stops being made.
+ *
+ * Keyed on the wording and category rather than on a payment, because that is what was declined.
+ * Re-confirming the same merchant afterwards does not resurrect the offer — more evidence for a
+ * pattern is not new information about somebody's decision to decline it.
+ *
+ * **A reason is required by the database**, the same way `evidence_match_candidates` refuses to
+ * reach `dismissed` without a recorded actor and instant. A decision nobody can account for later
+ * is not a decision, and this one silently removes something from a screen.
+ *
+ * **Nothing is ever deleted.** Changing your mind sets `restored_at`/`restored_by`, so the
+ * sequence "declined, then approved after all" stays legible. A dismissal is in force exactly
+ * while `restored_at` is null.
+ */
+export const ruleProposalDismissals = pgTable(
+  'rule_proposal_dismissals',
+  {
+    id: id(),
+    /** The proposal's stable key — its wording and category. Not a foreign key: it names an
+     * offer, and an offer is derived rather than stored. */
+    proposalKey: text('proposal_key').notNull(),
+    /** Quoted back on the dismissed list so a person can see what they turned down. */
+    wording: text('wording').notNull(),
+    category: text('category').notNull(),
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }).notNull().defaultNow(),
+    dismissedBy: text('dismissed_by').notNull(),
+    /** Their own words. Required — see the table comment. */
+    reason: text('reason').notNull(),
+    restoredAt: timestamp('restored_at', { withTimezone: true }),
+    restoredBy: text('restored_by'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check('rule_proposal_dismissals_reason_check', sql`length(trim(${table.reason})) > 0`),
+    check('rule_proposal_dismissals_actor_check', sql`length(trim(${table.dismissedBy})) > 0`),
+    // Restoring is one act: both columns arrive together or neither does.
+    //
+    // `restored_by is not null` is load-bearing and was missing until migration 0021. Without
+    // it, a row with `restored_at` set and `restored_by` NULL made the first branch FALSE and
+    // the second `TRUE and NULL` = NULL, so the whole predicate was NULL — and a `CHECK`
+    // admits NULL exactly as it admits TRUE. The database accepted an undo with nobody's name
+    // on it, in the one table whose entire purpose is that a decision can be accounted for
+    // (ADR-0065). Three-valued logic is why a nullable column needs its own IS NOT NULL even
+    // when a function of it is already being tested.
+    check(
+      'rule_proposal_dismissals_restored_check',
+      sql`(${table.restoredAt} is null and ${table.restoredBy} is null)
+          or (${table.restoredAt} is not null and ${table.restoredBy} is not null
+              and length(trim(${table.restoredBy})) > 0)`,
+    ),
+  ],
+);
+
 /* ====================================================================== sessions & jobs */
 
 /**

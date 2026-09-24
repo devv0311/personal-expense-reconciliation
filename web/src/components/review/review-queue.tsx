@@ -109,7 +109,7 @@ export function ReviewQueue({ kind }: { kind: ReviewItemKind | null }) {
 
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:items-start">
-      <ul ref={listRef} className="flex flex-col" aria-label="Items waiting for a decision">
+      <ul ref={listRef} className="flex min-w-0 flex-col" aria-label="Items waiting for a decision">
         {items.map((item) => (
           <li key={item.id}>
             <button
@@ -126,10 +126,14 @@ export function ReviewQueue({ kind }: { kind: ReviewItemKind | null }) {
               )}
             >
               <span className="flex items-baseline justify-between gap-3">
-                <span className="text-meta text-ink-muted">{reviewKindLabel(item.kind)}</span>
-                <Money paise={item.amount} className="text-meta" />
+                <span className="min-w-0 text-meta text-ink-muted">
+                  {reviewKindLabel(item.kind)}
+                </span>
+                <Money paise={item.amount} className="shrink-0 text-meta" />
               </span>
-              <span className="mt-0.5 block text-body text-ink">{itemTitle(item)}</span>
+              <span className="mt-0.5 block text-body text-ink wrap-anywhere">
+                {itemTitle(item)}
+              </span>
               <span className="mt-0.5 block text-micro text-ink-faint">
                 {formatDate(item.occurredAt)}
               </span>

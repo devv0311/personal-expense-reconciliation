@@ -71,6 +71,8 @@ function PaymentsWorkspace() {
   const requestedDirection = searchParams.get("direction");
   const requestedFrom = searchParams.get("from");
   const requestedTo = searchParams.get("to");
+  // `?record=manual` is what **Add records** links to, so "Type in a payment" opens the form.
+  const requestedManualEntry = searchParams.get("record") === "manual";
 
   const [chosenAccountId, setChosenAccountId] = useState<string | null>(null);
   // `null` means "no explicit choice on this screen yet", `""` means "explicitly all". They
@@ -125,7 +127,7 @@ function PaymentsWorkspace() {
         description="Every movement of money in or out of your accounts, imported or typed in. What is unexplained here is what will refuse to reconcile later."
         actions={
           <>
-            <ManualPaymentForm />
+            <ManualPaymentForm openOnArrival={requestedManualEntry} />
             <Link href="/payments/import" className={buttonVariants({ variant: "outline" })}>
               Import a statement
             </Link>

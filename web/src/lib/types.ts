@@ -1059,6 +1059,511 @@ export type ImportStatementResult =
       readonly previouslyImportedAt: string;
     };
 
+/** Something the statement reader read but wants the person to know. Never swallowed. */
+export interface StatementImportWarning {
+  readonly lineNumber: number | null;
+  readonly message: string;
+}
+
+/**
+ * What `POST /api/imports/statement` answers, over and above the CSV endpoint's result.
+ *
+ * `warnings` is the part that has to reach the screen. A PDF has no column structure, so the
+ * reader can only report how many movements it *matched* — and, separately, how many dated
+ * lines it saw and could not read. Dropping either would turn "nine is what we matched" into
+ * "your statement had nine transactions", which is the silent-shortfall this ledger exists to
+ * prevent.
+ *
+ * `closingBalanceCandidate` is a candidate and nothing more: importing never writes a cash
+ * boundary (ADR-0017, 17.5).
+ */
+export type MultiFormatImportResult = ImportStatementResult & {
+  readonly formatId: string;
+  readonly warnings: readonly StatementImportWarning[];
+  readonly closingBalanceCandidate: string | null;
+  /**
+   * What the import did about reading the rows it just wrote.
+   *
+   * The import reads them in the same request, so a person never has to know that reading is a
+   * separate thing that happens. `ran: false` carries a sentence — a re-import had nothing new
+   * to read, or the reading did not finish — and the import itself is unaffected either way:
+   * those rows are committed.
+   */
+  readonly prepared: PreparedImport | undefined;
+};
+
+/**
+ * What `POST /api/imports/preview` says about a file, before anything is imported (ADR-0066).
+ *
+ * Every figure here was computed by the API. `accountKind` is what the document says it is a
+ * statement of — `bank` or `card` — and an import screen offers only accounts of that kind,
+ * because the import refuses any other (ADR-0067); `null` when the document does not say, as a
+ * CSV or XLSX never does. Nothing about reading a file writes anything.
+ */
+export type StatementPreview =
+  | {
+      readonly readable: true;
+      readonly formatId: string;
+      readonly formatLabel: string;
+      readonly accountKind: string | null;
+      readonly checksPrintedBalances: boolean;
+      readonly movementCount: number;
+      readonly debitCount: number;
+      readonly creditCount: number;
+      readonly totalDebits: string;
+      readonly totalCredits: string;
+      readonly firstDate: string | null;
+      readonly lastDate: string | null;
+      readonly closingBalance: string | null;
+      readonly warnings: readonly string[];
+      readonly alreadyImported: {
+        readonly importBatchId: string;
+        readonly importedAt: string;
+      } | null;
+    }
+  | {
+      readonly readable: false;
+      readonly formatId: string;
+      readonly problems: readonly { readonly lineNumber: number; readonly message: string }[];
+    };
+
+export type PreparedImport =
+  | { readonly ran: true; readonly analysis: AnalysisResult }
+  | { readonly ran: false; readonly reason: string };
+
+/* --------------------------------------------------------------------------- overview */
+
+/**
+ * A figure, and whether the ledger can stand behind it.
+ *
+ * When `known` is false the screen says so in words. It never prints the amount as if it were
+ * the answer: a summary reading ₹0 is indistinguishable from a summary that has not finished
+ * looking, and that is the one confusion this product cannot afford.
+ */
+export interface OverviewFigure {
+  readonly known: boolean;
+  readonly amount: string | null;
+  readonly unknownReason?: string;
+}
+
+export interface OverviewResult {
+  readonly spending: {
+    readonly period: { readonly start: string; readonly end: string };
+    readonly total: OverviewFigure;
+    readonly categories: readonly {
+      readonly category: string | null;
+      readonly netTotal: string;
+      readonly expenseCount: number;
+    }[];
+    readonly caveats: { readonly excludes: readonly string[] };
+  };
+  readonly unexplained: {
+    readonly total: OverviewFigure;
+    readonly movementCount: number;
+    readonly scanned: number;
+    readonly complete: boolean;
+    /** The newest few movements the total is made of — a sample, not the set. */
+    readonly movements: readonly OverviewActivity[];
+  };
+  /** What is on file and has not been looked at yet. */
+  readonly readiness: AnalysisReadiness;
+  readonly attention: {
+    /** The same number **Needs attention** shows — the queue plus the questions it never held. */
+    readonly total: number;
+    readonly reviewQueueTotal: number;
+    readonly counts: Record<string, number>;
+  };
+  readonly people: {
+    readonly toCollect: OverviewFigure;
+    readonly toPay: OverviewFigure;
+    readonly counterparties: readonly CounterpartyBalance[];
+    /** Shared with, and square. Absence from `counterparties` alone cannot say this. */
+    readonly settled: readonly CounterpartyBalance[];
+  };
+  readonly recent: readonly OverviewActivity[];
+  readonly empty: boolean;
+}
+
+/** One person's standing balance. `netBalance` is signed: a leading `-` means the user owes. */
+export interface CounterpartyBalance {
+  readonly personId: string;
+  readonly displayName: string;
+  readonly netBalance: string;
+  readonly contributingExpenseCount: number;
+}
+
+export interface OverviewActivity {
+  readonly paymentId: string;
+  readonly occurredAt: string;
+  readonly description: string;
+  readonly amount: string;
+  readonly direction: "debit" | "credit";
+  readonly status: "understood" | "needs_context";
+}
+
+/* ================================================= phase C — one event, and what it needs */
+
+/**
+ * A figure, and whether the ledger can stand behind it.
+ *
+ * Same contract as `OverviewFigure`, kept as its own name because the two reads are separate
+ * and one is not derived from the other. `known: false` renders as words, never as an amount.
+ */
+export interface ConnectionFigure {
+  readonly known: boolean;
+  readonly amount: string | null;
+  readonly unknownReason?: string;
+}
+
+/** What one supporting record says, in the terms the record itself uses. */
+export interface ConnectionRecordReading {
+  readonly name: string | null;
+  readonly amount: string | null;
+  readonly reference: string | null;
+  readonly occurredAt: string | null;
+}
+
+export interface ConnectionSupportingRecord {
+  readonly evidenceId: string;
+  /** 'Bill or receipt', 'Screenshot', 'Payment message', 'Note you wrote'. */
+  readonly label: string;
+  /** The stored type. Details disclosure only. */
+  readonly evidenceType: string;
+  readonly capturedAt: string;
+  /** `null` when the record is attached but nothing has read it. */
+  readonly reading: ConnectionRecordReading | null;
+}
+
+export interface ConnectionProposal {
+  readonly candidateId: string;
+  readonly evidenceId: string;
+  readonly label: string;
+  readonly evidenceType: string;
+  readonly capturedAt: string;
+  readonly status: string;
+  /** Plain sentences the API wrote. Never a signal name, never a score. */
+  readonly whyRelated: readonly string[];
+  readonly whyUnsure: readonly string[];
+  readonly decidedAt: string | null;
+}
+
+export interface ConnectionShare {
+  readonly name: string;
+  readonly isYou: boolean;
+  readonly amount: string;
+  readonly beneficiaryKind: "person" | "group";
+  readonly members: readonly { readonly name: string; readonly amount: string }[] | null;
+}
+
+export interface ConnectionRefund {
+  readonly adjustmentId: string;
+  readonly label: string;
+  readonly amount: string;
+  readonly occurredAt: string;
+}
+
+export interface ConnectionExpense {
+  readonly expenseId: string;
+  readonly whatItWas: string | null;
+  readonly category: string | null;
+  readonly grossAmount: string;
+  readonly netAmount: string;
+  readonly fundedByThisPayment: string;
+  readonly paidBy: { readonly personId: string; readonly name: string; readonly isYou: boolean };
+  /** `null` when nobody has been named — never an empty list, which reads as "nobody". */
+  readonly shares: readonly ConnectionShare[] | null;
+  readonly sharesUnknownReason: string | null;
+  /** What the shares mean for who owes whom. The API's sentence — never inferred here. */
+  readonly obligationNote: string | null;
+  readonly refunds: readonly ConnectionRefund[];
+  readonly state: ExpenseState;
+}
+
+export interface ConnectionSettlement {
+  readonly settlementId: string;
+  readonly counterpartyName: string;
+  readonly amount: string;
+  readonly label: string;
+}
+
+export interface ConnectionRefundOf {
+  readonly adjustmentId: string;
+  readonly expenseId: string;
+  readonly whatItWas: string | null;
+  readonly label: string;
+  readonly amount: string;
+}
+
+export interface ConnectionDisagreement {
+  readonly about: string;
+  readonly detail: string;
+  readonly values: readonly string[];
+}
+
+export const PAYMENT_NATURES = [
+  "duplicate",
+  "transfer",
+  "investment",
+  "settlement",
+  "refund",
+  "spending",
+  "money_in",
+  "not_yet_known",
+] as const;
+export type PaymentNature = (typeof PAYMENT_NATURES)[number];
+
+/** The best name this event has, and which of the four sources established it. */
+export interface ConnectionTitle {
+  readonly text: string;
+  readonly source: "counterparty" | "record" | "expense" | "narration";
+}
+
+export interface ConnectionResult {
+  readonly paymentId: string;
+  readonly nature: PaymentNature;
+  readonly title: ConnectionTitle;
+  readonly merchantName: string | null;
+  /** The bank's own words. Immutable source — behind Details, never the headline. */
+  readonly narration: string;
+  readonly occurredAt: string;
+  readonly amount: string;
+  readonly direction: "debit" | "credit";
+  readonly accountName: string;
+  readonly countsAsSpending: boolean;
+  readonly whyNotSpending: string | null;
+  readonly spendingContribution: string;
+  readonly unaccountedFor: ConnectionFigure;
+  /** Decided by the API, never by comparing a figure to zero here. */
+  readonly fullyAccountedFor: boolean;
+  readonly duplicate: { readonly isDuplicate: boolean; readonly ofPaymentId: string | null };
+  readonly supportingRecords: readonly ConnectionSupportingRecord[];
+  readonly proposals: readonly ConnectionProposal[];
+  readonly disagreements: readonly ConnectionDisagreement[];
+  readonly expenses: readonly ConnectionExpense[];
+  readonly settlements: readonly ConnectionSettlement[];
+  readonly refundOf: readonly ConnectionRefundOf[];
+  readonly openQuestions: readonly AttentionItem[];
+  readonly details: {
+    readonly channel: string;
+    readonly reference: string | null;
+    readonly referenceType: string | null;
+    readonly counterpartyType: string;
+    readonly paymentState: string;
+    readonly cashFlowCategory: string | null;
+    readonly cashFlowState: string;
+    readonly importBatchId: string;
+    readonly currency: string;
+  };
+}
+
+/* --------------------------------------------------------- phase C — the real questions */
+
+export type AttentionFactKind = "text" | "money" | "date" | "unknown";
+
+/**
+ * One fact needed to answer a question, typed rather than pre-formatted.
+ *
+ * The API says what kind of thing the value is and this package renders it — an amount through
+ * `Money`, an instant through `formatDate`. `unknown` carries `null` and is rendered in words,
+ * so a total nobody has read off a document can never print as `₹0.00`.
+ */
+export interface AttentionFact {
+  readonly label: string;
+  readonly kind: AttentionFactKind;
+  readonly value: string | null;
+}
+
+export type AttentionSubject =
+  | { readonly kind: "payment"; readonly paymentId: string }
+  | { readonly kind: "payment_pair"; readonly paymentId: string; readonly otherPaymentId: string }
+  | { readonly kind: "evidence"; readonly evidenceId: string }
+  | { readonly kind: "expense"; readonly expenseId: string };
+
+export interface AttentionItem {
+  readonly id: string;
+  readonly source: "review_queue" | "ledger";
+  /** The review kind, or a ledger-derived one. A value this UI has not been taught still renders. */
+  readonly kind: string;
+  readonly question: string;
+  readonly why: string;
+  readonly reasons: readonly string[];
+  readonly amount: { readonly known: boolean; readonly value: string | null };
+  readonly occurredAt: string;
+  readonly facts: readonly AttentionFact[];
+  readonly subject: AttentionSubject;
+  /** The queue item, when there is one — what the existing inspector answers. */
+  readonly item: ReviewQueueItem | null;
+  readonly suggestion: AttentionSuggestion | null;
+}
+
+/**
+ * What a payment looks like it was for, with the reason and the other sensible answers.
+ *
+ * `countsAsPurchase` is the field a screen must read before it offers anything: a statement's
+ * tax lines, instalment interest and repayments are not purchases of their own, and agreeing
+ * with a category on one of them is how the same money reaches a total twice.
+ */
+/** The approved pattern that led a suggestion, so the screen can name it (ADR-0064). */
+export interface AppliedRule {
+  readonly ruleId: string;
+  readonly ruleName: string;
+  /** The text that matched. Shown so a person can see what fired and go and narrow it. */
+  readonly wording: string;
+  readonly category: string;
+  readonly why: string;
+}
+
+export interface AttentionSuggestion {
+  readonly inferenceId: string | null;
+  readonly category: string | null;
+  readonly confidence: ConfidenceLevel;
+  readonly why: readonly string[];
+  readonly alternatives: readonly { readonly category: string; readonly why: string }[];
+  readonly everyCategory: readonly string[];
+  readonly countsAsPurchase: boolean;
+  /** Set when one of the person's own approved patterns chose this category. */
+  readonly appliedRule?: AppliedRule | null;
+}
+
+export interface AttentionResult {
+  readonly items: readonly AttentionItem[];
+  readonly counts: Readonly<Record<ReviewItemKind, number>>;
+  readonly reviewQueueTotal: number;
+  readonly total: number;
+  readonly truncated: boolean;
+}
+
+/* ============================================== phases D and E — analysing and explaining */
+
+export interface AnalysisReadiness {
+  readonly recordsAwaitingAnalysis: number;
+  readonly documentsAwaitingAnalysis: number;
+}
+
+export const ANALYSIS_STAGES = ["read_records", "work_out_purpose", "connect_records"] as const;
+export type AnalysisStageName = (typeof ANALYSIS_STAGES)[number];
+export type AnalysisStageStatus = "done" | "partial" | "skipped" | "failed";
+
+export interface AnalysisStage {
+  readonly name: AnalysisStageName;
+  readonly status: AnalysisStageStatus;
+  /** One sentence the API wrote. Rendered as-is; never a state name or a code. */
+  readonly summary: string;
+  readonly unfinishedReason?: string;
+  readonly recordsTouched: number;
+}
+
+export interface AnalysisResult {
+  readonly recordsChecked: number;
+  readonly connectionsFound: number;
+  readonly suggestionsReady: number;
+  readonly questionsForYou: number;
+  readonly notUnderstood: number;
+  readonly stages: readonly AnalysisStage[];
+  /** False when any stage was skipped or failed. A screen must not say "done" over this. */
+  readonly complete: boolean;
+}
+
+/* ----------------------------------------------------------------------- what you spent */
+
+export interface SpendingMonth {
+  readonly month: string;
+  readonly netTotal: string;
+  readonly expenseCount: number;
+}
+
+export interface SpendingSummaryResult {
+  readonly period: { readonly start: string; readonly end: string };
+  readonly total: OverviewFigure;
+  readonly categories: readonly {
+    readonly category: string | null;
+    readonly netTotal: string;
+    readonly grossTotal: string;
+    readonly expenseCount: number;
+  }[];
+  readonly months: readonly SpendingMonth[];
+  readonly own: {
+    readonly share: string;
+    readonly paidByYou: string;
+    readonly frontedForOthers: string;
+  };
+  readonly cameBack: { readonly total: string };
+  readonly unaccountedFor: {
+    readonly total: OverviewFigure;
+    readonly movementCount: number;
+    readonly movements: readonly OverviewActivity[];
+  };
+  readonly caveats: AnalyticsCaveats;
+}
+
+/* --------------------------------------------------------------- one person's balance */
+
+export interface PersonContribution {
+  readonly expenseId: string;
+  readonly whatItWas: string | null;
+  readonly occurredAt: string;
+  readonly amount: string;
+  readonly direction: "collect" | "pay";
+  readonly paidByName: string;
+  readonly paidByIsYou: boolean;
+  readonly paymentId: string | null;
+}
+
+export interface PersonSettlementLine {
+  readonly settlementId: string;
+  readonly paymentId: string;
+  readonly amount: string;
+  readonly occurredAt: string;
+  readonly label: string;
+  readonly reason: string | null;
+}
+
+export interface PersonBalanceSummary {
+  readonly personId: string;
+  readonly displayName: string;
+  /** Always positive; `direction` says who owes whom. */
+  readonly amount: string;
+  readonly direction: "collect" | "pay" | "settled";
+  readonly evidenceStatus: ObligationEvidenceStatus;
+  readonly contributions: readonly PersonContribution[];
+  readonly settlements: readonly PersonSettlementLine[];
+  readonly pendingRefundExpenseIds: readonly string[];
+}
+
+/* ------------------------------------------------------------------- a split, previewed */
+
+export interface AllocationPreviewShare {
+  readonly beneficiaryType: "person" | "group";
+  readonly beneficiaryId: string;
+  readonly name: string;
+  readonly isYou: boolean;
+  readonly amount: string;
+  readonly percentage: string | null;
+  readonly members: readonly { readonly name: string; readonly amount: string }[] | null;
+}
+
+export interface AllocationPreviewObligation {
+  readonly personId: string;
+  readonly name: string;
+  readonly amount: string;
+  readonly direction: "collect" | "pay";
+}
+
+export interface AllocationPreviewResult {
+  readonly expenseId: string;
+  readonly grossAmount: string;
+  readonly netAmount: string;
+  readonly method: AllocationMethod;
+  readonly paidBy: { readonly personId: string; readonly name: string; readonly isYou: boolean };
+  readonly shares: readonly AllocationPreviewShare[];
+  readonly obligations: readonly AllocationPreviewObligation[];
+  /** Why nobody would owe anything, when nobody would. The API's own sentence. */
+  readonly noObligationsBecause: string | null;
+  readonly replacesExistingAllocation: boolean;
+  /** Why this split cannot be approved as stated. A value, so it can be read before pressing. */
+  readonly refusal: { readonly code: string; readonly message: string } | null;
+}
+
 export interface NormalizePaymentsResult {
   readonly normalizedPaymentIds: readonly string[];
   readonly channelRefinedCount: number;
@@ -1768,4 +2273,183 @@ export interface AskResult {
     readonly promptVersion: string;
   };
   readonly answer: LedgerAnswer;
+}
+
+/* ================================================= what has already been connected */
+
+/**
+ * The settled half of what **Needs attention** reports as open.
+ *
+ * `nameSource` is the field that keeps the row honest: on a ledger of imported statements most
+ * movements have only the bank's own narration, and printing `UPI-AMZN9821PYTM` as though
+ * somebody had chosen it is how a screen starts pretending to know more than it does.
+ */
+export interface LinkedPayment {
+  readonly paymentId: string;
+  readonly name: string;
+  readonly nameSource: "counterparty" | "narration";
+  readonly occurredAt: string;
+  readonly amount: string;
+  readonly direction: PaymentDirection;
+}
+
+/** Whether a person accepted an offer, or the record arrived already attached. */
+export type LinkOrigin = "you_accepted" | "attached_when_added";
+
+export interface ConfirmedLink {
+  readonly evidenceId: string;
+  readonly recordWords: string;
+  readonly capturedAt: string;
+  readonly payment: LinkedPayment | null;
+  readonly noPaymentBecause?: string;
+  readonly origin: LinkOrigin;
+  readonly decidedAt: string | null;
+  readonly decidedBy: string | null;
+  readonly why: readonly string[];
+}
+
+export interface ConfirmedLinksResult {
+  readonly links: readonly ConfirmedLink[];
+  readonly total: number;
+  readonly truncated: boolean;
+}
+
+/* ================================ phase 2 — instalment timelines and quiet anomalies */
+
+/**
+ * How much the ledger knows about one step of an instalment plan (ADR-0062).
+ *
+ * `observed` is a row that exists; `expected` is the issuer's own count with no amount and no
+ * date attached. A screen renders the word and never collapses the two — "the statement says
+ * there are six" and "₹X is due" are different claims, and only one of them is a fact here.
+ */
+export type PositionCertainty = "observed" | "expected" | "inferred" | "unknown";
+
+export type InstalmentComponent = "principal" | "interest" | "tax" | "fee";
+
+export interface InstalmentCharge {
+  readonly paymentId: string;
+  readonly component: InstalmentComponent;
+  readonly amount: string;
+  readonly occurredAt: string;
+  readonly narration: string;
+  readonly position: number | null;
+}
+
+export interface InstalmentTimelineEntry {
+  readonly number: number;
+  readonly certainty: PositionCertainty;
+  readonly charges: readonly InstalmentCharge[];
+  readonly principal: string | null;
+  readonly interest: string | null;
+  readonly tax: string | null;
+}
+
+export interface InstalmentPlan {
+  readonly planKey: string;
+  readonly merchantName: string | null;
+  /** `known: false` means no statement line stated a tenure. Never substitute a count. */
+  readonly tenure: { readonly known: boolean; readonly of: number | null };
+  readonly purchase: {
+    readonly known: boolean;
+    readonly paymentId: string | null;
+    readonly amount: string | null;
+    readonly occurredAt: string | null;
+  };
+  readonly positions: readonly InstalmentTimelineEntry[];
+  readonly unpositionedCharges: readonly InstalmentCharge[];
+  readonly observed: {
+    readonly principal: string;
+    readonly interest: string;
+    readonly tax: string;
+    readonly fee: string;
+    readonly chargeCount: number;
+  };
+  readonly progress: { readonly seen: number; readonly of: number | null };
+  /** What the plan does not know, in the API's own words. Rendered as-is. */
+  readonly unknowns: readonly string[];
+}
+
+export interface InstalmentsResult {
+  readonly plans: readonly InstalmentPlan[];
+  readonly rowsRead: number;
+}
+
+export type AnomalyKind =
+  "unexplained_interest" | "inconsistent_instalment" | "unusual_fee" | "repeated_charge";
+
+export interface AnomalyEvidence {
+  readonly paymentId: string;
+  readonly occurredAt: string;
+  readonly amount: string;
+  readonly narration: string;
+}
+
+/**
+ * Something worth a second look, stated as the comparison it is (ADR-0063).
+ *
+ * `headline` and `detail` are the API's own words and are rendered verbatim. This package must
+ * not add a verdict, a severity or a recommendation to act on top of them.
+ */
+export interface Anomaly {
+  readonly id: string;
+  readonly kind: AnomalyKind;
+  readonly headline: string;
+  readonly detail: string;
+  readonly evidence: readonly AnomalyEvidence[];
+}
+
+export interface AnomaliesResult {
+  readonly anomalies: readonly Anomaly[];
+  /** How many rows were compared. An empty list over a non-zero count is a real answer. */
+  readonly rowsRead: number;
+}
+
+/* ================================ ADR-0064 — patterns a person may approve */
+
+export interface LearningExample {
+  readonly paymentId: string;
+  readonly occurredAt: string;
+  readonly narration: string;
+}
+
+/**
+ * A pattern the ledger could learn, offered for approval.
+ *
+ * Nothing about it is active. It matches no payment and is stored nowhere until somebody
+ * approves it, and the wording below is the exact text that would then be matched on.
+ */
+export interface LearnedRuleProposal {
+  readonly id: string;
+  readonly suggestedName: string;
+  readonly wording: string;
+  readonly operator: "contains" | "equals" | "startsWith";
+  readonly category: string;
+  readonly reason: string;
+  readonly examples: readonly LearningExample[];
+  /** What this wording would actually reach if approved (ADR-0065). */
+  readonly reach: ProposalReach;
+}
+
+export interface ProposalReach {
+  readonly alreadyFiled: number;
+  /** The number that says a wording is too wide. Led with whenever it is not zero. */
+  readonly wouldAlsoMatch: number;
+  readonly examplesOfNewMatches: readonly LearningExample[];
+}
+
+/** A pattern somebody declined, kept so it can be read and brought back (ADR-0065). */
+export interface DismissedPattern {
+  readonly proposalKey: string;
+  readonly wording: string;
+  readonly category: string;
+  readonly dismissedAt: string;
+  readonly dismissedBy: string;
+  readonly reason: string;
+}
+
+export interface RuleProposalsResult {
+  readonly proposals: readonly LearnedRuleProposal[];
+  readonly confirmationsRead: number;
+  readonly dismissed: readonly DismissedPattern[];
 }

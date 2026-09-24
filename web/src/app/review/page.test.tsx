@@ -157,9 +157,13 @@ describe("the review queue", () => {
     );
     await user.click(screen.getByRole("button", { name: /PEPPERMILL CAFE/ }));
 
-    expect(await screen.findByText("What was read off it")).toBeInTheDocument();
+    expect(await screen.findByText("What could be read off it")).toBeInTheDocument();
     expect(screen.getByText("Parsed from the text, deterministically")).toBeInTheDocument();
-    // Both verdicts are visible, including the one that disagrees.
+    // What agrees and what does not is on the card itself; the signal-by-signal comparison that
+    // proves it is one disclosure away, still carrying both verdicts.
+    expect(screen.getByText("What matches")).toBeInTheDocument();
+    expect(screen.getByText("What does not")).toBeInTheDocument();
+    await user.click(screen.getByText("Compare them side by side"));
     expect(screen.getAllByText("Agrees").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Disagrees").length).toBeGreaterThan(0);
     expect(api.callsTo("/decision")).toHaveLength(0);
@@ -173,13 +177,13 @@ describe("the review queue", () => {
       expect(screen.getAllByText("Unmatched evidence").length).toBeGreaterThan(0),
     );
     await user.click(screen.getByRole("button", { name: /PEPPERMILL CAFE/ }));
-    await user.click(await screen.findByRole("button", { name: /attach to this payment/i }));
+    await user.click(await screen.findByRole("button", { name: /yes, they go together/i }));
 
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getAllByText(/permanent/i).length).toBeGreaterThan(0);
-    expect(within(dialog).getByText(/write-once/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/cannot later be moved/i)).toBeInTheDocument();
 
-    await user.click(within(dialog).getByRole("button", { name: /attach permanently/i }));
+    await user.click(within(dialog).getByRole("button", { name: /connect them/i }));
     await waitFor(() => expect(api.callsTo("/matches/cand-1/decision")).toHaveLength(1));
     expect(api.bodyOf("/matches/cand-1/decision")).toMatchObject({ decision: "accept" });
   });

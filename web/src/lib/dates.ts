@@ -17,6 +17,66 @@ export function currentMonthPeriod(now: Date = new Date()): { start: string; end
   return { start: toDateInputValue(start), end: toDateInputValue(end) };
 }
 
+/** The named windows the outcome screens offer. Calendar choices, never financial ones. */
+export const SPENDING_WINDOWS = [
+  "this_month",
+  "last_month",
+  "last_3_months",
+  "last_12_months",
+] as const;
+export type SpendingWindow = (typeof SPENDING_WINDOWS)[number];
+
+/** How many calendar months each window spans, so a trend can cover exactly the same ones. */
+export const spendingWindowMonths: Record<SpendingWindow, number> = {
+  this_month: 1,
+  last_month: 1,
+  last_3_months: 3,
+  last_12_months: 12,
+};
+
+export const spendingWindowLabel: Record<SpendingWindow, string> = {
+  this_month: "This month",
+  last_month: "Last month",
+  last_3_months: "Last 3 months",
+  last_12_months: "Last 12 months",
+};
+
+/**
+ * One named window as `[start, end)` date-input values.
+ *
+ * Choosing which months to ask the API about is a calendar decision, not a financial one — the
+ * API makes the same one when no period is given (`currentMonthPeriod` there), and every figure
+ * inside the window is still the ledger's. `end` is exclusive everywhere in this system, so a
+ * window ends on the first day after it.
+ */
+export function spendingWindowPeriod(
+  window: SpendingWindow,
+  now: Date = new Date(),
+): { start: string; end: string } {
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const startOfThisMonth = Date.UTC(year, month, 1);
+  switch (window) {
+    case "last_month":
+      return {
+        start: toDateInputValue(new Date(Date.UTC(year, month - 1, 1))),
+        end: toDateInputValue(new Date(startOfThisMonth)),
+      };
+    case "last_3_months":
+      return {
+        start: toDateInputValue(new Date(Date.UTC(year, month - 2, 1))),
+        end: toDateInputValue(new Date(Date.UTC(year, month + 1, 1))),
+      };
+    case "last_12_months":
+      return {
+        start: toDateInputValue(new Date(Date.UTC(year, month - 11, 1))),
+        end: toDateInputValue(new Date(Date.UTC(year, month + 1, 1))),
+      };
+    case "this_month":
+      return currentMonthPeriod(now);
+  }
+}
+
 export function formatPeriod(startIso: string, endIso: string): string {
   const start = new Date(startIso);
   // periodEnd is exclusive, so the human-readable range shows the last included day.
