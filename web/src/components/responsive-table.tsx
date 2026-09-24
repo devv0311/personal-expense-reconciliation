@@ -94,14 +94,18 @@ export function ResponsiveTable<Row>({
       <ul className="flex flex-col sm:hidden">
         {rows.map((row, index) => (
           <li key={rowKey(row, index)} className="border-b border-rule py-3 last:border-b-0">
-            <div className="text-body text-ink">{title.render(row)}</div>
+            {/* `wrap-anywhere` and `min-w-0`: one unbroken narration or reference must wrap
+                inside a phone's width rather than widen the page (Design.md, "Responsive"). */}
+            <div className="text-body text-ink wrap-anywhere">{title.render(row)}</div>
             {rowNote !== undefined && rowNote(row)}
             <dl className="mt-1.5 flex flex-col gap-1">
               {rest.map((column) => (
                 <Fragment key={column.key}>
                   <div className="flex items-baseline justify-between gap-4">
-                    <dt className="text-meta text-ink-muted">{column.header}</dt>
-                    <dd className="text-body text-ink">{column.render(row)}</dd>
+                    <dt className="shrink-0 text-meta text-ink-muted">{column.header}</dt>
+                    <dd className="min-w-0 text-body text-ink wrap-anywhere">
+                      {column.render(row)}
+                    </dd>
                   </div>
                 </Fragment>
               ))}

@@ -60,6 +60,27 @@ export const confidenceLabel = labelled({
   unknown: "Confidence unknown",
 });
 
+/* ------------------------------------------------------------------- one event (phase C) */
+
+/**
+ * What kind of event a movement is, in the words the reader uses.
+ *
+ * The API decides which of these applies (`domain.paymentNature`) and this only names it. The
+ * two that matter most are the two a summary gets wrong by default: a transfer between your own
+ * accounts and a confirmed duplicate are not spending, and saying so plainly is the difference
+ * between a ledger and a list of debits.
+ */
+export const paymentNatureLabel = labelled({
+  spending: "Something you bought",
+  transfer: "Moving your own money",
+  investment: "An investment",
+  settlement: "Settling up",
+  refund: "Money coming back",
+  money_in: "Money arriving",
+  duplicate: "The same payment, recorded twice",
+  not_yet_known: "Not worked out yet",
+});
+
 /* -------------------------------------------------------------------------- evidence */
 
 export const evidenceTypeLabel = labelled({

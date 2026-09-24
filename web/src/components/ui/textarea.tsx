@@ -11,7 +11,7 @@ export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   return (
     <textarea
       className={cn(
-        "min-h-20 w-full rounded-sm border border-rule bg-panel px-2.5 py-2 text-body text-ink placeholder:text-ink-faint",
+        "min-h-24 w-full rounded-sm border border-rule bg-panel px-3 py-2.5 text-body text-ink placeholder:text-ink-faint",
         "hover:border-rule-strong",
         "disabled:cursor-not-allowed disabled:opacity-50",
         className,

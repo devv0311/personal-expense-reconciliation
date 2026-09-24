@@ -30,7 +30,31 @@ export type ClassificationSkipReason =
   /** Already known to be a transfer or an investment, so there is nothing left to decide (#7). */
   | 'non_spend_counterparty'
   /** A credit is never new spend; V1 does not classify inflow (ADR-0015, ADR-0027). */
-  | 'credit_out_of_scope';
+  | 'credit_out_of_scope'
+  /**
+   * There is no model to ask, so only the deterministic leg ran.
+   *
+   * Not a failure and not a silence: the self-transfer rule still paired what it could, and
+   * this reason is what a run reports for everything the rule had no opinion about. It exists
+   * so "nobody asked" and "the model had nothing to say" can never be confused.
+   */
+  | 'no_model_configured'
+  /**
+   * The line's own words say nothing a category could be read from.
+   *
+   * Distinct from `no_model_configured`: something *did* look, and found nothing to go on. The
+   * payment stays unexplained and visible rather than being given a guess to argue with.
+   */
+  | 'nothing_to_go_on'
+  /**
+   * The line is not a purchase of its own — a tax line, or one instalment of something already
+   * bought.
+   *
+   * Deliberately never proposed. Approving an expense for one of these is how the same money
+   * gets counted twice, so the row is explained in words on its own screen instead
+   * (`domain.inferPurpose`, and ADR-0060).
+   */
+  | 'not_a_purchase_of_its_own';
 
 export interface ClassificationEligibilityInput {
   readonly state: PaymentState;

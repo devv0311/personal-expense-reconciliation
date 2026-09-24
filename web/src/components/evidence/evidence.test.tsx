@@ -97,7 +97,7 @@ describe("the evidence inspector", () => {
     renderInspector({ "/api/evidence/ev-1/matches": { evidenceId: "ev-1", candidates: [] } });
 
     await waitFor(() =>
-      expect(screen.getByText(/That is a real answer, not a failure/)).toBeInTheDocument(),
+      expect(screen.getByText(/That is a real answer rather than a failure/)).toBeInTheDocument(),
     );
   });
 
@@ -113,9 +113,7 @@ describe("the evidence inspector", () => {
     });
 
     await waitFor(() =>
-      expect(
-        screen.getByText(/The evidence does not distinguish them, so this system will not either/),
-      ).toBeInTheDocument(),
+      expect(screen.getByText(/nothing on the record tells them apart/)).toBeInTheDocument(),
     );
   });
 
@@ -134,7 +132,7 @@ describe("the evidence inspector", () => {
       },
     });
 
-    await waitFor(() => expect(screen.getByText("Already decided")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Already answered")).toBeInTheDocument());
     expect(screen.getByText(/Dismissed · user/)).toBeInTheDocument();
   });
 

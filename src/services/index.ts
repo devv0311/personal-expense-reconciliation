@@ -45,11 +45,20 @@ export * from './history-service.js';
 export * from './session-service.js';
 export * from './rule-service.js';
 export * from './analytics-service.js';
+export * from './overview-service.js';
+export * from './attention-service.js';
+export * from './connection-service.js';
+export * from './instalment-service.js';
+export * from './learning-service.js';
+export * from './analysis-service.js';
+export * from './spending-service.js';
 export * from './ask-service.js';
 export * from './occasion-service.js';
 export * from './splitwise-resync-service.js';
 export * from './job-service.js';
 export * from './intake-service.js';
+export * from './links-service.js';
+export * from './purpose-proposal-service.js';
 
 /**
  * The two handles every service call needs, re-exported so a caller — `src/api`, a future

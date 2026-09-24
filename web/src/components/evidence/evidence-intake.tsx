@@ -36,30 +36,77 @@ import {
  * Nothing here links anything to anything. Ingesting a document and deciding what it is about
  * are separate acts, and the second one is write-once (ADR-0034).
  */
-export function EvidenceIntake() {
-  const [open, setOpen] = useState<"file" | "note" | "notification" | null>(null);
+/** Which of the three intake forms a link is asking for. */
+export type EvidenceIntakeKind = "file" | "note" | "notification";
+
+/**
+ * The three intakes, or exactly one of them under a name the reader chose.
+ *
+ * `only` and `labels` exist for the guided **Add records** flow, where somebody has already
+ * said what they are holding — a bill, a screenshot — and a row of three buttons named after
+ * the storage mechanism would ask them to say it again in the ledger's words. The library
+ * screen passes neither and is unchanged; this is one control rendered under a different
+ * label, never a second way to write evidence.
+ *
+ * `defaultType` is the same idea one level down: "Upload a document" defaults to a receipt on
+ * the library and to a screenshot when the reader has already said that is what they have.
+ */
+export function EvidenceIntake({
+  requested,
+  only,
+  labels,
+  defaultType,
+}: {
+  requested?: EvidenceIntakeKind | null;
+  only?: readonly EvidenceIntakeKind[];
+  labels?: Partial<Record<EvidenceIntakeKind, string>>;
+  defaultType?: EvidenceType;
+}) {
+  const [chosen, setChosen] = useState<EvidenceIntakeKind | null>(null);
+  // A link from **Add records** supplies which form to open; dismissing it has to stick, or
+  // the dialog reopens on every render for as long as the query string is in the address bar.
+  const [dismissed, setDismissed] = useState(false);
+  const open = chosen ?? (dismissed ? null : (requested ?? null));
+  const close = (): void => {
+    setChosen(null);
+    setDismissed(true);
+  };
+
+  const shown = only ?? (["file", "note", "notification"] as const);
 
   return (
     <div className="flex flex-wrap gap-2">
-      <Button variant="outline" size="sm" onClick={() => setOpen("file")}>
-        Upload a document
-      </Button>
-      <Button variant="outline" size="sm" onClick={() => setOpen("note")}>
-        Write a note
-      </Button>
-      <Button variant="outline" size="sm" onClick={() => setOpen("notification")}>
-        Paste a notification
-      </Button>
+      {shown.includes("file") && (
+        <Button variant="outline" size="sm" onClick={() => setChosen("file")}>
+          {labels?.file ?? "Upload a document"}
+        </Button>
+      )}
+      {shown.includes("note") && (
+        <Button variant="outline" size="sm" onClick={() => setChosen("note")}>
+          {labels?.note ?? "Write a note"}
+        </Button>
+      )}
+      {shown.includes("notification") && (
+        <Button variant="outline" size="sm" onClick={() => setChosen("notification")}>
+          {labels?.notification ?? "Paste a notification"}
+        </Button>
+      )}
 
-      {open === "file" && <UploadDialog onClose={() => setOpen(null)} />}
-      {open === "note" && <NoteDialog onClose={() => setOpen(null)} />}
-      {open === "notification" && <NotificationDialog onClose={() => setOpen(null)} />}
+      {open === "file" && <UploadDialog onClose={close} defaultType={defaultType} />}
+      {open === "note" && <NoteDialog onClose={close} />}
+      {open === "notification" && <NotificationDialog onClose={close} />}
     </div>
   );
 }
 
-function UploadDialog({ onClose }: { onClose: () => void }) {
-  const [type, setType] = useState<EvidenceType>("receipt_image");
+function UploadDialog({
+  onClose,
+  defaultType,
+}: {
+  onClose: () => void;
+  defaultType?: EvidenceType;
+}) {
+  const [type, setType] = useState<EvidenceType>(defaultType ?? "receipt_image");
   const [capturedOn, setCapturedOn] = useState(toDateInputValue(new Date()));
   const [file, setFile] = useState<File | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);

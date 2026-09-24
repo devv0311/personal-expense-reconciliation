@@ -132,8 +132,6 @@ export interface PossibleDuplicateDecisionInput {
   /** The payment it may duplicate. */
   readonly duplicateOfPaymentId: PaymentId;
   readonly audit: AuditMeta;
-  /** Widens the window the pair is checked against, matching the queue's own option. */
-  readonly windowSeconds?: number;
 }
 
 export interface ConfirmDuplicateResult {
@@ -142,8 +140,6 @@ export interface ConfirmDuplicateResult {
   readonly canonicalPaymentId: PaymentId;
   readonly pairKey: string;
 }
-
-const DEFAULT_REVIEW_WINDOW_SECONDS = 24 * 60 * 60;
 
 /**
  * Confirms that a payment restates one the ledger already has.
@@ -164,13 +160,18 @@ export async function confirmPossibleDuplicate(
   parseDecisionActor(input.audit.actor);
   const { payment, other } = await requirePair(db, input);
 
-  const windowSeconds = input.windowSeconds ?? DEFAULT_REVIEW_WINDOW_SECONDS;
-  if (!isPossibleDuplicate(asCandidate(payment), asCandidate(other), { windowSeconds })) {
+  // The same whole rows the queue pairs, so this re-check cannot accept a pair the queue would
+  // never have offered — two days' movements, two different payees, two transaction numbers,
+  // two different lines of one statement, or two halves of one tax charge.
+  if (!isPossibleDuplicate(payment, other)) {
     throw new ServiceError(
       'PRECONDITION_FAILED',
       `Payments ${payment.id} and ${other.id} are not a possible-duplicate pair: they differ ` +
-        'in direction, amount, or timing beyond the review window, or a matching reference ' +
-        'already made the answer deterministic (invariants.md #10).',
+        'in direction, amount or calendar day; they name different payees or are different ' +
+        'kinds of line; their references name two transactions; they are two different lines ' +
+        'of one statement; one is a tax line and the other is not, or they are two different ' +
+        'taxes; or a matching reference already made the answer deterministic ' +
+        '(invariants.md #10, ADR-0070).',
       { paymentId: payment.id, duplicateOfPaymentId: other.id },
     );
   }
@@ -269,15 +270,6 @@ async function requirePair(
   const payment = await requirePayment(exec, input.paymentId);
   const other = await requirePayment(exec, input.duplicateOfPaymentId);
   return { payment, other };
-}
-
-function asCandidate(payment: PaymentRow) {
-  return {
-    amount: payment.amount,
-    occurredAt: payment.occurredAt,
-    externalReference: payment.externalReference,
-    direction: payment.direction,
-  };
 }
 
 /**

@@ -93,6 +93,88 @@ export function buildTextPdf(
   if (withText) for (const stream of streams) bodies.push({ stream });
   bodies.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
 
+  return serialise(bodies, filter);
+}
+
+/** One piece of text placed on a line of {@link buildPlacedTextPdf}. */
+export interface PlacedText {
+  readonly text: string;
+  /** Where the text starts — or, with `align: 'right'`, where it ends. */
+  readonly x: number;
+  readonly align?: 'left' | 'right';
+}
+
+/** The font size {@link buildPlacedTextPdf} sets, so a test can compute a placement. */
+export const PLACED_FONT_SIZE = 9;
+
+/**
+ * How wide `text` is when {@link buildPlacedTextPdf} draws it.
+ *
+ * The builder draws in Courier, whose every glyph is 600/1000 of an em wide, so a width is a
+ * multiplication rather than a font-metrics table — which is what lets a test right-align an
+ * amount under a column header the way a bank's statement does.
+ */
+export function placedTextWidth(text: string): number {
+  return text.length * PLACED_FONT_SIZE * 0.6;
+}
+
+/**
+ * A PDF whose pages are tables: every line is text drawn at explicit horizontal positions.
+ *
+ * `buildTextPdf` writes each line as one string starting at the margin, which is all a
+ * line-pattern layout needs. A columnar statement is read by **where** each value sits — the
+ * amount printed under "Withdrawal" rather than "Deposit" is the direction — so its tests need
+ * a document whose positions they chose. Lines are drawn top to bottom, 14 units apart.
+ *
+ * Synthetic only, like everything in this file: no real statement's text, amounts or layout
+ * measurements are to be passed to it.
+ */
+export function buildPlacedTextPdf(
+  pages: readonly (readonly (readonly PlacedText[])[])[],
+): Uint8Array {
+  const pageCount = Math.max(1, pages.length);
+  const firstPageObject = 3;
+  const firstStreamObject = firstPageObject + pageCount;
+  const fontObject = firstStreamObject + pageCount;
+
+  const bodies: (string | { readonly stream: Buffer })[] = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    `<< /Type /Pages /Kids [${Array.from({ length: pageCount }, (_, index) => `${firstPageObject + index} 0 R`).join(' ')}] /Count ${pageCount} >>`,
+  ];
+  for (let index = 0; index < pageCount; index += 1) {
+    bodies.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 ${fontObject} 0 R >> >> /Contents ${firstStreamObject + index} 0 R >>`,
+    );
+  }
+  for (let index = 0; index < pageCount; index += 1) {
+    const lines = pages[index] ?? [];
+    const content = lines
+      .map((line, lineIndex) =>
+        line
+          .map((placed) => {
+            const x = placed.align === 'right' ? placed.x - placedTextWidth(placed.text) : placed.x;
+            const y = 560 - lineIndex * 14;
+            return `BT /F1 ${PLACED_FONT_SIZE} Tf 1 0 0 1 ${x.toFixed(2)} ${y} Tm (${escapePdfText(placed.text)}) Tj ET`;
+          })
+          .join('\n'),
+      )
+      .join('\n');
+    bodies.push({ stream: deflateSync(Buffer.from(content, 'latin1')) });
+  }
+  bodies.push('<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>');
+
+  return serialise(bodies, '/Filter /FlateDecode');
+}
+
+function escapePdfText(text: string): string {
+  return text.replace(/([()\\])/g, '\\$1');
+}
+
+/** Writes numbered objects, a cross-reference table and a trailer around `bodies`. */
+function serialise(
+  bodies: readonly (string | { readonly stream: Buffer })[],
+  filter: string,
+): Uint8Array {
   const chunks: Buffer[] = [Buffer.from('%PDF-1.4\n', 'latin1')];
   const offsets: number[] = [];
   let position = chunks[0]!.length;

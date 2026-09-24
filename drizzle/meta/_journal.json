@@ -134,6 +134,27 @@
       "when": 1789229929725,
       "tag": "0018_splitwise_remote_changes",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789834420052,
+      "tag": "0019_rule_proposal_dismissals",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1789834616024,
+      "tag": "0020_audit_rule_proposal_dismissal",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789839988740,
+      "tag": "0021_rule_proposal_restore_actor_not_null",
+      "breakpoints": true
     }
   ]
 }

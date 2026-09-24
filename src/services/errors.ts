@@ -82,7 +82,31 @@ export type ServiceErrorCode =
    * is a configuration or availability fact. Every figure a question would have reported is
    * still reachable from the screen that owns it either way.
    */
-  | 'LEDGER_QUESTION_UNAVAILABLE';
+  | 'LEDGER_QUESTION_UNAVAILABLE'
+  /**
+   * A statement that says which kind of account it belongs to, imported into another kind
+   * (`import-service.ts`, ADR-0066).
+   *
+   * Refused before anything is written: a bank account's movements written onto a card would
+   * be immutable evidence attributed to the wrong account, and nothing downstream could tell.
+   */
+  | 'STATEMENT_ACCOUNT_MISMATCH'
+  /**
+   * A statement that does not say what kind of account it belongs to, imported without the
+   * person saying so either (`import-service.ts`, ADR-0068).
+   *
+   * Every CSV and XLSX is one: a card's export and a bank account's can carry the same
+   * columns, and the columns are never read as a kind. Refused before anything is written.
+   */
+  | 'STATEMENT_KIND_REQUIRED'
+  /**
+   * A stated kind of account that the statement itself contradicts (ADR-0068).
+   *
+   * The document's own word is not overruled by a caller's, and it is not silently preferred
+   * over one either: two answers to "whose statement is this?" are refused, before anything
+   * is written.
+   */
+  | 'STATEMENT_KIND_CONFLICT';
 
 export class ServiceError extends Error {
   public readonly code: ServiceErrorCode;

@@ -48,6 +48,53 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
 
   const commands = useMemo<readonly Command[]>(() => {
     const sections: Command[] = [
+      // The four places the nav leads with, plus the two actions beside them, first — a
+      // palette that could only reach the specialist screens would be the old information
+      // architecture surviving behind a keyboard shortcut. They carry a descriptive hint
+      // rather than a `g`-pair, because rebinding a key somebody already uses is a worse
+      // trade than one more thing to type.
+      {
+        id: "go-overview",
+        label: "Home",
+        hint: "What needs you next",
+        group: "Go to",
+        href: "/",
+      },
+      {
+        id: "go-add",
+        label: "Add records",
+        hint: "Statement, bill, receipt or screenshot",
+        group: "Go to",
+        href: "/add",
+      },
+      {
+        id: "go-attention",
+        label: "Needs attention",
+        hint: "Only what needs a decision",
+        group: "Go to",
+        href: "/needs-attention",
+      },
+      {
+        id: "go-spending",
+        label: "Spending",
+        hint: "Where the money went",
+        group: "Go to",
+        href: "/spending",
+      },
+      {
+        id: "go-people",
+        label: "People",
+        hint: "Who owes whom",
+        group: "Go to",
+        href: "/people",
+      },
+      {
+        id: "go-records",
+        label: "Records",
+        hint: "Everything on file, and every specialist screen",
+        group: "Go to",
+        href: "/records",
+      },
       { id: "go-review", label: "Review queue", hint: "g v", group: "Go to", href: "/review" },
       { id: "go-payments", label: "Payments", hint: "g m", group: "Go to", href: "/payments" },
       {

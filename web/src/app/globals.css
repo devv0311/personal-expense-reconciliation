@@ -1,44 +1,67 @@
 @import "tailwindcss";
 
+/*
+  A warm, paper-like editorial surface.
+
+  The palette this replaced was a cool-neutral family (`#fafaf7` over `#1b2333`, an indigo
+  accent) chosen in the phase-15 design pass. It was not wrong; it read as software. The
+  product's job is to make somebody willing to sit with their own financial records, and a bone
+  page with charcoal type and one restrained moss accent reads as something you would sit with.
+
+  Two rules from the previous system are kept exactly, because they are about truth rather than
+  taste: **a colour means one thing**, and **every text token clears AA on both the page and a
+  raised panel, in both themes** — `src/design-system.test.tsx` recomputes that from this file
+  rather than trusting the comment.
+
+  One rule was consciously replaced. "Never mix warm and cool neutrals" now reads **never mix
+  warm and cool neutrals; this family is warm** — the neutrals here are a single warm family,
+  and a cool grey introduced into it would look as wrong as a warm one did in the old.
+
+  `accent` (moss) and `credit` (teal) are the closest pair in the system. They are kept apart
+  three ways: they never appear as the same kind of thing (accent is interactive chrome — a
+  link, a button fill, an active underline; credit is a figure, set in tabular mono), they are
+  separated in hue and luminance, and **direction is always stated in words beside the figure**
+  ("owes you" / "you owe"), so colour reinforces a fact it never has to carry alone.
+*/
 :root {
-  --paper: #fafaf7;
-  --panel: #ffffff;
-  --ink: #1b2333;
-  --ink-muted: #5b6478;
-  --ink-faint: #6b7387;
-  --rule: #d8d9cd;
-  --rule-strong: #b7bba8;
-  --debit: #a33b2e;
-  --debit-bg: #f8ece9;
-  --credit: #2f6e4f;
-  --credit-bg: #eaf2ec;
-  --accent: #2a3a6b;
-  --accent-bg: #ecedf5;
-  --accent-ink: #ffffff;
-  --attention: #8a5a17;
-  --attention-bg: #f7f0e2;
-  --focus-ring: #2a3a6b;
+  --paper: #f6f4ee;
+  --panel: #fffdf7;
+  --ink: #282b28;
+  --ink-muted: #575c55;
+  --ink-faint: #6a6f68;
+  --rule: #dcddd4;
+  --rule-strong: #b6b9aa;
+  --debit: #9a3324;
+  --debit-bg: #f7e9e5;
+  --credit: #1b7268;
+  --credit-bg: #e5efeb;
+  --accent: #355445;
+  --accent-bg: #e9eee8;
+  --accent-ink: #f6f4ee;
+  --attention: #7d5310;
+  --attention-bg: #f5ecdc;
+  --focus-ring: #355445;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #14161c;
-    --panel: #1b1e26;
-    --ink: #eceef4;
-    --ink-muted: #a2a9bb;
-    --ink-faint: #828a9e;
-    --rule: #2c2f3a;
-    --rule-strong: #3c4050;
-    --debit: #e08678;
-    --debit-bg: #2e211f;
-    --credit: #7fbb9c;
-    --credit-bg: #1c2921;
-    --accent: #8b9be0;
-    --accent-bg: #232744;
-    --accent-ink: #14161c;
-    --attention: #d3a24e;
-    --attention-bg: #2b2416;
-    --focus-ring: #8b9be0;
+    --paper: #191a16;
+    --panel: #21221d;
+    --ink: #ece9df;
+    --ink-muted: #a8a79a;
+    --ink-faint: #96958a;
+    --rule: #33342d;
+    --rule-strong: #4a4c42;
+    --debit: #e69484;
+    --debit-bg: #2c211e;
+    --credit: #45a096;
+    --credit-bg: #172625;
+    --accent: #a3c2a8;
+    --accent-bg: #232b24;
+    --accent-ink: #191a16;
+    --attention: #d8ab5e;
+    --attention-bg: #2a2417;
+    --focus-ring: #a3c2a8;
   }
 }
 
@@ -62,19 +85,27 @@
   --font-sans: var(--font-plex-sans);
   --font-mono: var(--font-plex-mono);
 
+  /* The serif is for headings a person reads as prose, and for nothing else. Every figure stays
+     mono — tabular digits are what make a column of money scan as a ledger, and a serif's
+     proportional numerals would undo that on the one element that cannot afford it. */
+  --font-serif: var(--font-newsreader);
+
   /* Type scale — see web/Design.md "Typography". Named so every screen draws from the same
      seven sizes instead of ad hoc bracketed values; `display`/`figure` are for the one hero
-     number per page (invariants.md #20's unexplained total; a balance headline amount).
-     Tailwind v4's font-size namespace is `--text-*` (with an optional paired
+     per page. Tailwind v4's font-size namespace is `--text-*` (with an optional paired
      `--text-*--line-height`, deliberately omitted here — call sites set `leading-none`
-     themselves for the two hero sizes, so there's exactly one place line-height is decided). */
-  --text-micro: 0.75rem;
-  --text-meta: 0.8125rem;
-  --text-body: 0.875rem;
-  --text-emphasis: 0.9375rem;
-  --text-h1: 1.5rem;
-  --text-figure: 1.75rem;
-  --text-display: 2.5rem;
+     themselves for the two hero sizes, so there's exactly one place line-height is decided).
+
+     Everything moved up one step in the 2026-09-19 pass: body was 14px, which is a dense-table
+     size, and this product is read a decision at a time rather than scanned a hundred rows at
+     a time. 16px body with more air is the readable-at-arm's-length bar the brief asked for. */
+  --text-micro: 0.8125rem;
+  --text-meta: 0.875rem;
+  --text-body: 1rem;
+  --text-emphasis: 1.0625rem;
+  --text-h1: 1.75rem;
+  --text-figure: 2rem;
+  --text-display: 2.75rem;
 }
 
 * {

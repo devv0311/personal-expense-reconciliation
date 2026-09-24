@@ -48,6 +48,18 @@ export const queryKeys = {
   categorySpend: (range: AnalyticsRange) => ["analytics", "spending", range] as const,
   monthlySpend: (range: AnalyticsRange) => ["analytics", "monthly", range] as const,
   ownSpend: (range: AnalyticsRange) => ["analytics", "own-spend", range] as const,
+  overview: (range?: AnalyticsRange) => ["overview", range ?? "default"] as const,
+  connection: (paymentId: string) => ["connection", paymentId] as const,
+  attention: (limit?: number) => ["attention", limit ?? "default"] as const,
+  confirmedLinks: (limit?: number) => ["links", limit ?? "default"] as const,
+  spendingSummary: (range?: AnalyticsRange, months?: number) =>
+    ["spending", range ?? "default", months ?? "default"] as const,
+  personBalance: (personId: string) => ["person-balance", personId] as const,
+  instalments: () => ["instalments"] as const,
+  anomalies: () => ["anomalies"] as const,
+  ruleProposals: () => ["rule-proposals"] as const,
+  allocationPreview: (expenseId: string, decision: string) =>
+    ["allocation-preview", expenseId, decision] as const,
   outstanding: () => ["analytics", "outstanding"] as const,
   unsettled: () => ["analytics", "unsettled"] as const,
   rules: () => ["rules"] as const,
@@ -145,6 +157,174 @@ export function useReviewQueue(filter: ReviewQueueFilter) {
   return useQuery({
     queryKey: queryKeys.reviewQueue(filter),
     queryFn: () => api.getReviewQueue(filter),
+  });
+}
+
+/**
+ * The four reads every recorded decision can change.
+ *
+ * Phase C's surfaces are compositions of the same ledger the specialist screens read, so a
+ * decision taken anywhere has to reach them: the event it was about (`connection`), the list of
+ * what is still waiting (`attention`), and the figures on the front page and the Spending and
+ * People screens (`overview`). Invalidated by prefix, so a decision never has to know which
+ * payment's connection or which period's overview it touched.
+ */
+function invalidateOutcomes(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: ["connection"] });
+  void queryClient.invalidateQueries({ queryKey: ["attention"] });
+  void queryClient.invalidateQueries({ queryKey: ["overview"] });
+  void queryClient.invalidateQueries({ queryKey: ["spending"] });
+  void queryClient.invalidateQueries({ queryKey: ["person-balance"] });
+  void queryClient.invalidateQueries({ queryKey: ["links"] });
+}
+
+/**
+ * What has already been connected.
+ *
+ * Invalidated by the same `invalidateOutcomes` every decision runs, because accepting an offer
+ * is exactly what moves a question out of the open list and into this one — a review screen
+ * whose two halves disagreed about one document would be worse than either half alone.
+ */
+export function useConfirmedLinks(limit?: number) {
+  return useQuery({
+    queryKey: queryKeys.confirmedLinks(limit),
+    queryFn: () => api.getConfirmedLinks(limit),
+  });
+}
+
+/** What you spent, in one read, so the total and the trend cannot disagree. */
+/** Instalment plans. A read: nothing this hook calls writes anything (ADR-0062). */
+export function useInstalments() {
+  return useQuery({ queryKey: queryKeys.instalments(), queryFn: api.getInstalments });
+}
+
+/** What is worth a second look. A read, and never a queue (ADR-0063). */
+export function useAnomalies() {
+  return useQuery({ queryKey: queryKeys.anomalies(), queryFn: api.getAnomalies });
+}
+
+/** Patterns a person could approve. A read; nothing it returns is active (ADR-0064). */
+export function useRuleProposals() {
+  return useQuery({ queryKey: queryKeys.ruleProposals(), queryFn: api.getRuleProposals });
+}
+
+/**
+ * Approves one pattern.
+ *
+ * Invalidates the proposals (the approved one stops being offered), the rules list, and every
+ * surface that shows a suggestion — an approved pattern changes what those lead with, and a
+ * stale card would show the old category beside the new rule's name.
+ */
+export function useApproveRuleProposal() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: api.approveRuleProposal,
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.ruleProposals() }),
+        client.invalidateQueries({ queryKey: ["rules"] }),
+        client.invalidateQueries({ queryKey: ["attention"] }),
+        client.invalidateQueries({ queryKey: ["connection"] }),
+      ]);
+    },
+  });
+}
+
+/** Declines a pattern. A write about an offer; nothing financial moves (ADR-0065). */
+export function useDismissRuleProposal() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: api.dismissRuleProposal,
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: queryKeys.ruleProposals() });
+    },
+  });
+}
+
+/** Brings a declined pattern back into the offer list. */
+export function useRestoreRuleProposal() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: api.restoreRuleProposal,
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: queryKeys.ruleProposals() });
+    },
+  });
+}
+
+export function useSpendingSummary(range?: AnalyticsRange, months?: number) {
+  return useQuery({
+    queryKey: queryKeys.spendingSummary(range, months),
+    queryFn: () => api.getSpendingSummary(range, months),
+  });
+}
+
+/**
+ * What a split would come to, asked of the ledger.
+ *
+ * A query rather than a mutation, because it writes nothing: keying it by the decision means
+ * an unchanged selection is answered from cache, and a changed one refetches without any
+ * effect setting state by hand.
+ */
+export function useAllocationPreview(
+  expenseId: string,
+  decision: api.AllocationDecisionInput | null,
+) {
+  const key = decision === null ? "" : JSON.stringify(decision);
+  return useQuery({
+    queryKey: queryKeys.allocationPreview(expenseId, key),
+    queryFn: () => api.previewAllocation(expenseId, decision as api.AllocationDecisionInput),
+    enabled: decision !== null,
+  });
+}
+
+/** Why one person's balance is what it is. */
+export function usePersonBalance(personId: string) {
+  return useQuery({
+    queryKey: queryKeys.personBalance(personId),
+    queryFn: () => api.getPersonBalance(personId),
+  });
+}
+
+/**
+ * Analysing the records on file.
+ *
+ * Invalidates everything a run can change — which is every outcome screen, because reading a
+ * record is what makes it countable at all. It approves nothing, so no balance moves; what
+ * moves is how much the product can say.
+ */
+export function useAnalyzeRecords() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.analyzeRecords,
+    onSuccess: () => {
+      invalidatePayments(queryClient);
+      void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+    },
+  });
+}
+
+/** One financial event: the movement, its records, its expense, and what it still needs. */
+export function useConnection(paymentId: string) {
+  return useQuery({
+    queryKey: queryKeys.connection(paymentId),
+    queryFn: () => api.getConnection(paymentId),
+  });
+}
+
+/** What needs a person, as questions. Same items and order as the review queue. */
+export function useAttention(options: { limit?: number } = {}) {
+  return useQuery({
+    queryKey: queryKeys.attention(options.limit),
+    queryFn: () => api.getAttention(options),
+  });
+}
+
+/** Everything the front page shows, in one read, so no two figures can disagree. */
+export function useOverview(range?: AnalyticsRange) {
+  return useQuery({
+    queryKey: queryKeys.overview(range),
+    queryFn: () => api.getOverview(range),
   });
 }
 
@@ -358,12 +538,14 @@ export function useRunReconciliation() {
   });
 }
 
+/** Agreeing with a suggested purpose, correcting it, or declining it — one mutation, one route. */
 export function useDecideInference() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: api.decideInference,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      invalidateOutcomes(queryClient);
       void queryClient.invalidateQueries({ queryKey: ["expenses"] });
     },
   });
@@ -376,6 +558,7 @@ export function useReclassifyPayment() {
     mutationFn: api.reclassifyPayment,
     onSuccess: (_result, input) => {
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      invalidateOutcomes(queryClient);
       void queryClient.invalidateQueries({ queryKey: queryKeys.payment(input.paymentId) });
       void queryClient.invalidateQueries({ queryKey: ["expenses"] });
     },
@@ -388,6 +571,7 @@ export function useDecidePaymentDuplicate() {
     mutationFn: api.decidePaymentDuplicate,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      invalidateOutcomes(queryClient);
     },
   });
 }
@@ -400,6 +584,7 @@ export function useEnrichEvidence() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.evidenceMatches(evidenceId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.evidenceObservation(evidenceId) });
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      invalidateOutcomes(queryClient);
     },
   });
 }
@@ -416,6 +601,7 @@ export function useDecideEvidenceMatch() {
         queryKey: queryKeys.evidence(result.candidate.evidenceId),
       });
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      invalidateOutcomes(queryClient);
       void queryClient.invalidateQueries({ queryKey: ["payment-context"] });
     },
   });
@@ -487,6 +673,7 @@ function invalidateExpense(
   void queryClient.invalidateQueries({ queryKey: ["expenses"] });
   void queryClient.invalidateQueries({ queryKey: ["balance"] });
   void queryClient.invalidateQueries({ queryKey: ["proof-pack"] });
+  invalidateOutcomes(queryClient);
 }
 
 /* ------------------------------------------------- the payment workspace and its writes */
@@ -531,6 +718,14 @@ export function useImportStatement() {
     mutationFn: api.importStatement,
     onSuccess: () => invalidatePayments(queryClient),
   });
+}
+
+/**
+ * Reading a chosen statement before it is imported. A mutation only because it carries a file
+ * body; it writes nothing, so nothing is invalidated.
+ */
+export function usePreviewStatement() {
+  return useMutation({ mutationFn: api.previewStatement });
 }
 
 export function useRecordManualPayment() {
@@ -699,6 +894,10 @@ function invalidatePayments(queryClient: ReturnType<typeof useQueryClient>): voi
   void queryClient.invalidateQueries({ queryKey: ["payments"] });
   void queryClient.invalidateQueries({ queryKey: ["payment"] });
   void queryClient.invalidateQueries({ queryKey: ["imports"] });
+  // Every payment write moves what the outcome screens report: a new movement is money not
+  // yet accounted for and a record nobody has read, and both of those are figures on the front
+  // page. Leaving them out meant importing a statement and being told nothing had changed.
+  invalidateOutcomes(queryClient);
 }
 
 /** A person's name is rendered from `people` on half the screens in the product. */
@@ -825,6 +1024,9 @@ export function useRecordSettlement() {
       void queryClient.invalidateQueries({ queryKey: ["settlements"] });
       void queryClient.invalidateQueries({ queryKey: ["balance"] });
       void queryClient.invalidateQueries({ queryKey: ["proof-pack"] });
+      // A repayment is the one write that moves a standing balance without touching an
+      // expense, so **People** and the front page have to be told — they read the balance, not
+      // the settlement.
       invalidatePayments(queryClient);
     },
   });
@@ -901,6 +1103,7 @@ export function useConfirmReceipt(receiptId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.receipt(receiptId) });
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      invalidateOutcomes(queryClient);
     },
   });
 }
@@ -913,6 +1116,7 @@ export function useCorrectReceipt(receiptId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.receipt(receiptId) });
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      invalidateOutcomes(queryClient);
     },
   });
 }
@@ -921,6 +1125,7 @@ export function useCorrectReceipt(receiptId: string) {
 function invalidateEvidence(queryClient: ReturnType<typeof useQueryClient>): void {
   void queryClient.invalidateQueries({ queryKey: ["evidence-library"] });
   void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+  invalidateOutcomes(queryClient);
 }
 
 /* ---------------------------------------------------------------------------- session */

@@ -25,6 +25,20 @@ describe("bringing evidence in by hand", () => {
     return api;
   }
 
+  it("opens the form a link from Add records asked for, and stays shut once dismissed", async () => {
+    mockApi({ "/api/evidence/notes": { evidenceId: "ev-new" } });
+    renderWithQuery(<EvidenceIntake requested="file" />);
+    const user = userEvent.setup();
+
+    // "Add a bill or receipt" has to reach the form, not a library with three buttons on it.
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Upload a document" })).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    // The query string is still in the address bar; the dialog must not come straight back.
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
   it("says a settlement claim moves no money, because it is evidence of a belief", async () => {
     const api = renderIntake();
     const user = userEvent.setup();

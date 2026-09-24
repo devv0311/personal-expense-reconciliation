@@ -14,7 +14,7 @@
  */
 
 import { parseMajorUnitsToPaise } from '../../domain/index.js';
-import type { Paise } from '../../domain/index.js';
+import type { Paise, PaymentReferenceType } from '../../domain/index.js';
 
 /** A header row plus the rows beneath it, each already split into cells. */
 export interface StatementTable {
@@ -294,4 +294,29 @@ export function parseStatementAmount(value: string): ParsedAmount | null {
 
   const magnitude = parseMajorUnitsToPaise(text);
   return { magnitude, negative };
+}
+
+/**
+ * What kind of identifier a reference is, from the prefixes a format declares.
+ *
+ * The value is tried first, exactly as a reference column would be, and the narration it came
+ * from only after it — because a PDF layout that lifts `301234567890` out of `UPICC/301234567890/…`
+ * leaves the prefix that says what it is behind in the narration. Anything unrecognised is the
+ * format's default rather than a guess; the reference itself is kept verbatim either way.
+ */
+export function referenceTypeFromPrefixes(
+  reference: string,
+  narration: string,
+  prefixes: ReadonlyArray<readonly [string, PaymentReferenceType]>,
+  defaultType: PaymentReferenceType | null,
+): PaymentReferenceType | null {
+  const upperReference = reference.toUpperCase();
+  const upperNarration = narration.toUpperCase();
+  for (const [prefix, type] of prefixes) {
+    if (upperReference.startsWith(prefix)) return type;
+  }
+  for (const [prefix, type] of prefixes) {
+    if (upperNarration.includes(prefix)) return type;
+  }
+  return defaultType;
 }

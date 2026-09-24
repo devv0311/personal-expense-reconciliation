@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { schema } from '../../src/db/index.js';
-import type { AccountId } from '../../src/domain/index.js';
+import type { AccountId, AccountType } from '../../src/domain/index.js';
 import {
   importStatement,
   ingestForwardedMessages,
@@ -30,6 +30,10 @@ const STATEMENTS = join(process.cwd(), 'fixtures', 'statements');
 let database: TestDatabase;
 let cast: Cast;
 let accountId: AccountId;
+/** Where a card statement goes: a bank account refuses one (ADR-0067). */
+let cardAccountId: AccountId;
+/** Where a UPI app's export goes when the person says it is their UPI account's. */
+let upiAccountId: AccountId;
 
 beforeAll(async () => {
   database = await createTestDatabase();
@@ -43,16 +47,30 @@ beforeEach(async () => {
   await database.truncateAll();
   cast = await seedCast(database.db);
   accountId = cast.account['account_hdfc_savings']!;
+  cardAccountId = cast.account['account_icici_credit_card']!;
+  upiAccountId = cast.account['account_hdfc_upi']!;
 });
 
-function importFixture(name: string, formatId = 'auto') {
+/**
+ * Imports one synthetic fixture the way the website does.
+ *
+ * A table — and a PDF read by a generic layout — does not say what kind of account it is from,
+ * so the import states one, as a person does in the dialog (ADR-0068). A PDF whose layout names
+ * its own kind is imported with `null`: the document answers for itself.
+ */
+function importFixture(
+  name: string,
+  into: AccountId = accountId,
+  statementKind: AccountType | null = 'bank',
+) {
   return importStatement(database.db, {
-    accountId,
+    accountId: into,
     sourceSystem: 'synthetic_bank',
-    formatId,
+    formatId: 'auto',
     bytes: new Uint8Array(readFileSync(join(STATEMENTS, name))),
     filename: name,
     fileReference: `fixtures/statements/${name}`,
+    ...(statementKind === null ? {} : { statementKind }),
     audit: AS_USER,
   });
 }
@@ -104,7 +122,8 @@ describe('importStatement', () => {
   });
 
   it('imports a card statement, where a credit is a refund rather than new spend', async () => {
-    const result = await importFixture('card-statement.csv');
+    // Onto the card, because the person says it is the card's: its columns do not say (ADR-0068).
+    const result = await importFixture('card-statement.csv', cardAccountId, 'card');
     if (result.outcome !== 'imported') throw new Error('expected an import');
     expect(result.formatId).toBe('card_statement_csv');
     const rows = await payments();
@@ -113,7 +132,7 @@ describe('importStatement', () => {
   });
 
   it('imports a UPI app export on the upi channel', async () => {
-    const result = await importFixture('upi-app-export.csv');
+    const result = await importFixture('upi-app-export.csv', upiAccountId, 'upi');
     if (result.outcome !== 'imported') throw new Error('expected an import');
     const rows = await payments();
     expect(rows).toHaveLength(3);
@@ -145,7 +164,7 @@ describe('importStatement', () => {
   it('imports an original IDFC FIRST credit-card PDF, wrapped narration and all', async () => {
     // The user outcome this work exists for: the file the issuer generated, selected as it
     // arrived, with no conversion, renaming or editing step in front of it.
-    const result = await importFixture('idfc-first-credit-card-statement.pdf');
+    const result = await importFixture('idfc-first-credit-card-statement.pdf', cardAccountId, null);
     if (result.outcome !== 'imported') throw new Error('expected an import');
     expect(result.formatId).toBe('idfc_first_credit_card_pdf');
 
@@ -168,7 +187,7 @@ describe('importStatement', () => {
   });
 
   it('says the count is what it matched, because a PDF has no columns to be sure from', async () => {
-    const result = await importFixture('idfc-first-credit-card-statement.pdf');
+    const result = await importFixture('idfc-first-credit-card-statement.pdf', cardAccountId, null);
     if (result.outcome !== 'imported') throw new Error('expected an import');
     expect(result.warnings.some((warning) => warning.message.includes('check the count'))).toBe(
       true,
@@ -203,8 +222,8 @@ describe('importStatement', () => {
   });
 
   it('recognises a re-imported IDFC PDF rather than counting the month twice', async () => {
-    const first = await importFixture('idfc-first-credit-card-statement.pdf');
-    const second = await importFixture('idfc-first-credit-card-statement.pdf');
+    const first = await importFixture('idfc-first-credit-card-statement.pdf', cardAccountId, null);
+    const second = await importFixture('idfc-first-credit-card-statement.pdf', cardAccountId, null);
     expect(second.outcome).toBe('already_imported');
     if (first.outcome !== 'imported' || second.outcome !== 'already_imported') return;
     expect(second.importBatchId).toBe(first.importBatchId);

@@ -17,16 +17,23 @@
  */
 
 import { paise } from '../../domain/index.js';
-import type { Paise, PaymentDirection, PaymentReferenceType } from '../../domain/index.js';
+import type {
+  AccountType,
+  Paise,
+  PaymentDirection,
+  PaymentReferenceType,
+} from '../../domain/index.js';
 
 import { PDF_LINE_PATTERNS, STATEMENT_FORMATS } from './formats.js';
 import type { PdfLinePattern, StatementFormat } from './formats.js';
+import { readColumnarPdfRows } from './pdf-columns.js';
 import { extractPdfTextWithPdfJs } from './pdf-text.js';
 import {
   detectDelimiter,
   findColumn,
   parseStatementAmount,
   parseStatementDate,
+  referenceTypeFromPrefixes,
   splitDelimitedLine,
   splitLines,
 } from './table.js';
@@ -53,15 +60,21 @@ export function listStatementFormats(): readonly StatementFormatDescriptor[] {
     headerHint: format.headerHint,
     carriesRunningBalance: format.balanceColumns.length > 0,
     detectable: format.detectable,
+    // A column map cannot tell a savings account's export from a card's: it does not claim one.
+    accountKind: null,
+    checksPrintedBalances: false,
   }));
   const pdf = PDF_LINE_PATTERNS.map((pattern) => ({
     id: pattern.id,
     label: pattern.label,
     container: 'pdf_text' as const,
     channel: pattern.channel,
-    headerHint: pattern.pattern.source,
-    carriesRunningBalance: pattern.pattern.source.includes('balance'),
+    headerHint: pattern.headerHint ?? pattern.pattern.source,
+    carriesRunningBalance:
+      pattern.columns !== undefined || pattern.pattern.source.includes('balance'),
     detectable: true,
+    accountKind: pattern.accountKind ?? null,
+    checksPrintedBalances: pattern.columns !== undefined,
   }));
   return [...tabular, ...pdf];
 }
@@ -145,10 +158,14 @@ export function parseStatement(input: ParseStatementInput): StatementParseResult
     table = tableFromDelimitedText(new TextDecoder('utf-8').decode(input.bytes));
   }
 
-  const format =
-    input.formatId === 'auto'
-      ? detectTabularFormat(table)
-      : (STATEMENT_FORMATS.find((candidate) => candidate.id === input.formatId) ?? null);
+  let format: StatementFormat | null;
+  if (input.formatId === 'auto') {
+    const detected = detectTabularFormat(table);
+    if (detected.kind === 'tied') return tiedLayoutsRefusal(table, detected.formats);
+    format = detected.kind === 'matched' ? detected.format : null;
+  } else {
+    format = STATEMENT_FORMATS.find((candidate) => candidate.id === input.formatId) ?? null;
+  }
 
   if (format === null) {
     return {
@@ -280,6 +297,19 @@ function looksLikeHeader(cells: readonly string[]): boolean {
 }
 
 /**
+ * What auto-detection made of a header: one layout, several that fit it equally well, or none.
+ *
+ * A tie is its own answer rather than "none", because the two call for different things from
+ * whoever holds the file. "No layout fits" means this build does not read it; "two layouts fit
+ * equally" means it reads it two different ways and will not pick one — and a refusal that
+ * reported the second as the first would send somebody looking for the wrong problem.
+ */
+type TabularDetection =
+  | { readonly kind: 'matched'; readonly format: StatementFormat }
+  | { readonly kind: 'tied'; readonly formats: readonly StatementFormat[] }
+  | { readonly kind: 'none' };
+
+/**
  * Picks the declared format whose columns this header best satisfies.
  *
  * A format only qualifies when every column it *needs* is present — the date, the description,
@@ -288,7 +318,7 @@ function looksLikeHeader(cells: readonly string[]): boolean {
  * fit equally well disagree about something and importing under either is a coin flip with
  * somebody's money.
  */
-function detectTabularFormat(table: StatementTable): StatementFormat | null {
+function detectTabularFormat(table: StatementTable): TabularDetection {
   const scored: { format: StatementFormat; score: number }[] = [];
 
   for (const format of STATEMENT_FORMATS) {
@@ -304,13 +334,42 @@ function detectTabularFormat(table: StatementTable): StatementFormat | null {
     if (columns.balance !== null) score += 1;
     scored.push({ format, score });
   }
-  if (scored.length === 0) return null;
+  if (scored.length === 0) return { kind: 'none' };
 
   scored.sort((a, b) => b.score - a.score);
   const best = scored[0]!;
-  const runnerUp = scored[1];
-  if (runnerUp !== undefined && runnerUp.score === best.score) return null;
-  return best.format;
+  const tied = scored.filter((candidate) => candidate.score === best.score);
+  if (tied.length > 1) return { kind: 'tied', formats: tied.map((candidate) => candidate.format) };
+  return { kind: 'matched', format: best.format };
+}
+
+/** Auto-detection's refusal of a header that several layouts fit equally well. */
+function tiedLayoutsRefusal(
+  table: StatementTable,
+  formats: readonly StatementFormat[],
+): StatementParseResult {
+  const header = table.header.join(', ');
+  return {
+    ok: false,
+    formatId: 'auto',
+    parserVersion: STATEMENT_PARSER_VERSION,
+    errors: [
+      {
+        lineNumber: 1,
+        column: null,
+        rawValue: header,
+        // Shown verbatim by the import screen, which cannot name a layout — so the way forward
+        // offered is one a person holding the file can take. A caller of the API can still name
+        // one with `formatId`; the labels here are the ones `GET /api/imports/formats` lists.
+        message:
+          "This file's columns fit more than one layout this build reads equally well — " +
+          `${formats.map((format) => format.label).join('; ')} — and those layouts read some ` +
+          'rows differently, for example which way money went, so none was chosen for you. ' +
+          `Nothing was imported. Its header reads: ${header}. Try another format of the same ` +
+          'statement.',
+      },
+    ],
+  };
 }
 
 interface ResolvedColumns {
@@ -457,7 +516,15 @@ function parseTable(table: StatementTable, format: StatementFormat): StatementPa
         'that is a statement about the file rather than about the account.',
     });
   }
-  return { ok: true, formatId: format.id, parserVersion: STATEMENT_PARSER_VERSION, rows, warnings };
+  return {
+    ok: true,
+    formatId: format.id,
+    parserVersion: STATEMENT_PARSER_VERSION,
+    // A column map cannot tell a savings account's export from a card's: it does not claim one.
+    accountKind: null,
+    rows,
+    warnings,
+  };
 }
 
 interface MoneyReading {
@@ -650,7 +717,10 @@ function parsePdfText(
   // and when an issuer's own layout has recognised the document there is nothing to weigh.
   let best: { pattern: PdfLinePattern; read: PdfReadResult } | null = null;
   for (const pattern of patterns) {
-    const read = readPdfRows(text.lines, pattern);
+    const read =
+      pattern.columns === undefined
+        ? readPdfRows(text.lines, pattern)
+        : fromColumnarRead(readColumnarPdfRows(text, { ...pattern, columns: pattern.columns }));
     if (best === null || beats(pattern, read, best)) best = { pattern, read };
   }
 
@@ -723,13 +793,108 @@ function parsePdfText(
   // rows plus errors — but the guard keeps the success branch honest about what it returns.
   if (best.read.rows.length === 0) return unrecognised();
 
+  const kinds = namedAccountKinds(documentText, best.pattern);
+  if (kinds.length > 1) {
+    // Choosing one would decide which account a statement's movements are written onto, and a
+    // document that contradicts itself about that is not a file this build can decide it for.
+    return {
+      ok: false,
+      formatId: best.pattern.id,
+      parserVersion: STATEMENT_PARSER_VERSION,
+      errors: [
+        {
+          lineNumber: 1,
+          column: null,
+          rawValue: null,
+          message:
+            `This document says it is the statement of ${kinds.map(kindWords).join(' and of ')}, ` +
+            'so which account it belongs to cannot be read from it. Nothing was imported.',
+        },
+      ],
+    };
+  }
+
   return {
     ok: true,
     formatId: best.pattern.id,
     parserVersion: STATEMENT_PARSER_VERSION,
+    accountKind: kinds[0] ?? null,
     rows: best.read.rows,
-    warnings: pdfWarnings(best.pattern, best.read, text.lines.length),
+    warnings:
+      best.pattern.columns === undefined
+        ? pdfWarnings(best.pattern, best.read, text.lines.length)
+        : columnarWarnings(best.read),
   };
+}
+
+/**
+ * The kinds of account this document says it is a statement of (ADR-0067).
+ *
+ * A layout that declares a kind and read the document settles it: it recognised the document by
+ * name before it read a line. Otherwise every layout that declares a kind is asked whether this
+ * is its document, because what a statement is does not change with the reader a caller chose —
+ * a card statement read by a generic line shape is still a card's, and must not become an
+ * unclaimed file that any account will accept. More than one answer means the document
+ * contradicts itself, which the caller refuses rather than resolves.
+ */
+function namedAccountKinds(documentText: string, reader: PdfLinePattern): readonly AccountType[] {
+  if (reader.accountKind !== undefined) return [reader.accountKind];
+  const kinds = new Set<AccountType>();
+  for (const pattern of PDF_LINE_PATTERNS) {
+    if (pattern.accountKind === undefined || pattern.documentPattern === undefined) continue;
+    if (pattern.documentPattern.test(documentText)) kinds.add(pattern.accountKind);
+  }
+  return [...kinds];
+}
+
+function kindWords(kind: AccountType): string {
+  switch (kind) {
+    case 'bank':
+      return 'a bank account';
+    case 'card':
+      return 'a card';
+    case 'upi':
+      return 'a UPI account';
+    case 'wallet':
+      return 'a wallet';
+    case 'cash':
+      return 'cash';
+  }
+}
+
+/** The columnar reader's result, in the shape layout selection compares. */
+function fromColumnarRead(read: ReturnType<typeof readColumnarPdfRows>): PdfReadResult {
+  return {
+    rows: read.rows,
+    rowErrors: read.rowErrors,
+    incompleteLineNumbers: [],
+    sectionFound: read.headerFound,
+    rowsOutOfBankOrder: read.rowsOutOfBankOrder,
+  };
+}
+
+/**
+ * What a columnar statement that *succeeded* still wants said.
+ *
+ * Not the line reader's count caveat: every row here was accounted for by the statement's own
+ * row numbers and printed balances, so there is nothing for a person to recount. What is worth
+ * saying is when the bank's balance column followed a different order within a day than the
+ * rows were printed in — each day still closed, and each row's direction was read from its
+ * column, but a person reading the running balances row by row would otherwise think one was
+ * printed backwards.
+ */
+function columnarWarnings(read: PdfReadResult): readonly StatementWarning[] {
+  const reordered = read.rowsOutOfBankOrder ?? 0;
+  if (reordered === 0) return [];
+  return [
+    {
+      lineNumber: null,
+      message:
+        `${String(reordered)} rows show a running balance in the bank's own order within the day ` +
+        'rather than the order they were printed in. Every day still closes exactly on the ' +
+        'balance the statement printed, and every row was read from the column it sits in.',
+    },
+  ];
 }
 
 /**
@@ -835,6 +1000,8 @@ interface PdfReadResult {
   readonly rowErrors: readonly StatementRowError[];
   /** `false` when a layout declares a section marker that the document never printed. */
   readonly sectionFound: boolean;
+  /** Columnar layouts only: rows whose balance followed the bank's own order within a day. */
+  readonly rowsOutOfBankOrder?: number;
 }
 
 /**
@@ -955,14 +1122,12 @@ function pdfReferenceTypeFor(
   narration: string,
   pattern: PdfLinePattern,
 ): PaymentReferenceType | null {
-  const upper = narration.toUpperCase();
-  for (const [prefix, type] of pattern.referencePrefixes) {
-    if (reference.toUpperCase().startsWith(prefix)) return type;
-  }
-  for (const [prefix, type] of pattern.referencePrefixes) {
-    if (upper.includes(prefix)) return type;
-  }
-  return pattern.defaultReferenceType;
+  return referenceTypeFromPrefixes(
+    reference,
+    narration,
+    pattern.referencePrefixes,
+    pattern.defaultReferenceType,
+  );
 }
 
 /**

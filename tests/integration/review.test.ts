@@ -34,7 +34,7 @@ import type { ProposedClassification, ReviewQueueItem } from '../../src/services
 import { createTestDatabase } from '../support/database.js';
 import type { TestDatabase } from '../support/database.js';
 import { scriptedClassificationTransport } from '../support/ai.js';
-import { AS_USER, addPayment, seedCast, seedMerchants } from '../support/ledger.js';
+import { AS_USER, addImportBatch, addPayment, seedCast, seedMerchants } from '../support/ledger.js';
 import type { Cast } from '../support/ledger.js';
 import { createMockSplitwisePort } from '../support/splitwise.js';
 
@@ -406,6 +406,8 @@ async function addLookalikePair(): Promise<{ earlier: PaymentId; later: PaymentI
     channel: 'upi',
     state: 'normalized',
   });
+  // The second capture of the same coffee — another channel's copy, thirty seconds off — arrives
+  // in a batch of its own. Two different lines of one batch would be two coffees.
   const later = await addPayment(database.db, cast, {
     accountId,
     amount: paise(45_000n),
@@ -414,6 +416,7 @@ async function addLookalikePair(): Promise<{ earlier: PaymentId; later: PaymentI
     rawDescription: 'UPI-COFFEE-SHOP',
     channel: 'upi',
     state: 'normalized',
+    importBatchId: await addImportBatch(database.db),
   });
   return { earlier, later };
 }
@@ -609,22 +612,55 @@ describe('listReviewQueue — possible duplicates', () => {
     expect(queue.counts.possible_duplicate).toBe(0);
   });
 
+  /** Two captures of one coffee that arrived separately, eleven days apart. */
+  async function addCapturesElevenDaysApart(): Promise<{ earlier: PaymentId; later: PaymentId }> {
+    const capture = async (occurredAt: Date, importBatchId: Cast['importBatchId']) =>
+      addPayment(database.db, cast, {
+        accountId,
+        amount: paise(45_000n),
+        direction: 'debit',
+        occurredAt,
+        rawDescription: 'UPI-COFFEE-SHOP',
+        channel: 'upi',
+        state: 'normalized',
+        importBatchId,
+      });
+    return {
+      earlier: await capture(new Date('2026-07-01T00:00:00Z'), cast.importBatchId),
+      later: await capture(new Date('2026-07-12T00:00:00Z'), await addImportBatch(database.db)),
+    };
+  }
+
   it('does not pair two payments a fortnight apart', async () => {
     await classifiedFixture();
+    await addCapturesElevenDaysApart();
 
-    // The fixture's two Blinkit rows share an amount and a direction but sit 11 days apart.
     const queue = await listReviewQueue(database.db);
     expect(queue.counts.possible_duplicate).toBe(0);
   });
 
-  it('pairs them once the window is widened, which is a caller’s choice', async () => {
+  it('pairs captures by calendar day, not by how many hours apart they are', async () => {
     await classifiedFixture();
+    const capture = async (occurredAt: Date) =>
+      addPayment(database.db, cast, {
+        accountId,
+        amount: paise(45_000n),
+        direction: 'debit',
+        occurredAt,
+        rawDescription: 'UPI-COFFEE-SHOP',
+        channel: 'upi',
+        state: 'normalized',
+        importBatchId: await addImportBatch(database.db),
+      });
+    const morning = await capture(new Date('2026-07-20T01:00:00Z'));
+    const evening = await capture(new Date('2026-07-20T20:00:00Z'));
+    // Four and a half hours after the evening capture, but on the next date: another day's
+    // coffee (ADR-0070), which the 24-hour window used to pair with both of the others.
+    await capture(new Date('2026-07-21T00:30:00Z'));
 
-    const queue = await listReviewQueue(database.db, {
-      duplicateWindowSeconds: 30 * 24 * 60 * 60,
-    });
+    const queue = await listReviewQueue(database.db, { kinds: ['possible_duplicate'] });
 
-    expect(queue.counts.possible_duplicate).toBe(1);
+    expect(queue.items.map((item) => item.id)).toEqual([possibleDuplicateKey(morning, evening)]);
   });
 });
 
@@ -1014,6 +1050,7 @@ describe('confirmPossibleDuplicate', () => {
       channel: 'upi',
       state: 'normalized',
     });
+    // Three captures of one coffee, each arriving on its own.
     const second = await addPayment(database.db, cast, {
       accountId,
       amount: paise(45_000n),
@@ -1022,6 +1059,7 @@ describe('confirmPossibleDuplicate', () => {
       rawDescription: 'UPI-COFFEE-SHOP',
       channel: 'upi',
       state: 'normalized',
+      importBatchId: await addImportBatch(database.db),
     });
     const third = await addPayment(database.db, cast, {
       accountId,
@@ -1031,6 +1069,7 @@ describe('confirmPossibleDuplicate', () => {
       rawDescription: 'UPI-COFFEE-SHOP',
       channel: 'upi',
       state: 'normalized',
+      importBatchId: await addImportBatch(database.db),
     });
     await confirmPossibleDuplicate(database.db, {
       paymentId: second,
@@ -1201,6 +1240,7 @@ describe('dismissPossibleDuplicate', () => {
 
   it('does not dismiss a different pair', async () => {
     const { earlier, later } = await addLookalikePair();
+    // A third capture, arriving on its own like the second.
     const third = await addPayment(database.db, cast, {
       accountId,
       amount: paise(45_000n),
@@ -1209,6 +1249,7 @@ describe('dismissPossibleDuplicate', () => {
       rawDescription: 'UPI-COFFEE-SHOP',
       channel: 'upi',
       state: 'normalized',
+      importBatchId: await addImportBatch(database.db),
     });
 
     await dismissPossibleDuplicate(database.db, {

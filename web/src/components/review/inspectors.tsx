@@ -27,7 +27,15 @@ import type {
   UnmatchedEvidenceItem,
 } from "@/lib/types";
 
-/** Dispatches on the kind. Each inspector explains its own item and offers only its own acts. */
+/**
+ * Dispatches on the kind. Each inspector explains its own item and offers only its own acts.
+ *
+ * The default branch is not dead code. `ReviewQueueItem` is a union this package declares from
+ * the API's shape, and the API can start sending a kind before this file learns it — so the
+ * honest behaviour for an unrecognised one is to say a decision is waiting and point at the
+ * unfiltered queue, never to render nothing. An item nobody can see is the one failure a review
+ * surface cannot have, and it is the failure a silently-exhaustive switch produces.
+ */
 export function ReviewItemInspector({ item }: { item: ReviewQueueItem }) {
   switch (item.kind) {
     case "classification_decision":
@@ -38,7 +46,36 @@ export function ReviewItemInspector({ item }: { item: ReviewQueueItem }) {
       return <RejectedInspector item={item} />;
     case "unmatched_evidence":
       return <UnmatchedEvidenceInspector item={item} />;
+    default:
+      return <UnrecognisedInspector item={item} />;
   }
+}
+
+/** A decision this screen cannot describe yet. Shown, never hidden. */
+function UnrecognisedInspector({ item }: { item: { kind: string; id: string } }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <NoteList
+        items={[
+          {
+            title: "Something here needs your judgement",
+            detail:
+              "This kind of decision is newer than this screen. Nothing about it has been " +
+              "decided or hidden — the full review queue can show it and act on it.",
+          },
+        ]}
+      />
+      <Facts>
+        <Fact label="Kind">{sentenceCase(item.kind)}</Fact>
+      </Facts>
+      <Link
+        href="/review"
+        className={`${buttonVariants({ variant: "outline", size: "sm" })} self-start`}
+      >
+        Open the full review queue
+      </Link>
+    </div>
+  );
 }
 
 /* ------------------------------------------------------------------ classification */
@@ -383,26 +420,26 @@ function UnmatchedEvidenceInspector({ item }: { item: UnmatchedEvidenceItem }) {
   return (
     <div className="flex flex-col gap-6">
       <Section
-        title="The document"
+        title="The record itself"
         headingId="inspector-evidence"
         actions={
           <Link
             href={`/evidence/${item.evidenceId}`}
             className="text-meta text-accent underline underline-offset-2"
           >
-            Open full inspector
+            Open the record
           </Link>
         }
       >
         <Facts>
-          <Fact label="Type">{evidenceTypeLabel(item.evidenceType)}</Fact>
-          <Fact label="Captured" mono>
+          <Fact label="Kind of record">{evidenceTypeLabel(item.evidenceType)}</Fact>
+          <Fact label="Dated" mono>
             {formatDateTime(item.capturedAt)}
           </Fact>
-          <Fact label="Ingested" mono>
+          <Fact label="Added" mono>
             {formatDateTime(item.ingestedAt)}
           </Fact>
-          <Fact label="Receipt total" mono>
+          <Fact label="Total on it" mono>
             {item.receiptTotal === null ? (
               <UnknownValue>Nothing has read this document yet</UnknownValue>
             ) : (
@@ -414,9 +451,9 @@ function UnmatchedEvidenceInspector({ item }: { item: UnmatchedEvidenceItem }) {
 
       {item.observation !== null && (
         <Section
-          title="What was read off it"
+          title="What could be read off it"
           headingId="inspector-observation"
-          description="A structured reading beside the immutable source, never replacing it."
+          description="What a reader could pick out. The record itself is kept exactly as it arrived and is never changed by this."
         >
           <EvidenceObservationFacts observation={item.observation} />
         </Section>
@@ -425,7 +462,7 @@ function UnmatchedEvidenceInspector({ item }: { item: UnmatchedEvidenceItem }) {
       <Section
         title="Payments this could be about"
         headingId="inspector-candidates"
-        description="Offers with their signal provenance. Accepting one is the only way to attach this document."
+        description="Each one is a payment that might be the one this record describes. Agreeing is the only way to attach it — nothing is attached on its own."
         actions={
           <Button
             variant="outline"
@@ -433,7 +470,7 @@ function UnmatchedEvidenceInspector({ item }: { item: UnmatchedEvidenceItem }) {
             disabled={enrich.isPending}
             onClick={() => enrich.mutate(item.evidenceId)}
           >
-            {enrich.isPending ? "Looking…" : "Find candidates"}
+            {enrich.isPending ? "Looking…" : "Look for matches"}
           </Button>
         }
       >
@@ -446,9 +483,9 @@ function UnmatchedEvidenceInspector({ item }: { item: UnmatchedEvidenceItem }) {
 
       {item.candidateMatches.length > 0 && (
         <Section
-          title="Payments whose amount matches this receipt exactly"
+          title="Payments for exactly this amount"
           headingId="inspector-exact"
-          description="An amount-only shortcut. It is not an offer to link, and it never was."
+          description="Matching amounts and nothing more. This is not a suggestion that they belong together."
         >
           <ul className="flex flex-col">
             {item.candidateMatches.map((candidate) => (

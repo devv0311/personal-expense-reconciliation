@@ -38,6 +38,7 @@ const ALL_TABLES = [
   'splitwise_settlements',
   'splitwise_expenses',
   'external_integrations',
+  'rule_proposal_dismissals',
   'rules',
   'ai_inferences',
   'expense_adjustment_items',

@@ -91,6 +91,7 @@ import {
   getStatementFormatsRoute,
   postBankCsvImport,
   postStatementImport,
+  postStatementPreview,
   postCashFlowDecision,
   postClassifyPayments,
   postManualPayment,
@@ -143,6 +144,20 @@ import {
   postPaymentDuplicateDecision,
   postPaymentReclassification,
 } from './review-routes.js';
+import { getAttentionRoute, getConnectionRoute } from './connection-routes.js';
+import {
+  getAnomaliesRoute,
+  getConfirmedLinksRoute,
+  getInstalmentsRoute,
+  getRuleProposalsRoute,
+  postRuleProposalDismissRoute,
+  postRuleProposalRestoreRoute,
+  postRuleProposalRoute,
+  getPersonBalanceRoute,
+  getSpendingSummaryRoute,
+  postAllocationPreview,
+  postAnalysis,
+} from './outcome-routes.js';
 import {
   getSessionRoute,
   postSetPassword,
@@ -157,6 +172,7 @@ import {
   getMonthlySpendRoute,
   getOccasionsRoute,
   getOutstandingRoute,
+  getOverviewRoute,
   getOwnSpendRoute,
   getResyncCandidatesRoute,
   getRulesRoute,
@@ -423,10 +439,58 @@ export const PAYMENT_CONTEXT_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/payments/:paymentId/context', handler: getPaymentContextRoute },
 ];
 
+/**
+ * One real-world financial event, and the decisions still waiting on a person (phase C).
+ *
+ * Both reads, both compositions of reads that already exist. `/api/connections/:paymentId` puts
+ * a movement beside the records that describe it, the expense it funded, who shared it and what
+ * it still needs; `/api/attention` is the review queue re-expressed as the questions those
+ * decisions actually are, plus the ones the queue has never carried. `/api/review` and
+ * `/api/payments/:paymentId/context` are unchanged and still reachable.
+ */
+export const CONNECTION_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/connections/:paymentId', handler: getConnectionRoute },
+  { method: 'GET', path: '/api/attention', handler: getAttentionRoute },
+];
+
+/**
+ * The journey's own surface (phases D and E): analyse, spend, owe, share.
+ *
+ * `POST /api/analysis` is the one action that replaced two buttons named after the pipeline.
+ * It writes proposals and never an approval, so it takes an actor and records an audit trail
+ * without ever being a decision itself. The other three are reads; the allocation preview is a
+ * `POST` only because it carries a decision in a body, and writes nothing at all.
+ *
+ * `/api/payments/normalize` and `/api/payments/classify` are unchanged and still registered —
+ * the specialist pipeline keeps working for audit and debugging.
+ */
+export const OUTCOME_ROUTES: readonly ApiRoute[] = [
+  { method: 'POST', path: '/api/analysis', handler: postAnalysis },
+  { method: 'GET', path: '/api/spending', handler: getSpendingSummaryRoute },
+  { method: 'GET', path: '/api/links', handler: getConfirmedLinksRoute },
+  // Both reads, both derived from immutable rows and neither writing anything (ADR-0062/0063).
+  { method: 'GET', path: '/api/instalments', handler: getInstalmentsRoute },
+  { method: 'GET', path: '/api/anomalies', handler: getAnomaliesRoute },
+  // A read, and the one write that turns a suggested pattern into a standing rule (ADR-0064).
+  { method: 'GET', path: '/api/rule-proposals', handler: getRuleProposalsRoute },
+  { method: 'POST', path: '/api/rule-proposals', handler: postRuleProposalRoute },
+  // Declining and un-declining a pattern. Both write a decision about an offer and nothing
+  // financial; the dismissal is closed rather than deleted, so the sequence stays legible.
+  { method: 'POST', path: '/api/rule-proposals/dismiss', handler: postRuleProposalDismissRoute },
+  { method: 'POST', path: '/api/rule-proposals/restore', handler: postRuleProposalRestoreRoute },
+  { method: 'GET', path: '/api/people/:personId/balance', handler: getPersonBalanceRoute },
+  {
+    method: 'POST',
+    path: '/api/expenses/:expenseId/allocation/preview',
+    handler: postAllocationPreview,
+  },
+];
+
 /** Statement import and its history (`docs/roadmap.md` phase 6; audit rows 01–02). */
 export const IMPORT_ROUTES: readonly ApiRoute[] = [
   { method: 'POST', path: '/api/imports/bank-csv', handler: postBankCsvImport },
   { method: 'POST', path: '/api/imports/statement', handler: postStatementImport },
+  { method: 'POST', path: '/api/imports/preview', handler: postStatementPreview },
   { method: 'GET', path: '/api/imports/formats', handler: getStatementFormatsRoute },
   { method: 'GET', path: '/api/imports', handler: getImportsRoute },
   { method: 'GET', path: '/api/imports/:importBatchId', handler: getImportBatchRoute },
@@ -511,6 +575,7 @@ export const ASK_ROUTES: readonly ApiRoute[] = [
 
 /** Aggregate reads over the ledger's own figures (audit rows 30 and 44). All reads. */
 export const ANALYTICS_ROUTES: readonly ApiRoute[] = [
+  { method: 'GET', path: '/api/overview', handler: getOverviewRoute },
   { method: 'GET', path: '/api/analytics/spending', handler: getSpendingRoute },
   { method: 'GET', path: '/api/analytics/monthly', handler: getMonthlySpendRoute },
   { method: 'GET', path: '/api/analytics/own-spend', handler: getOwnSpendRoute },
@@ -754,6 +819,8 @@ export const API_ROUTES: readonly ApiRoute[] = [
   ...ADJUSTMENT_ROUTES,
   ...SETTLEMENT_ROUTES,
   ...PAYMENT_CONTEXT_ROUTES,
+  ...CONNECTION_ROUTES,
+  ...OUTCOME_ROUTES,
   ...IMPORT_ROUTES,
   ...INTAKE_ROUTES,
   ...PAYMENT_WORKSPACE_ROUTES,

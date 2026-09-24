@@ -72,18 +72,10 @@ export interface ReviewQueueOptions {
   readonly kinds?: readonly ReviewItemKind[];
   /** Overrides `domain.DEFAULT_MATERIALITY_THRESHOLD_PAISE` when re-deriving the "why". */
   readonly materialityThreshold?: Paise;
-  /**
-   * How far apart two payments may be captured and still be offered as a possible duplicate.
-   *
-   * Defaults to 24 hours rather than `isPossibleDuplicate`'s own 60 seconds, for the reason
-   * the importer widened its window: a bank statement carries a *date*, so two captures of one
-   * transaction are the same calendar day rather than seconds apart, and a minute-wide window
-   * would surface nothing at all from that source.
-   */
-  readonly duplicateWindowSeconds?: number;
+  // There is deliberately no pairing window here any more. Which lookalikes are one movement is
+  // the owner's policy — the same calendar day, amount and name (ADR-0070) — and lives whole in
+  // `domain.isPossibleDuplicate`, not in an option a caller could widen past it.
 }
-
-const DEFAULT_DUPLICATE_WINDOW_SECONDS = 24 * 60 * 60;
 
 /* ----------------------------------------------------------------------------- items */
 
@@ -256,7 +248,7 @@ export async function listReviewQueue(
     items.push(...(await classificationItems(exec, options)));
   }
   if (wanted('possible_duplicate')) {
-    items.push(...(await possibleDuplicateItems(exec, options)));
+    items.push(...(await possibleDuplicateItems(exec)));
   }
   if (wanted('rejected_classification')) {
     items.push(...(await rejectedClassificationItems(exec)));
@@ -374,15 +366,11 @@ function parseStoredProposal(proposedOutput: unknown): TransactionClassification
   }
 }
 
-async function possibleDuplicateItems(
-  exec: Executor,
-  options: ReviewQueueOptions,
-): Promise<PossibleDuplicateItem[]> {
+async function possibleDuplicateItems(exec: Executor): Promise<PossibleDuplicateItem[]> {
   const candidates = await listPossibleDuplicateCandidates(exec);
   if (candidates.length < 2) return [];
 
   const dismissed = new Set(await listDismissedDuplicatePairs(exec));
-  const windowSeconds = options.duplicateWindowSeconds ?? DEFAULT_DUPLICATE_WINDOW_SECONDS;
   const items: PossibleDuplicateItem[] = [];
 
   // The candidate set is already narrowed to payments sharing an amount and a direction with
@@ -392,7 +380,11 @@ async function possibleDuplicateItems(
     for (let j = i + 1; j < candidates.length; j += 1) {
       const earlier = candidates[i]!;
       const later = candidates[j]!;
-      if (!isPossibleDuplicate(asCandidate(earlier), asCandidate(later), { windowSeconds })) {
+      // The whole row goes to the rule, so it reads every field it needs — the day, the words
+      // that name the payee and tell a tax component from a purchase, the reference and its
+      // kind, and the batch that tells two lines of one statement from one movement captured
+      // twice — with no copy of the mapping here to drift.
+      if (!isPossibleDuplicate(earlier, later)) {
         continue;
       }
       const id = possibleDuplicateKey(earlier.id, later.id);
@@ -410,15 +402,6 @@ async function possibleDuplicateItems(
     }
   }
   return items;
-}
-
-function asCandidate(payment: PaymentRow) {
-  return {
-    amount: payment.amount,
-    occurredAt: payment.occurredAt,
-    externalReference: payment.externalReference,
-    direction: payment.direction,
-  };
 }
 
 /**

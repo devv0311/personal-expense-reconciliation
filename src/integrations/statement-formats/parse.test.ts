@@ -218,6 +218,54 @@ describe('refusals', () => {
     expect(result.errors[0]?.message).toContain('No supported format matched');
   });
 
+  it('says a file whose columns fit two layouts fits two, rather than that none matched', () => {
+    // Under the generic layout a "D" is a deposit; under the debit/credit-marker layout it is a
+    // debit. A tie is refused because the two disagree about which way money went — and saying
+    // "no format matched" about it would send somebody looking for the wrong problem.
+    const result = parseStatement({
+      bytes: new TextEncoder().encode(
+        'date,description,amount_inr,type,reference\n2026-08-01,SYNTHETIC ENTRY,100.00,D,REF1\n',
+      ),
+      formatId: 'auto',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const message = result.errors[0]?.message ?? '';
+    expect(message).toContain('more than one layout');
+    // Named in the words the import screen uses for a layout, never by internal id.
+    expect(message).toContain('Generic export');
+    expect(message).toContain('debit/credit marker');
+    expect(message).not.toContain('generic_bank_csv');
+    expect(message).toContain('Nothing was imported');
+    expect(message).not.toContain('No supported format matched');
+  });
+
+  it('reads the same file once its layout is named explicitly', () => {
+    const result = parseStatement({
+      bytes: new TextEncoder().encode(
+        'date,description,amount_inr,type,reference\n2026-08-01,SYNTHETIC ENTRY,100.00,D,REF1\n',
+      ),
+      formatId: 'card_statement_csv',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rows[0]?.direction).toBe('debit');
+  });
+
+  it('never claims a kind of account for a table, whichever layout read it', () => {
+    for (const name of [
+      'hdfc-bank-statement.csv',
+      'card-statement.csv',
+      'upi-app-export.csv',
+      'sbi-bank-statement.xlsx',
+    ]) {
+      const result = parseFixture(name);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.accountKind).toBeNull();
+    }
+  });
+
   it('names an unknown format id rather than falling back to a default', () => {
     const result = parseStatement({
       bytes: new TextEncoder().encode('date,description,amount_inr,type,reference\n'),
@@ -338,5 +386,17 @@ describe('listStatementFormats', () => {
     // The one format detection may not choose on its own is still offered explicitly.
     const signed = listStatementFormats().find((format) => format.id === 'signed_amount_csv');
     expect(signed?.detectable).toBe(false);
+  });
+
+  it('names a table layout by how its columns are arranged, never by a kind of account', () => {
+    // A column map is matched by its headings alone, and a card's export and a bank account's can
+    // share them. The layout's name is what a person reads first about their file, so it must not
+    // say what the columns cannot (ADR-0068).
+    const tabular = listStatementFormats().filter((format) => format.container !== 'pdf_text');
+    expect(tabular.length).toBeGreaterThan(0);
+    for (const format of tabular) {
+      expect(format.accountKind).toBeNull();
+      expect(format.label).not.toMatch(/\b(card|account|savings|current)\b/i);
+    }
   });
 });

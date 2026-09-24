@@ -57,6 +57,8 @@ import {
  */
 export function RulesAdmin() {
   const [adding, setAdding] = useState(false);
+  /** The rule whose on/off switch is being confirmed (ADR-0065). */
+  const [toggling, setToggling] = useState<RuleView | null>(null);
   const [running, setRunning] = useState<"preview" | "apply" | null>(null);
   const [result, setResult] = useState<ApplyRulesResult | null>(null);
   const [dryRunResult, setDryRunResult] = useState<ApplyRulesResult | null>(null);
@@ -124,7 +126,10 @@ export function RulesAdmin() {
                   variant="link"
                   size="sm"
                   disabled={update.isPending}
-                  onClick={() => update.mutate({ ruleId: rule.id, active: !rule.active })}
+                  onClick={() => {
+                    update.reset();
+                    setToggling(rule);
+                  }}
                 >
                   {rule.active ? "Deactivate" : "Activate"}
                 </Button>
@@ -133,6 +138,50 @@ export function RulesAdmin() {
           ))}
         </ul>
       )}
+
+      {/*
+        Switching a rule off is consequential enough to state, and the thing people hesitate over
+        is what happens to payments it already touched. The answer is nothing, and saying so is
+        the whole point of the dialog (ADR-0065).
+      */}
+      <DecisionDialog
+        open={toggling !== null}
+        onClose={() => {
+          setToggling(null);
+          update.reset();
+        }}
+        title={toggling?.active === true ? "Switch this rule off" : "Switch this rule back on"}
+        consequence={
+          toggling === null ? null : toggling.active ? (
+            <>
+              <strong>{toggling.name}</strong> stops suggesting anything from now on.
+              <br />
+              <br />
+              Payments it already matched keep the categories you confirmed, and the rule stays on
+              file with what it did. Nothing about any payment, expense or past decision changes.
+              You can switch it back on here.
+            </>
+          ) : (
+            <>
+              <strong>{toggling.name}</strong> starts suggesting again for payments whose wording it
+              matches. It still only suggests — you are asked about every payment before anything is
+              filed.
+            </>
+          )
+        }
+        confirmLabel={toggling?.active === true ? "Switch it off" : "Switch it on"}
+        confirmVariant="outline"
+        reasonLabel="Note for the record"
+        pending={update.isPending}
+        error={update.error}
+        onConfirm={() => {
+          if (toggling === null) return;
+          update.mutate(
+            { ruleId: toggling.id, active: !toggling.active },
+            { onSuccess: () => setToggling(null) },
+          );
+        }}
+      />
 
       {dryRunResult !== null && <RunOutcome result={dryRunResult} preview />}
       {result !== null && <RunOutcome result={result} preview={false} />}

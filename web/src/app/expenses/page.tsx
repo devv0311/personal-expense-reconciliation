@@ -241,11 +241,11 @@ export default function ExpensesPage() {
                   <div className="flex items-baseline justify-between gap-3">
                     <Link
                       href={`/expenses/${expense.id}`}
-                      className="text-accent underline underline-offset-2"
+                      className="min-w-0 text-accent underline underline-offset-2 wrap-anywhere"
                     >
                       {expense.description ?? "Untitled expense"}
                     </Link>
-                    <span className="text-right">
+                    <span className="shrink-0 text-right">
                       <Money paise={expense.netAmount} />
                       {hasAdjustment && (
                         <span className="ml-1 text-micro text-ink-faint">

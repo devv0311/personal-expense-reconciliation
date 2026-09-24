@@ -96,6 +96,8 @@ describe('POST /api/imports/statement', () => {
       formatId: 'auto',
       contentBase64: bytes.toString('base64'),
       filename: 'sbi-bank-statement.xlsx',
+      // A workbook does not say what kind of account it is from; the person does (ADR-0068).
+      statementKind: 'bank',
     });
     expect(response.status).toBe(201);
     const body = (await response.json()) as { formatId: string; paymentIds: string[] };
@@ -110,6 +112,7 @@ describe('POST /api/imports/statement', () => {
       sourceSystem: 'synthetic_bank',
       formatId: 'auto',
       fileContent: readFileSync(join(STATEMENTS, 'axis-bank-statement.csv'), 'utf8'),
+      statementKind: 'bank',
     });
     expect(response.status).toBe(201);
     const body = (await response.json()) as { formatId: string };
@@ -123,7 +126,7 @@ describe('POST /api/imports/statement', () => {
     const bytes = readFileSync(join(STATEMENTS, 'idfc-first-credit-card-statement.pdf'));
     const response = await post('/api/imports/statement', {
       actor: 'user',
-      accountId: cast.account['account_hdfc_savings'],
+      accountId: cast.account['account_icici_credit_card'],
       sourceSystem: 'idfc_first_card',
       formatId: 'auto',
       contentBase64: bytes.toString('base64'),
@@ -180,7 +183,7 @@ describe('POST /api/imports/statement', () => {
     const send = () =>
       post('/api/imports/statement', {
         actor: 'user',
-        accountId: cast.account['account_hdfc_savings'],
+        accountId: cast.account['account_icici_credit_card'],
         sourceSystem: 'idfc_first_card',
         formatId: 'auto',
         contentBase64: bytes.toString('base64'),

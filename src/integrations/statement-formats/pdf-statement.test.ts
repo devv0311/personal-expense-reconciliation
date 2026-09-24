@@ -21,9 +21,15 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { buildTextPdf } from '../../../tests/support/synthetic-pdf.js';
+import { bankStatementPdf } from '../../../tests/support/synthetic-bank-statement.js';
+import {
+  buildPlacedTextPdf,
+  buildTextPdf,
+  placedTextWidth,
+} from '../../../tests/support/synthetic-pdf.js';
 
-import { parseStatementFile } from './parse.js';
+import { PDF_LINE_PATTERNS } from './formats.js';
+import { listStatementFormats, parseStatementFile } from './parse.js';
 import { extractPdfTextWithPdfJs } from './pdf-text.js';
 
 const FIXTURES = join(process.cwd(), 'fixtures', 'statements');
@@ -58,6 +64,32 @@ async function parsePdf(bytes: Uint8Array, formatId = 'auto') {
 }
 
 describe('extractPdfTextWithPdfJs', () => {
+  it("keeps where each line's words sat, one layout entry per extracted line", async () => {
+    // A columnar statement is read by position — the amount under "Withdrawal" is a debit — so
+    // the reader has to know where every word was drawn, not only what it said.
+    const result = await extractPdfTextWithPdfJs(
+      buildPlacedTextPdf([
+        [
+          [
+            { text: 'FIRST', x: 40 },
+            { text: 'COLUMN', x: 200 },
+          ],
+          [{ text: '12.50', x: 300, align: 'right' }],
+        ],
+        [[{ text: 'NEXT PAGE', x: 60 }]],
+      ]),
+    );
+    expect(result.lines).toEqual(['FIRST COLUMN', '12.50', 'NEXT PAGE']);
+    expect(result.layout).toHaveLength(result.lines.length);
+    expect(result.layout?.map((line) => line.page)).toEqual([1, 1, 2]);
+    // Blank spacing items are dropped; every word keeps its own left and right edge.
+    expect(result.layout?.[0]?.items.map((item) => item.text)).toEqual(['FIRST', 'COLUMN']);
+    expect(result.layout?.[0]?.items[1]?.left).toBeCloseTo(200, 1);
+    expect(result.layout?.[1]?.items[0]?.right).toBeCloseTo(300, 1);
+    expect(result.layout?.[1]?.items[0]?.left).toBeCloseTo(300 - placedTextWidth('12.50'), 1);
+    expect(result.layout?.[2]?.items.map((item) => item.text)).toEqual(['NEXT', 'PAGE']);
+  });
+
   it('lifts a generated PDF text layer, in document order, across pages', async () => {
     const result = await extractPdfTextWithPdfJs(
       buildTextPdf(['first line', 'second line', 'third line', 'fourth line'], { pages: 2 }),
@@ -576,5 +608,88 @@ describe('parseStatementFile', () => {
       filename: 'notes.csv',
     });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('the kind of account a statement says it belongs to (ADR-0067)', () => {
+  it('reads a credit-card statement as a card’s, as the format list says', async () => {
+    const result = await parsePdf(fixture('idfc-first-credit-card-statement.pdf'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.accountKind).toBe('card');
+    expect(
+      listStatementFormats().find((format) => format.id === 'idfc_first_credit_card_pdf')
+        ?.accountKind,
+    ).toBe('card');
+  });
+
+  it('reads a bank-account statement as a bank account’s', async () => {
+    const result = await parsePdf(bankStatementPdf());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.formatId).toBe('idfc_first_bank_account_pdf');
+    expect(result.accountKind).toBe('bank');
+  });
+
+  it('keeps the kind the document names when a layout that cannot tell is asked to read it', async () => {
+    // The generic marker layout reads this card statement's lines when a caller names it, but it
+    // declares no kind of account. What the statement is does not change with the reader.
+    const result = await parsePdf(
+      fixture('idfc-first-credit-card-statement.pdf'),
+      'pdf_amount_with_marker',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.formatId).toBe('pdf_amount_with_marker');
+    expect(result.accountKind).toBe('card');
+  });
+
+  it('claims no kind for a statement that does not name one', async () => {
+    const otherIssuer = await parsePdf(
+      buildTextPdf([
+        'SOME OTHER BANK — CARD STATEMENT',
+        'YOUR TRANSACTIONS',
+        '02/07/2026 A PURCHASE 100.00 DR',
+      ]),
+    );
+    const generic = await parsePdf(fixture('bank-statement.pdf'));
+    const table = await parseStatementFile({
+      bytes: fixture('card-statement.csv'),
+      formatId: 'auto',
+      filename: 'card-statement.csv',
+    });
+
+    for (const result of [otherIssuer, generic, table]) {
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      // A column map or a generic line shape cannot tell a card's export from a bank's.
+      expect(result.accountKind).toBeNull();
+    }
+  });
+
+  it('lets a layout claim a kind only if it can recognise its own document', () => {
+    // Otherwise a document read by another layout could not be asked whether it is this one's.
+    for (const pattern of PDF_LINE_PATTERNS) {
+      if (pattern.accountKind === undefined) continue;
+      expect(pattern.documentPattern, pattern.id).toBeDefined();
+    }
+  });
+
+  it('refuses a document that names two kinds of account, rather than choosing one', async () => {
+    const result = await parsePdf(
+      buildTextPdf([
+        ...IDFC_PREAMBLE,
+        'Savings Account Transactions',
+        '# Date Description Chq/Ref. No. Withdrawal (Dr.) Deposit (Cr.) Balance',
+        '02/07/2026 A PURCHASE 100.00 DR',
+      ]),
+      'pdf_amount_with_marker',
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[0]?.message).toMatch(/card/);
+    expect(result.errors[0]?.message).toMatch(/bank account/);
+    // The refusal is about the document, and quotes none of it.
+    expect(result.errors[0]?.message).not.toContain('A PURCHASE');
   });
 });

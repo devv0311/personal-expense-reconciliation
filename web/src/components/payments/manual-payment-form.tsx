@@ -31,8 +31,17 @@ import {
  * The amount is a magnitude and the direction is a separate field, deliberately: money that
  * went out is not "negative money", and a signed field is how a credit gets typed as a debit.
  */
-export function ManualPaymentForm() {
-  const [open, setOpen] = useState(false);
+export function ManualPaymentForm({
+  openOnArrival = false,
+  triggerLabel,
+}: {
+  openOnArrival?: boolean;
+  triggerLabel?: string;
+}) {
+  // A link from **Add records** asks for this form to be open on arrival. Closing it has to
+  // stick, so the request is a default rather than a condition the dialog is bound to.
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? openOnArrival;
   const [accountId, setAccountId] = useState("");
   const [amount, setAmount] = useState("");
   const [direction, setDirection] = useState<PaymentDirection>("debit");
@@ -49,14 +58,14 @@ export function ManualPaymentForm() {
   const ready = accountId !== "" && description.trim().length > 0 && parsed.ok;
 
   const close = () => {
-    setOpen(false);
+    setChosen(false);
     record.reset();
   };
 
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)}>
-        Record a movement
+      <Button variant="outline" onClick={() => setChosen(true)}>
+        {triggerLabel ?? "Record a movement"}
       </Button>
 
       <DecisionDialog

@@ -2,15 +2,23 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
+import { PreparedResult } from "@/components/analysis/prepared-result";
 import { DecisionDialog } from "@/components/review/decision-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { formatDateTime } from "@/lib/dates";
-import { useAccounts, useImportStatement } from "@/lib/queries";
-import type { MultiFormatImportResult, StatementImportWarning } from "@/lib/types";
+import { Money } from "@/components/money";
+import { formatDate, formatDateTime } from "@/lib/dates";
+import { useAccounts, useImportStatement, usePreviewStatement } from "@/lib/queries";
+import type {
+  AccountSummary,
+  AccountType,
+  MultiFormatImportResult,
+  StatementImportWarning,
+  StatementPreview,
+} from "@/lib/types";
 
 /**
  * The largest statement this screen will read into memory and post as base64.
@@ -29,6 +37,12 @@ interface SelectedStatement {
 }
 
 /**
+ * The kinds of account a statement can be from — the same five an account can be in Setup — in
+ * the order a person holding one thinks of them.
+ */
+const STATEMENT_KINDS: readonly AccountType[] = ["bank", "card", "upi", "wallet", "cash"];
+
+/**
  * Loads one statement in its original CSV, XLSX or PDF container.
  *
  * Two properties are worth stating on the screen rather than only in the parser, because both
@@ -44,10 +58,18 @@ interface SelectedStatement {
  * leaves this machine. Bytes matter: decoding a PDF or XLSX as text would corrupt it before the
  * statement parser saw it.
  */
-export function ImportStatementForm() {
+export function ImportStatementForm({ triggerLabel }: { triggerLabel?: string } = {}) {
   const [open, setOpen] = useState(false);
   const [accountId, setAccountId] = useState("");
   const [sourceSystem, setSourceSystem] = useState("");
+  /**
+   * What the person says the chosen file is a statement of, when the file does not say (ADR-0068).
+   *
+   * Never filled in on anybody's behalf — not from the accounts on file, not from the file's
+   * columns, and not from an account chosen earlier — and cleared with every new file, because
+   * it was an answer about the last one.
+   */
+  const [statedKind, setStatedKind] = useState<AccountType | "">("");
   const [statement, setStatement] = useState<SelectedStatement | null>(null);
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
@@ -66,9 +88,54 @@ export function ImportStatementForm() {
 
   const accounts = useAccounts();
   const runImport = useImportStatement();
+  /**
+   * What the chosen file is, read by the API before anything is imported (ADR-0066).
+   *
+   * Advisory, deliberately: if the reading cannot be reached, the import still reads the file
+   * itself and refuses it whole if it cannot, and the API still refuses a statement written onto
+   * the wrong kind of account. What the reading adds is the chance to say so *before* anybody
+   * chooses an account or confirms anything. A file it read and could not import is the one
+   * case where it blocks, because importing it would only be refused.
+   */
+  const preview = usePreviewStatement();
+  // An API that predates the reading answers with something that is not one (or with a 404,
+  // which is `isError`); either way the reading is simply unavailable, never "unreadable".
+  const readingUnavailable = preview.isError || (preview.isSuccess && !isReading(preview.data));
+  const statementReading = preview.isSuccess && isReading(preview.data) ? preview.data : null;
+  /** The kind of account the document itself says it belongs to — a PDF that names it. */
+  const documentKind =
+    statementReading !== null && statementReading.readable ? statementReading.accountKind : null;
+  /**
+   * Whether the person has to say what the file is a statement of (ADR-0068).
+   *
+   * Asked once the file has been read and says nothing about it — every CSV and spreadsheet, whose
+   * columns look the same for a bank account and a card — and when the file could not be read
+   * ahead of the import, because nothing then says what it is. Not asked while the file is being
+   * read, nor about a file that cannot be imported at all.
+   */
+  const asksKind =
+    statement !== null &&
+    !preview.isPending &&
+    documentKind === null &&
+    (readingUnavailable || statementReading?.readable === true);
+  /** The kind the account is checked against: the document's own word, else the person's. */
+  const accountKind = documentKind ?? (asksKind && statedKind !== "" ? statedKind : null);
+  const kindNamedBy = documentKind !== null ? "document" : "person";
+  const chosenAccount = (accounts.data ?? []).find((account) => account.id === accountId);
+  // Until the question is answered nothing fits, so an account picked first is never enough.
+  const accountFits =
+    accountKind === null
+      ? !asksKind
+      : chosenAccount !== undefined && chosenAccount.type === accountKind;
+  const readingAllows = readingUnavailable || statementReading?.readable === true;
 
   const ready =
-    accountId !== "" && sourceSystem.trim().length > 0 && statement !== null && !reading;
+    accountId !== "" &&
+    sourceSystem.trim().length > 0 &&
+    statement !== null &&
+    !reading &&
+    readingAllows &&
+    accountFits;
 
   const clearFileInput = () => {
     if (fileInput.current !== null) fileInput.current.value = "";
@@ -84,24 +151,26 @@ export function ImportStatementForm() {
     // A read that resolves after the dialog closed must not stage a file behind it.
     beginRead();
     setReading(false);
+    setStatedKind("");
     setOpen(false);
     runImport.reset();
+    preview.reset();
   };
 
   return (
     <div className="flex flex-col gap-4">
-      <Button onClick={() => setOpen(true)}>Import a statement</Button>
+      <Button onClick={() => setOpen(true)}>{triggerLabel ?? "Import a statement"}</Button>
 
       <DecisionDialog
         open={open}
         onClose={close}
-        title="Import a bank statement"
+        title="Import a statement"
         consequence={
           <>
-            This writes every row in the file into the ledger as a payment, in one batch. Rows that
-            restate a movement already on record are still written — the ledger did receive that
-            evidence twice — but are marked <strong>ignored</strong> so no total counts them twice.
-            If any row cannot be read, nothing at all is imported.
+            This writes every row in the file into the ledger as a payment on the account chosen
+            below, in one batch. Rows that restate a movement already on record are still written —
+            the ledger did receive that evidence twice — but are marked <strong>ignored</strong> so
+            no total counts them twice. If any row cannot be read, nothing at all is imported.
           </>
         }
         confirmLabel="Import it"
@@ -118,6 +187,8 @@ export function ImportStatementForm() {
               contentBase64: statement.contentBase64,
               filename: statement.name,
               fileReference: statement.name,
+              // Only the person's own answer, and only when the file did not say for itself.
+              statementKind: documentKind === null && statedKind !== "" ? statedKind : undefined,
             },
             {
               onSuccess: (imported) => {
@@ -131,42 +202,6 @@ export function ImportStatementForm() {
         }}
       >
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="import-account">Account this statement belongs to</Label>
-            <Select
-              id="import-account"
-              value={accountId}
-              onChange={(event) => setAccountId(event.target.value)}
-            >
-              <option value="">Choose an account…</option>
-              {(accounts.data ?? []).map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                  {account.last4 === null ? "" : ` ••${account.last4}`}
-                </option>
-              ))}
-            </Select>
-            {accounts.isSuccess && accounts.data.length === 0 && (
-              <p className="text-meta text-attention">
-                No accounts exist yet. Add one in <Link href="/setup">Setup</Link> first.
-              </p>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="import-source">Where it came from</Label>
-            <Input
-              id="import-source"
-              value={sourceSystem}
-              placeholder="hdfc-savings-export"
-              onChange={(event) => setSourceSystem(event.target.value)}
-            />
-            <p className="text-micro text-ink-faint">
-              Recorded against every row as its source system, so a movement can always be traced
-              back to the file it arrived in.
-            </p>
-          </div>
-
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="import-file">Statement file</Label>
             <input
@@ -182,6 +217,7 @@ export function ImportStatementForm() {
 
                 setReadError(null);
                 setStatement(null);
+                setStatedKind("");
                 if (file === undefined) {
                   setReading(false);
                   return;
@@ -193,10 +229,12 @@ export function ImportStatementForm() {
                   return;
                 }
                 setReading(true);
+                preview.reset();
                 readFileAsBase64(file)
                   .then((contentBase64) => {
                     if (!isCurrent()) return;
                     setStatement({ name: file.name, contentBase64 });
+                    preview.mutate({ contentBase64, filename: file.name });
                   })
                   .catch(() => {
                     if (!isCurrent()) return;
@@ -224,6 +262,81 @@ export function ImportStatementForm() {
                 {readError}
               </p>
             )}
+          </div>
+
+          <StatementReading
+            pending={preview.isPending}
+            failed={readingUnavailable}
+            reading={statementReading}
+          />
+
+          {asksKind && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="import-kind">What kind of account is this statement from?</Label>
+              <Select
+                id="import-kind"
+                value={statedKind}
+                onChange={(event) => setStatedKind(event.target.value as AccountType | "")}
+              >
+                <option value="">Choose one…</option>
+                {STATEMENT_KINDS.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {capitalise(accountWords(kind))}
+                  </option>
+                ))}
+              </Select>
+              <p className="max-w-prose text-micro text-ink-faint">
+                {readingUnavailable
+                  ? "The file couldn’t be read ahead of the import, so nothing yet says whose statement it is. The answer is yours, and the import is checked against it."
+                  : "The file doesn’t say — a CSV or spreadsheet looks the same whether it came from a bank account or a card — so the answer is yours. Only an account of that kind can take it."}
+              </p>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="import-account">Account this statement belongs to</Label>
+            <Select
+              id="import-account"
+              value={accountId}
+              onChange={(event) => setAccountId(event.target.value)}
+            >
+              <option value="">Choose an account…</option>
+              {(accounts.data ?? []).map((account) => {
+                const fits = accountKind === null || account.type === accountKind;
+                return (
+                  <option key={account.id} value={account.id} disabled={!fits}>
+                    {account.name}
+                    {account.last4 === null ? "" : ` ••${account.last4}`}
+                    {fits ? "" : ` — not ${accountWords(accountKind)}`}
+                  </option>
+                );
+              })}
+            </Select>
+            {accounts.isSuccess && accounts.data.length === 0 && accountKind === null && (
+              <p className="text-meta text-attention">
+                No accounts exist yet. Add one in <SetupLink /> first.
+              </p>
+            )}
+            <AccountBoundary
+              accountKind={accountKind}
+              namedBy={kindNamedBy}
+              accounts={accounts.isSuccess ? accounts.data : null}
+              chosen={chosenAccount}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="import-source">Where it came from</Label>
+            <Input
+              id="import-source"
+              value={sourceSystem}
+              placeholder="hdfc-savings-export"
+              onChange={(event) => setSourceSystem(event.target.value)}
+            />
+            <p className="text-micro text-ink-faint">
+              Recorded against every row as its source system, so a movement can always be traced
+              back to the file it arrived in.
+            </p>
           </div>
         </div>
       </DecisionDialog>
@@ -260,8 +373,8 @@ function ImportOutcome({ result }: { result: MultiFormatImportResult }) {
         <AlertTitle>This file was already imported</AlertTitle>
         <AlertDescription>
           <p>
-            Its contents match a batch loaded on {formatDateTime(result.previouslyImportedAt)}.
-            Nothing was written a second time.
+            Its contents match one you added on {formatDateTime(result.previouslyImportedAt)}.
+            Nothing was written a second time, so nothing has changed.
           </p>
         </AlertDescription>
       </Alert>
@@ -276,9 +389,12 @@ function ImportOutcome({ result }: { result: MultiFormatImportResult }) {
           Imported {imported} row{imported === 1 ? "" : "s"}
         </AlertTitle>
         <AlertDescription>
-          <p>
-            Read with the <span className="font-mono">{result.formatId}</span> layout.
-          </p>
+          {/*
+            The layout the reader matched is provenance — recorded on the batch, and shown in
+            the import history under More. It was the first thing this alert said, on a screen
+            a person reaches while holding a bank statement, and it is not something they can
+            do anything with.
+          */}
           <p>
             {result.duplicates.length === 0
               ? "No row restated a movement already on record."
@@ -286,13 +402,25 @@ function ImportOutcome({ result }: { result: MultiFormatImportResult }) {
                   result.duplicates.length === 1 ? "" : "s"
                 } restated a movement already on record. Each was kept for provenance and marked ignored, so nothing is counted twice.`}
           </p>
-          <p>
-            They are unexplained until something explains them. Run normalization next, then
-            classification.
-          </p>
         </AlertDescription>
       </Alert>
       <ImportWarnings warnings={result.warnings} />
+      {/*
+        What used to be a button here, then a button on another screen before that. The import
+        reads its own rows in the same request, so this reports what came of it rather than
+        asking for permission to look.
+      */}
+      {/*
+        Read defensively: an API that has not been restarted since this shipped sends no
+        `prepared` at all, and a blank screen after a successful import — the one moment a
+        person most needs to be told what happened — is a worse failure than saying nothing
+        about the reading.
+      */}
+      {result.prepared === undefined ? null : result.prepared.ran ? (
+        <PreparedResult result={result.prepared.analysis} />
+      ) : (
+        <p className="max-w-prose text-meta text-ink-muted">{result.prepared.reason}</p>
+      )}
     </div>
   );
 }
@@ -319,5 +447,228 @@ function ImportWarnings({ warnings }: { warnings: readonly StatementImportWarnin
         </ul>
       </AlertDescription>
     </Alert>
+  );
+}
+
+/**
+ * What the chosen file is and what is on it, before anybody decides where it goes.
+ *
+ * Every figure is one the API computed; this only formats them. A file the reader could not
+ * read says so here, with the reader's own reason, because an import would only be refused.
+ */
+function StatementReading({
+  pending,
+  failed,
+  reading,
+}: {
+  pending: boolean;
+  failed: boolean;
+  reading: StatementPreview | null;
+}) {
+  if (pending) {
+    return (
+      <p className="text-meta text-ink-faint" role="status">
+        Reading the statement…
+      </p>
+    );
+  }
+  if (failed) {
+    return (
+      <p className="max-w-prose text-meta text-ink-muted" role="status">
+        The file could not be read ahead of the import. Importing it reads it again, and writes
+        nothing unless every row can be read.
+      </p>
+    );
+  }
+  if (reading === null) return null;
+
+  if (!reading.readable) {
+    const [first, ...rest] = reading.problems;
+    return (
+      <Alert variant="destructive" role="alert">
+        <AlertTitle>This file can’t be imported</AlertTitle>
+        <AlertDescription>
+          {first !== undefined && <p>{first.message}</p>}
+          {rest.length > 0 && (
+            <p className="mt-1 text-meta">
+              {rest.length === 1 ? "One more line" : `${rest.length} more lines`} could not be read
+              either. Nothing has been written.
+            </p>
+          )}
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-sm border border-rule p-4" role="status">
+      <p className="text-body font-medium text-ink">{reading.formatLabel}</p>
+      <p className="text-meta text-ink-muted">
+        {reading.movementCount === 1 ? "1 movement" : `${reading.movementCount} movements`}
+        {reading.firstDate !== null && reading.lastDate !== null && (
+          <>
+            , {formatDate(reading.firstDate)} to {formatDate(reading.lastDate)}
+          </>
+        )}
+      </p>
+      <dl className="flex flex-wrap gap-x-8 gap-y-1 text-meta">
+        <div className="flex items-baseline gap-2">
+          <dt className="text-ink-faint">Money out ({reading.debitCount})</dt>
+          <dd>
+            <Money paise={reading.totalDebits} tone="debit" />
+          </dd>
+        </div>
+        <div className="flex items-baseline gap-2">
+          <dt className="text-ink-faint">Money in ({reading.creditCount})</dt>
+          <dd>
+            <Money paise={reading.totalCredits} tone="credit" />
+          </dd>
+        </div>
+        {reading.closingBalance !== null && (
+          <div className="flex items-baseline gap-2">
+            <dt className="text-ink-faint">Closing balance printed</dt>
+            <dd>
+              <Money paise={reading.closingBalance} />
+            </dd>
+          </div>
+        )}
+      </dl>
+      {reading.checksPrintedBalances && (
+        <p className="text-meta text-ink-muted">
+          Every movement is accounted for by the balances the statement printed, day by day.
+        </p>
+      )}
+      {reading.warnings.length > 0 && (
+        <ul className="flex list-disc flex-col gap-1 pl-4 text-meta text-ink-muted">
+          {reading.warnings.map((warning) => (
+            <li key={warning}>{warning}</li>
+          ))}
+        </ul>
+      )}
+      {reading.alreadyImported !== null && (
+        <p className="text-meta text-attention">
+          This exact file is already on record, from an import on{" "}
+          {formatDateTime(reading.alreadyImported.importedAt)}. Importing it again changes nothing.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The line this screen will not cross for anybody: which account a statement belongs to.
+ *
+ * A statement can only go into an account of the kind it is a statement of — a bank statement
+ * into a bank account, a card statement into a card. The kind is the document's own word when it
+ * names one (ADR-0066, ADR-0067) and the person's answer when it does not (ADR-0068), and each
+ * sentence says which, so nobody is told a CSV "is" something it never said. When no account of
+ * that kind exists, adding one is the person's own decision — its name is theirs to choose — so
+ * this says so and points at Setup rather than inventing one.
+ */
+function AccountBoundary({
+  accountKind,
+  namedBy,
+  accounts,
+  chosen,
+}: {
+  accountKind: string | null;
+  namedBy: "document" | "person";
+  accounts: readonly AccountSummary[] | null;
+  chosen: AccountSummary | undefined;
+}) {
+  if (accountKind === null || accounts === null) return null;
+  const fitting = accounts.filter((account) => account.type === accountKind);
+  if (fitting.length === 0) {
+    const what =
+      namedBy === "document"
+        ? `This is ${statementWords(accountKind)}`
+        : `You said this is ${statementWords(accountKind)}`;
+    return (
+      <p className="max-w-prose text-meta text-attention" role="alert">
+        {what}, and there is no {accountNoun(accountKind)} on record yet. Add the{" "}
+        {accountNoun(accountKind)} in <SetupLink /> — its name is yours to choose — then come back
+        to import this file. Nothing has been imported.
+      </p>
+    );
+  }
+  if (chosen !== undefined && chosen.type !== accountKind) {
+    const whose =
+      namedBy === "document"
+        ? `This statement belongs to ${accountWords(accountKind)}`
+        : `You said this statement is from ${accountWords(accountKind)}`;
+    return (
+      <p className="max-w-prose text-meta text-attention" role="alert">
+        {whose}, and the account chosen is {accountWords(chosen.type)}. Choose{" "}
+        {accountWords(accountKind)} instead.
+      </p>
+    );
+  }
+  return null;
+}
+
+/**
+ * The way to the one place an account is added. Underlined at rest (`Design.md`, "Links"): it
+ * sits inside a sentence of the same colour, where colour alone could not mark it as a link.
+ */
+function SetupLink() {
+  return (
+    <Link href="/setup" className="text-accent underline underline-offset-2">
+      Setup
+    </Link>
+  );
+}
+
+function accountWords(type: string | null): string {
+  switch (type) {
+    case "bank":
+      return "a bank account";
+    case "card":
+      return "a card";
+    case "upi":
+      return "a UPI account";
+    case "wallet":
+      return "a wallet";
+    case "cash":
+      return "cash";
+    default:
+      return "another kind of account";
+  }
+}
+
+function accountNoun(type: string): string {
+  // "There is no cash on record yet" reads as a remark about money rather than an account.
+  if (type === "cash") return "cash account";
+  return accountWords(type).replace(/^an? /, "");
+}
+
+/** "a bank account" → "A bank account", for an option standing on its own. */
+function capitalise(words: string): string {
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** What the file is, in the words a person would use for it: "a card statement". */
+function statementWords(type: string): string {
+  switch (type) {
+    case "bank":
+      return "a bank account statement";
+    case "card":
+      return "a card statement";
+    case "upi":
+      return "a UPI account statement";
+    case "wallet":
+      return "a wallet statement";
+    case "cash":
+      return "a cash statement";
+    default:
+      return "a statement of another kind of account";
+  }
+}
+
+/** Whether a reading response is one this screen understands. */
+function isReading(value: unknown): value is StatementPreview {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { readonly readable?: unknown }).readable === "boolean"
   );
 }

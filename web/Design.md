@@ -26,6 +26,26 @@ decision record and the audit that motivated it.
 > The bar these are held to: axe reports **0 violations** on every screen in desktop light,
 > desktop dark and mobile, and that is a gate, not an aspiration.
 
+> **2026-09-19 update — the calm pass.** The palette, the type scale and the control sizes were
+> all replaced, and one long-standing rule was rewritten rather than broken. The surface is now a
+> **warm, paper-like editorial** one: bone `#f6f4ee` under charcoal `#282b28`, one restrained moss
+> accent `#355445`, fine `#dcddd4` rules. Four things changed together, and each is recorded under
+> its own heading below:
+>
+> - **The neutrals are warm.** "Never mix warm and cool neutrals" now reads _never mix warm and
+>   cool neutrals; this family is warm_. A cool grey here is as wrong as a warm one was before.
+> - **A third typeface exists, for headings only.** `Newsreader` sets page and section titles and
+>   the one decision on the front page. It never touches a figure — money stays in
+>   `IBM_Plex_Mono`, because tabular digits are the one thing a serif would undo.
+> - **Body text is 16px** and the whole scale moved up a step. 14px is a dense-table size; this
+>   product is read one decision at a time.
+> - **The primary control is 48px**, the secondary 40px.
+>
+> The bar did not move: every text token still clears AA on both surfaces in both themes, and
+> `src/design-system.test.tsx` now recomputes that for **all seven** text tokens rather than only
+> the faintest one. axe still reports 0 violations, re-verified across Home, Needs attention,
+> Records, Add records, Spending and People in desktop light, desktop dark and mobile.
+
 ## Visual direction
 
 This is a personal financial reconciliation ledger, not a SaaS dashboard, not a consumer app,
@@ -62,19 +82,19 @@ token.
 
 | Token             | Light     | Dark      | Meaning — the only thing it may be used for                                                                                                                                                                                                                                                                                                                              |
 | ----------------- | --------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `paper`           | `#fafaf7` | `#14161c` | Page background.                                                                                                                                                                                                                                                                                                                                                         |
-| `panel`           | `#ffffff` | `#1b1e26` | A raised surface (the grouped person-picker panel).                                                                                                                                                                                                                                                                                                                      |
-| `ink`             | `#1b2333` | `#eceef4` | Primary text.                                                                                                                                                                                                                                                                                                                                                            |
-| `ink-muted`       | `#5b6478` | `#a2a9bb` | Secondary text, labels, table headers.                                                                                                                                                                                                                                                                                                                                   |
+| `paper`           | `#f6f4ee` | `#191a16` | Page background.                                                                                                                                                                                                                                                                                                                                                         |
+| `panel`           | `#fffdf7` | `#21221d` | A raised surface (the grouped person-picker panel).                                                                                                                                                                                                                                                                                                                      |
+| `ink`             | `#282b28` | `#ece9df` | Primary text.                                                                                                                                                                                                                                                                                                                                                            |
+| `ink-muted`       | `#575c55` | `#a8a79a` | Secondary text, labels, table headers.                                                                                                                                                                                                                                                                                                                                   |
 | `ink-faint`       | `#6b7387` | `#828a9e` | Tertiary text (a subtraction sign, an annotation under a figure). **Darkened in phase 21**: the old `#8b93a3`/`#6b7284` pair was ~2.95:1 on `paper` and ~3.76:1 in dark, below AA for the 12px text it is used for. Both values now clear 4.5:1 on `paper` **and** on `panel`, in both themes, and `src/design-system.test.tsx` recomputes that rather than trusting it. |
-| `rule`            | `#d8d9cd` | `#2c2f3a` | Hairline borders/dividers.                                                                                                                                                                                                                                                                                                                                               |
-| `rule-strong`     | `#b7bba8` | `#3c4050` | A heavier rule (the double rule above a hero total; a hover border).                                                                                                                                                                                                                                                                                                     |
-| `debit`/`-bg`     | `#a33b2e` | `#e08678` | A figure that is **bad news in this context** — unexplained money, a rejected expense. Never used for a system error alone (pair with `attention` for that).                                                                                                                                                                                                             |
-| `credit`/`-bg`    | `#2f6e4f` | `#7fbb9c` | A figure that is **good news in this context** — fully explained, settled, confirmed. Never derived from a raw sign; always an explicit caller judgment (`money.tsx`'s own comment).                                                                                                                                                                                     |
-| `accent`/`-bg`    | `#2a3a6b` | `#8b9be0` | The one interactive/brand color — links, the primary button, the active nav tab, in-flow states moving toward completion.                                                                                                                                                                                                                                                |
-| `accent-ink`      | `#ffffff` | `#14161c` | Text set **on top of** `accent` (a filled button's label). Never `text-white`/`text-black` literally — dark mode inverts which one is readable.                                                                                                                                                                                                                          |
-| `attention`/`-bg` | `#8a5a17` | `#d3a24e` | A finding that needs a look but is not wrong: a Splitwise mismatch, an expense sitting in `review_required`. Distinct from `debit` on purpose — see "Color carries exactly one meaning" below.                                                                                                                                                                           |
-| `focus-ring`      | `#2a3a6b` | `#8b9be0` | The universal `:focus-visible` outline. Same value as `accent`, kept as its own token because the two could diverge later.                                                                                                                                                                                                                                               |
+| `rule`            | `#dcddd4` | `#33342d` | Hairline borders/dividers.                                                                                                                                                                                                                                                                                                                                               |
+| `rule-strong`     | `#b6b9aa` | `#4a4c42` | A heavier rule (the double rule above a hero total; a hover border).                                                                                                                                                                                                                                                                                                     |
+| `debit`/`-bg`     | `#9a3324` | `#e69484` | A figure that is **bad news in this context** — unexplained money, a rejected expense. Never used for a system error alone (pair with `attention` for that).                                                                                                                                                                                                             |
+| `credit`/`-bg`    | `#1b7268` | `#45a096` | A figure that is **good news in this context** — fully explained, settled, confirmed. Never derived from a raw sign; always an explicit caller judgment (`money.tsx`'s own comment).                                                                                                                                                                                     |
+| `accent`/`-bg`    | `#355445` | `#a3c2a8` | The one interactive/brand color — links, the primary button, the active nav tab, in-flow states moving toward completion.                                                                                                                                                                                                                                                |
+| `accent-ink`      | `#f6f4ee` | `#191a16` | Text set **on top of** `accent` (a filled button's label). Never `text-white`/`text-black` literally — dark mode inverts which one is readable.                                                                                                                                                                                                                          |
+| `attention`/`-bg` | `#7d5310` | `#d8ab5e` | A finding that needs a look but is not wrong: a Splitwise mismatch, an expense sitting in `review_required`. Distinct from `debit` on purpose — see "Color carries exactly one meaning" below.                                                                                                                                                                           |
+| `focus-ring`      | `#355445` | `#a3c2a8` | The universal `:focus-visible` outline. Same value as `accent`, kept as its own token because the two could diverge later.                                                                                                                                                                                                                                               |
 
 **Color carries exactly one meaning, and only one token owns each meaning.** Before phase 15's
 design pass, a Splitwise discrepancy and an API network failure were both rendered in `debit`
@@ -86,15 +106,30 @@ for `debit` to mean "notice this," stop and ask whether it's actually "this is w
 "this is a finding" (attention), or "this is progressing normally" (accent) — `expense-state-tag.tsx`
 and `discrepancy-list.tsx` are the worked examples.
 
-**Never mix warm and cool neutrals.** `ink`/`rule`/`paper` are all one cool-neutral family; don't
-introduce a warm gray anywhere.
+**Never mix warm and cool neutrals — and this family is warm.** `ink`/`rule`/`paper` are one
+warm-neutral family; a cool grey introduced into it now looks as wrong as a warm one did before
+the 2026-09-19 pass. The rule did not weaken, it changed sides.
+
+**`accent` and `credit` are the closest pair in the system, and three things keep them apart.**
+Moss and teal are adjacent, which the old indigo/green pair was not. They never appear as the
+same kind of thing — `accent` is interactive chrome (a link, a button fill, an active underline),
+`credit` is a figure set in tabular mono; they are separated in hue and in luminance; and
+**direction is always stated in words beside the figure** ("owes you" / "you owe"), so colour
+reinforces a fact it never has to carry alone. If you are about to render a `credit` amount with
+no word saying which way it runs, that is the thing to fix, not the colour.
 
 ### Typography
 
 **IBM Plex Sans** (UI/prose, weights 400/500/600 loaded — never use `font-bold`, it isn't loaded
-and would synthesize) + **IBM Plex Mono** (every number, id, and state tag). The mono face is
-load-bearing: money needs tabular-aligned digits to scan as a ledger, not decorative flavor.
-Keep both; don't introduce a second typeface.
+and would synthesize) + **IBM Plex Mono** (every number, id, and state tag) + **Newsreader**
+(headings only, added 2026-09-19). The mono face is load-bearing: money needs tabular-aligned
+digits to scan as a ledger, not decorative flavor.
+
+**The serif is for headings a person reads as prose, and for nothing else** — a page title, a
+section title, the one decision on the front page. It never sets a figure, a state word, an id or
+a table cell: a proportional-numeral serif on a column of money would undo the single thing the
+mono face exists for. That is the whole of the exception to "don't introduce another typeface";
+a fourth face still needs a reason this good.
 
 The type scale is seven named sizes, each a Tailwind theme token (`--text-*` in `globals.css`,
 generating `text-micro` … `text-display` utilities directly — **not** `--font-size-*`, which
@@ -104,13 +139,13 @@ in a new component is a sign the scale is missing something, not a reason to byp
 
 | Token           | Size | Used for                                                         |
 | --------------- | ---- | ---------------------------------------------------------------- |
-| `text-micro`    | 12px | A secondary annotation under a figure (`of ₹1,800.00`).          |
-| `text-meta`     | 13px | Form labels, table column headers, timestamps.                   |
-| `text-body`     | 14px | Default body and table-cell text.                                |
-| `text-emphasis` | 15px | A section heading (`From these expenses`, `Splitwise`).          |
-| `text-h1`       | 24px | The one page-title heading per screen.                           |
-| `text-figure`   | 28px | A secondary hero — the balance headline amount.                  |
-| `text-display`  | 40px | **The** hero — `ledgerUnexplainedTotal` on a reconciliation run. |
+| `text-micro`    | 13px | A secondary annotation under a figure (`of ₹1,800.00`).          |
+| `text-meta`     | 14px | Form labels, table column headers, timestamps.                   |
+| `text-body`     | 16px | Default body and table-cell text.                                |
+| `text-emphasis` | 17px | A section heading (`From these expenses`, `Splitwise`).          |
+| `text-h1`       | 28px | The one page-title heading per screen.                           |
+| `text-figure`   | 32px | A secondary hero — the balance headline amount.                  |
+| `text-display`  | 44px | **The** hero — `ledgerUnexplainedTotal` on a reconciliation run. |
 
 **One hero number per screen.** A reconciliation run detail exists to answer one question ("how
 much is still unexplained?"); a balance screen exists to answer one question ("who owes whom,
@@ -260,7 +295,11 @@ completes a decision** (ADR-0049).
 than imported from a package) without taking shadcn's CLI or Radix as a dependency — see ADR-0043
 for why that pattern was worth adopting without the specific tools "shadcn" usually implies.
 
-- **`Button`** — `default` (filled `accent`, the one primary action per screen), `outline`,
+- **`Button`** — `default` is **48px tall** (`h-12`) and `sm` is **40px** (`h-10`), set in the
+  2026-09-19 pass: these buttons complete decisions about money and should not feel like a
+  toolbar, while an inline secondary action ("Show these 12") stays smaller so a row of them does
+  not shout over the primary one. `Input`, `Select` and the reason `Textarea` match at 48px.
+  Variants: `default` (filled `accent`, the one primary action per screen), `outline`,
   `ghost`, `link` (an inline recovery action like "Try again," styled to inherit the surrounding
   text color via an explicit `className` override rather than the variant's own `text-accent`,
   so a retry link inside a red `ErrorBlock` doesn't turn indigo).
@@ -313,6 +352,15 @@ One breakpoint is used throughout: `sm` (640px). Below it:
   whole tablet range.
 - The nav and the two-person-picker panel wrap via `flex-wrap`/`flex-col sm:flex-row` rather than
   a bespoke mobile layout.
+- **A narration is usually one unbroken token.** A bank prints a UPI line as
+  `UPI/DR/…/PAYEE/…/note` with no space to break at, so a row that sets a narration or a reference
+  beside a figure gives the text `min-w-0 wrap-anywhere` and the figure `shrink-0`. Without both, a
+  flex or grid item's default `min-width: auto` is the whole token, the figure is pushed off the
+  phone and the page pans sideways. Found at 375px on `/payments`, `/expenses`, `/review` and — in
+  `ResponsiveTable`'s stacked list — `/ask`, against a real statement in September 2026;
+  `src/design-system.test.tsx` asserts the classes. Glanceable summaries (Home, Spending) truncate
+  instead; lists a person picks a payment out of wrap, because a truncated narration hides exactly
+  the part that tells two payments apart.
 
 ### Accessibility expectations
 

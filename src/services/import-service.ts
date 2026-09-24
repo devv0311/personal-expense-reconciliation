@@ -23,10 +23,12 @@ import {
   duplicateOfReason,
   isDeterministicDuplicate,
   parseDuplicateOfReason,
+  sumPaise,
   SUPPORTED_CURRENCY,
 } from '../domain/index.js';
 import type {
   AccountId,
+  AccountType,
   ImportBatchId,
   Paise,
   PaymentChannel,
@@ -37,6 +39,7 @@ import type {
 import {
   findImportBatchByContentHash,
   findPaymentsByExternalReference,
+  getAccountById,
   insertImportBatch,
   insertPayment,
   updatePaymentState,
@@ -70,6 +73,16 @@ const BANK_STATEMENT_CHANNEL = 'bank_transfer';
 
 /** Names the import event in `import_batches.source_channel`. */
 const BANK_STATEMENT_SOURCE_CHANNEL = 'bank_statement_csv';
+
+/**
+ * The kind of account this adapter's statements belong to (ADR-0068).
+ *
+ * Not read from the file — its five columns would fit a card's export as well as a bank
+ * account's. It is what a caller says by choosing this adapter at all: the route is
+ * `POST /api/imports/bank-csv`, and every row it writes is recorded as a bank transfer
+ * (`BANK_STATEMENT_CHANNEL`). So it writes onto a bank account and refuses any other kind.
+ */
+const BANK_STATEMENT_ACCOUNT_KIND: AccountType = 'bank';
 
 /** Bumped when a change to the parser would alter how the same file is read. */
 export const BANK_STATEMENT_PARSER_VERSION = 'bank-csv@1';
@@ -158,6 +171,8 @@ export async function importBankStatementCsv(
     throw new ImportSourceError(parsed.errors);
   }
 
+  const named: NamedStatementKind = { kind: BANK_STATEMENT_ACCOUNT_KIND, by: 'importer' };
+  await assertAccountKindMatches(db, input.accountId, named);
   return writeImportedRows(db, {
     accountId: input.accountId,
     sourceSystem: input.sourceSystem,
@@ -167,6 +182,7 @@ export async function importBankStatementCsv(
     contentHash: sha256Bytes(bytes),
     fileReference: input.fileReference ?? null,
     rows: parsed.rows,
+    statement: named,
     audit: input.audit,
   });
 }
@@ -221,6 +237,16 @@ export interface ImportStatementInput {
   readonly bytes: Uint8Array;
   readonly filename?: string | null;
   readonly fileReference?: string | null;
+  /**
+   * The kind of account the person importing says this is a statement of (ADR-0068).
+   *
+   * **Required whenever the document does not say so itself** — every CSV and XLSX, and a PDF
+   * read by a layout that cannot tell — because a card's export and a bank account's can carry
+   * the same columns, and the columns are never read as a kind. When the document does name its
+   * kind, a stated one must agree with it. Either way, the kind in force must be the chosen
+   * account's type. Every one of those refusals happens before anything is written.
+   */
+  readonly statementKind?: AccountType | null;
   readonly audit: AuditMeta;
 }
 
@@ -281,6 +307,8 @@ export async function importStatement(
   }
 
   const format = listStatementFormats().find((candidate) => candidate.id === parsed.formatId);
+  const named = statementKindInForce(parsed.accountKind, input.statementKind ?? null);
+  await assertAccountKindMatches(db, input.accountId, named);
   const written = await writeImportedRows(db, {
     accountId: input.accountId,
     sourceSystem: input.sourceSystem,
@@ -290,6 +318,7 @@ export async function importStatement(
     contentHash: sha256Bytes(input.bytes),
     fileReference: input.fileReference ?? null,
     rows: parsed.rows,
+    statement: named,
     audit: input.audit,
   });
 
@@ -303,6 +332,210 @@ export async function importStatement(
     warnings: parsed.warnings,
     closingBalanceCandidate:
       lastBalance === undefined || lastBalance === null ? null : lastBalance.toString(),
+  };
+}
+
+/**
+ * The kind of account a statement belongs to, and who said so (ADR-0068).
+ *
+ * `document` when the statement names it itself (a layout recognised it by name, ADR-0066/0067);
+ * `importer` when the person importing it said so, because the document does not. Recorded on
+ * every payment's audit event, so "why is this movement on this account?" has an answer.
+ */
+interface NamedStatementKind {
+  readonly kind: AccountType;
+  readonly by: 'document' | 'importer';
+}
+
+/**
+ * Which kind of account this import is checked against, or a refusal.
+ *
+ * The document's own word settles it when it has one, and a stated kind may only agree with
+ * it — overruling a statement that names its account, or silently preferring it over the
+ * person, would each decide the question for somebody. When the document says nothing, the
+ * person must: a table's columns are never read as a kind, so without their word there is
+ * nothing to check the account against, and an unchecked import is how a bank account's
+ * movements land on a card.
+ */
+function statementKindInForce(
+  documentKind: AccountType | null,
+  statedKind: AccountType | null,
+): NamedStatementKind {
+  if (documentKind !== null) {
+    if (statedKind !== null && statedKind !== documentKind) {
+      throw new ServiceError(
+        'STATEMENT_KIND_CONFLICT',
+        `This document says it is the statement of ${accountWords(documentKind)}, and it was ` +
+          `named as the statement of ${accountWords(statedKind)}. Nothing was imported. A ` +
+          'statement that names its own kind of account goes onto an account of that kind and ' +
+          'no other.',
+        { statementAccountKind: documentKind, statedAccountKind: statedKind },
+      );
+    }
+    return { kind: documentKind, by: 'document' };
+  }
+  if (statedKind === null) {
+    throw new ServiceError(
+      'STATEMENT_KIND_REQUIRED',
+      'This file does not say what kind of account it is a statement of — a CSV or a ' +
+        'spreadsheet looks the same whether it came from a bank account or a card, and its ' +
+        'columns are not taken as an answer. Nothing was imported. Say which kind of account ' +
+        'it is from, and import it into an account of that kind.',
+      { field: 'statementKind' },
+    );
+  }
+  return { kind: statedKind, by: 'importer' };
+}
+
+/**
+ * Refuses a statement whose kind of account the chosen account is not.
+ *
+ * Both ways round and for every kind: a bank statement never lands on a card (ADR-0066), a card
+ * statement never lands on a bank account (ADR-0067), and a table goes only onto the kind of
+ * account the person said it came from (ADR-0068). The kind is the document's own when it names
+ * one — read by the parser whichever layout read the rows, so naming a layout that cannot tell
+ * is not a way round it — and the importer's word otherwise.
+ *
+ * Checked after the file is read — only a read file knows whether it names its kind — and
+ * before `writeImportedRows`, so a refusal writes nothing at all: no batch, no row, no audit
+ * event. It also comes before the file's duplicate check, so a statement already on record for
+ * the right account is still refused, by name, for the wrong one.
+ */
+async function assertAccountKindMatches(
+  db: Database,
+  accountId: AccountId,
+  named: NamedStatementKind,
+): Promise<void> {
+  const account = await getAccountById(db, accountId);
+  if (account === null) {
+    throw new ServiceError('ENTITY_NOT_FOUND', `No account with id ${accountId}.`, { accountId });
+  }
+  if (account.type === named.kind) return;
+  const whose =
+    named.by === 'document'
+      ? `This statement belongs to ${accountWords(named.kind)}`
+      : `You said this is the statement of ${accountWords(named.kind)}`;
+  throw new ServiceError(
+    'STATEMENT_ACCOUNT_MISMATCH',
+    `${whose}, and the account chosen is ${accountWords(account.type)}. Nothing was imported. ` +
+      `Choose ${accountWords(named.kind)} — or add one in Setup — and import it there.`,
+    { statementAccountKind: named.kind, accountType: account.type },
+  );
+}
+
+function accountWords(type: string): string {
+  switch (type) {
+    case 'bank':
+      return 'a bank account';
+    case 'card':
+      return 'a card';
+    case 'upi':
+      return 'a UPI account';
+    case 'wallet':
+      return 'a wallet';
+    case 'cash':
+      return 'cash';
+    default:
+      return `an account of type ${type}`;
+  }
+}
+
+export interface PreviewStatementInput {
+  /** A declared format id, or `'auto'` to detect one. */
+  readonly formatId: string;
+  readonly bytes: Uint8Array;
+  readonly filename?: string | null;
+}
+
+/** What a statement says, before anybody decides to import it. */
+export type StatementPreview =
+  | {
+      readonly readable: true;
+      readonly formatId: string;
+      readonly formatLabel: string;
+      /** The kind of account the document says it belongs to, when it says. */
+      readonly accountKind: AccountType | null;
+      /** Whether the read was proved complete against the statement's own printed balances. */
+      readonly checksPrintedBalances: boolean;
+      readonly movementCount: number;
+      readonly debitCount: number;
+      readonly creditCount: number;
+      readonly totalDebits: Paise;
+      readonly totalCredits: Paise;
+      /** `YYYY-MM-DD`, the earliest and latest printed dates. */
+      readonly firstDate: string | null;
+      readonly lastDate: string | null;
+      /** The last printed running balance, when the format prints one. */
+      readonly closingBalance: Paise | null;
+      readonly warnings: readonly string[];
+      /** Set when these exact bytes are already on record, so importing again changes nothing. */
+      readonly alreadyImported: {
+        readonly importBatchId: ImportBatchId;
+        readonly importedAt: Date;
+      } | null;
+    }
+  | {
+      readonly readable: false;
+      readonly formatId: string;
+      /** Why nothing could be read: line numbers and reasons, never the file's own text. */
+      readonly problems: readonly { readonly lineNumber: number; readonly message: string }[];
+    };
+
+/**
+ * Reads a statement and says what is on it. **Writes nothing** (ADR-0066).
+ *
+ * The same reader, the same checks and the same duplicate lookup as `importStatement`, so what
+ * a person is shown before choosing an account is exactly what an import would do — minus the
+ * write. The totals are sums of the rows the reader returned, computed here rather than in the
+ * browser, which performs no financial arithmetic (ADR-0048).
+ */
+export async function previewStatement(
+  db: Database,
+  input: PreviewStatementInput,
+): Promise<StatementPreview> {
+  assertStatementWithinLimit(input.bytes.byteLength);
+
+  const parsed = await parseStatementFile({
+    bytes: input.bytes,
+    formatId: input.formatId,
+    filename: input.filename ?? null,
+  });
+  if (!parsed.ok) {
+    return {
+      readable: false,
+      formatId: parsed.formatId,
+      problems: parsed.errors.map((error) => ({
+        lineNumber: error.lineNumber,
+        message: error.message,
+      })),
+    };
+  }
+
+  const format = listStatementFormats().find((candidate) => candidate.id === parsed.formatId);
+  const debits = parsed.rows.filter((row) => row.direction === 'debit');
+  const credits = parsed.rows.filter((row) => row.direction === 'credit');
+  const days = parsed.rows.map((row) => row.occurredAt.toISOString().slice(0, 10)).sort();
+  const closing = [...parsed.rows].reverse().find((row) => row.runningBalance !== null);
+  const previous = await findImportBatchByContentHash(db, sha256Bytes(input.bytes));
+
+  return {
+    readable: true,
+    formatId: parsed.formatId,
+    formatLabel: format?.label ?? parsed.formatId,
+    // The document's own kind, so the dialog offers exactly the accounts an import would accept.
+    accountKind: parsed.accountKind,
+    checksPrintedBalances: format?.checksPrintedBalances ?? false,
+    movementCount: parsed.rows.length,
+    debitCount: debits.length,
+    creditCount: credits.length,
+    totalDebits: sumPaise(debits.map((row) => row.amount)),
+    totalCredits: sumPaise(credits.map((row) => row.amount)),
+    firstDate: days[0] ?? null,
+    lastDate: days[days.length - 1] ?? null,
+    closingBalance: closing?.runningBalance ?? null,
+    warnings: parsed.warnings.map((warning) => warning.message),
+    alreadyImported:
+      previous === null ? null : { importBatchId: previous.id, importedAt: previous.importedAt },
   };
 }
 
@@ -328,6 +561,8 @@ interface WriteImportedRowsInput {
   readonly contentHash: string;
   readonly fileReference: string | null;
   readonly rows: readonly ImportableRow[];
+  /** The kind of account these rows were checked against, and who named it. */
+  readonly statement: NamedStatementKind;
   readonly audit: AuditMeta;
 }
 
@@ -399,6 +634,10 @@ async function writeImportedRows(
           externalReference: row.externalReference,
           referenceType: row.referenceType,
           sourceSystem: input.sourceSystem,
+          // Why this movement is on this account: the kind it was checked against, and whether
+          // the statement named it or the person importing it did (ADR-0068).
+          statementKind: input.statement.kind,
+          statementKindNamedBy: input.statement.by,
         },
       });
 

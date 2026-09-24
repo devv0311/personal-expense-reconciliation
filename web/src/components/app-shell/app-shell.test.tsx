@@ -1,9 +1,9 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "@/components/app-shell/app-shell";
 import { mockApi } from "@/test-support/api-mock";
-import { FINDING, PEOPLE, RUN, reviewQueue } from "@/test-support/fixtures";
+import { FINDING, PEOPLE, RUN, attentionResult, reviewQueue } from "@/test-support/fixtures";
 import { pushedRoutes, resetNavigation, setPathname } from "@/test-support/next-navigation";
 
 const originalFetch = global.fetch;
@@ -17,6 +17,8 @@ afterEach(() => {
 function renderShell() {
   mockApi({
     "/api/review": reviewQueue(),
+    // The badge counts what Needs attention shows, so it reads the question list, not the queue.
+    "/api/attention": attentionResult(),
     "/api/people": { people: PEOPLE },
     "/api/reconciliation/runs": { runs: [RUN] },
     "/api/splitwise/audit-findings": { findings: [FINDING] },
@@ -48,37 +50,73 @@ describe("the application shell", () => {
     expect(document.getElementById("main")).not.toBeNull();
   });
 
-  it("offers one entry per workflow, and marks the current one", async () => {
-    setPathname("/expenses");
+  it("offers one entry per question a person arrives with, and marks the current one", async () => {
+    setPathname("/spending");
     renderShell();
 
     const nav = screen.getByRole("navigation", { name: "Main" });
     const links = within(nav).getAllByRole("link");
+    // Four places named after what somebody came to do. Adding records is the one thing a
+    // person *does* here rather than reads, so it is an action beside the row, not a fifth tab.
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
-      "/review",
-      "/payments",
-      "/evidence",
-      "/reconciliation",
-      "/expenses",
-      "/balances",
-      "/splitwise",
-      "/proof-packs",
-      "/ask",
-      "/analytics",
-      "/automation",
-      "/setup",
+      "/",
+      "/spending",
+      "/people",
+      "/records",
     ]);
-    expect(within(nav).getByRole("link", { name: "Expenses" })).toHaveAttribute(
+    expect(within(nav).getByRole("link", { name: "Spending" })).toHaveAttribute(
       "aria-current",
       "page",
     );
   });
 
-  it("shows how many items are waiting, from the queue's own total", async () => {
+  it("keeps Add records reachable from every screen, as an action rather than a tab", async () => {
+    setPathname("/spending");
+    renderShell();
+
+    // Outside the `nav` landmark on purpose — it is not one of the four questions.
+    const add = screen.getByRole("link", { name: "Add records" });
+    expect(add).toHaveAttribute("href", "/add");
+    expect(add.closest("nav")).toBeNull();
+  });
+
+  it("does not mark Home current on every screen, since its href prefixes them all", async () => {
+    setPathname("/spending");
+    renderShell();
+
+    const nav = screen.getByRole("navigation", { name: "Main" });
+    expect(within(nav).getByRole("link", { name: /^Home/ })).not.toHaveAttribute("aria-current");
+
+    cleanup();
+    setPathname("/");
+    renderShell();
+    const home = screen.getByRole("navigation", { name: "Main" });
+    expect(within(home).getByRole("link", { name: /^Home/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
+  it("shows how many items are waiting on Home, from the question list's own total", async () => {
+    renderShell();
+
+    // The badge sits on the tab whose screen shows the same count. One that pointed at a screen
+    // quoting a different number would be worse than no badge.
+    await waitFor(() => expect(screen.getByText("2")).toBeInTheDocument());
+    expect(screen.getByText("waiting on you")).toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Main" });
+    expect(within(nav).getByRole("link", { name: /^Home/ })).toHaveTextContent("2");
+  });
+
+  it("reads the ledger and writes nothing when a screen is merely opened", async () => {
     renderShell();
 
     await waitFor(() => expect(screen.getByText("2")).toBeInTheDocument());
-    expect(screen.getByText("items waiting")).toBeInTheDocument();
+    // The shell mounts on every screen in the product. A POST from it would be a write nobody
+    // asked for, triggered by navigation.
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(
+      0,
+    );
   });
 });
 
@@ -119,11 +157,33 @@ describe("the command palette", () => {
     await screen.findByRole("listbox");
     await user.keyboard("{ArrowDown}{Enter}");
 
-    await waitFor(() => expect(pushedRoutes).toEqual(["/payments"]));
+    // The list opens on the places the nav leads with plus the action beside them, so the
+    // second entry is **Add records** rather than the old first workflow tab.
+    await waitFor(() => expect(pushedRoutes).toEqual(["/add"]));
     // Nothing the palette does is a POST.
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(
       0,
     );
+  });
+
+  it("can reach every primary place, not only the specialist screens", async () => {
+    // The palette is the keyboard-first way in. One that could only reach Review, Payments and
+    // Reconciliation would be the old information architecture surviving behind a shortcut.
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    await screen.findByRole("listbox");
+    for (const name of [
+      /^Home/,
+      /^Add records/,
+      /^Needs attention/,
+      /^Spending/,
+      /^People/,
+      /^Records/,
+    ]) {
+      expect(screen.getByRole("option", { name })).toBeInTheDocument();
+    }
   });
 
   it("searches people, recent runs and open findings, not just the six screens", async () => {

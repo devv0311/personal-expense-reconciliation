@@ -133,6 +133,25 @@ statements, receipts, UPI IDs, or account numbers are ever used in a test, even 
 in-memory ones — this keeps the boundary between "safe to run anywhere, including CI" and
 "contains real financial data" absolute, not judgment-call-based.
 
+## Keeping a test run away from the real ledger
+
+Synthetic fixtures keep real data out of tests. The reverse also has to hold: a test, a seed
+script or a QA stack must not reach the developer's own ledger, and on 19 September 2026 one did
+— a teardown's `pkill -f "tsx src/server.ts"` matched the real API as well as the synthetic one
+and destroyed the database it was writing to.
+
+**[`process-isolation.md`](process-isolation.md) is the procedure**, and three things in it are
+load-bearing: synthetic tools refuse to run without naming a non-real database and refuse an
+ambient `DATABASE_URL` outright (`src/db/real-ledger-guard.ts`), the two stacks are separated by
+port rather than by name, and a stack is stopped by process group or exact pid — never by a
+pattern, because both stacks run the same command line. `src/db/real-ledger-guard.test.ts`,
+`scripts/seed-refusal.test.ts`, `scripts/stack-status.test.ts` and
+`scripts/process-isolation.test.ts` hold those properties; the second of those runs the seed
+script as a subprocess to prove the refusal lands before any database is opened.
+
+`vitest.config.ts` includes `scripts/**/*.test.ts` for this reason: the operational tooling was
+the one untested surface in the repository, and it is the surface that can destroy data.
+
 ## What is not (and cannot be) deterministically tested
 
 AI proposal _quality_ (does `classifyTransaction` correctly guess "personal" for a Netflix
@@ -203,6 +222,24 @@ it covers:
   exact sequence and by repetition (two reads of an unchanged ledger return the same order),
   because a queue that reorders itself under a reviewer is the defect `domain/review.ts` exists
   to prevent.
+- **Duplicate policy tests** (ADR-0070) — `src/domain/payment.test.ts` pins the rule case by
+  case (calendar day, names and the sufficiently similar ones — a narration's payee, a word cut
+  short — kinds of line, tax lines, references, pairs one reference proves) and checks four
+  properties over a seeded sample of pairs: the rule is symmetric, never crosses a day, an
+  amount or a direction, never pairs two different numbers of one kind, and always asks about a
+  line another import prints again with no number. `tests/integration/duplicate-policy.test.ts`
+  imports a synthetic bank account, card and UPI app
+  (`tests/support/synthetic-duplicate-scenario.ts`) through the real import route — PDFs, a
+  bank CSV, a card XLSX, a generic layout chosen by hand, a card statement downloaded twice, and
+  a payment typed by hand — and asserts exactly which cases are asked about, that ordinary
+  synthetic months raise no question between two different shops, that a file, table or
+  workbook sent again changes nothing, that a referenced row is settled at import rather than
+  asked, and that confirming accepts the policy's pairs (keeping both rows) and refuses every
+  lookalike with `409`. Every case owns a unique amount, so a question names its case by its
+  amount alone. The guards were **mutation-tested** when the owner's policy was accepted: each of
+  the rule's checks, the queue's and the confirm path's use of it, and the importer's file-hash,
+  reference and account-kind guards was removed or loosened in turn, and every such change
+  failed the suite.
 
 - **Reconciliation and frontend tests** (added phase 15) —
   `tests/integration/reconciliation-service.test.ts` covers Splitwise drift detection against a

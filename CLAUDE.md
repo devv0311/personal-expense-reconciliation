@@ -1,5 +1,111 @@
 # CLAUDE.md — Engineering Context for This Repository
 
+> **Across imports, one movement is one day, one amount and one name (2026-09-22, accepted; live
+> since 22 Sep 22:51 IST).** [ADR-0070](docs/decisions/0070-one-movement-recorded-twice-is-one-day-one-amount-one-name.md)
+> amends ADR-0069 and ADR-0031 with the owner's duplicate policy: the same calendar day, the same
+> amount and the same or a sufficiently similar name or type are one transaction, whichever
+> accounts the lines came from. The 24-hour window is gone, and so are the
+> `duplicateWindowSeconds`/`windowSeconds` options. A shared transaction number in two
+> packagings is asked about whatever the names say; two different numbers of one kind (two
+> UTRs) are two movements; otherwise the lines must be the same kind of line and name the same
+> payee — every name word of one inside the other, the same letters, or the **payee part** of a
+> `/`-separated narration (`UPI / payee / number / note`) inside the other line, with a word cut
+> short (four letters or more) counting as the word it begins. A tax line is compared only with
+> the same tax from another import (`CGST`↔`CGST`, never `SGST`, never within one statement), so
+> a re-downloaded card statement cannot double-count its GST unasked; and a pair one reference
+> proves is asked about while both are live (a hand entry carrying an imported UTR used to stay
+> counted twice). No score, no spelling distance, nothing merged; confirming re-checks the same
+> rule. Every guard is mutation-tested. On the real ledger it changed no stored row (42 tables
+> identical by digest) and took the possible-duplicate queue from 22 to 16, all word-for-word
+> repeats within one statement.
+>
+> **Two lines of one statement are two movements (2026-09-22).**
+> [ADR-0069](docs/decisions/0069-two-lines-of-one-statement-are-two-movements.md) amends
+> ADR-0031. The possible-duplicate queue no longer pairs two rows of one import batch that the
+> batch itself tells apart by date, words or reference. Invariant #10 is about one movement
+> arriving **twice**, and every second capture (an overlapping statement, a second channel, a hand
+> entry) is a batch of its own. A line one batch prints twice, word for word, is still asked
+> about, and every cross-batch resemblance is unchanged. `confirmPossibleDuplicate` applies the
+> same rule to the same whole rows and now refuses such a pair (409). The queue is derived on
+> read, so no migration is needed, but a running API only shows the change after a restart.
+>
+> **A table's account is named by the person importing it (2026-09-22).**
+> [ADR-0068](docs/decisions/0068-a-statement-that-cannot-name-its-account-is-named-by-the-person-importing-it.md)
+> closes the last door ADR-0066/0067 left open. A CSV or XLSX still claims **no** kind of account —
+> its columns fit a card's export as well as a bank account's, and they are never read as a kind,
+> not even in the layout's label — so `POST /api/imports/statement` now requires `statementKind`
+> for any statement that does not name its own, refuses one the document contradicts, and refuses
+> an account of another kind, all before anything is written. The dialog asks _"What kind of
+> account is this statement from?"_ with nothing pre-chosen and never picks an account for the
+> person; `POST /api/imports/bank-csv` states `bank` by its own contract. A running server only
+> enforces this after a restart.
+>
+> **Product surface (2026-09-18).** `web/` is now organised around five journeys rather than
+> twelve workflow tabs — **Overview, Add records, Needs attention, Spending, People**, with every
+> specialist screen kept, unrenamed, under **More**. The plan and its phases are
+> [`docs/superpowers/plans/2026-09-17-outcome-first-product-surface.md`](docs/superpowers/plans/2026-09-17-outcome-first-product-surface.md);
+> the last of them is
+> [ADR-0059](docs/decisions/0059-a-review-surface-shows-both-halves-of-a-decision.md), which
+> makes **Add records** a guided flow rather than a menu of links out to the machinery, adds
+> `GET /api/links` so a review surface can show **what has already been connected** and not only
+> what is still open, and puts the plain **Yes, they go together / No, different thing** answer
+> beside the reasons on the event's own screen. Two rules govern anything added here: the
+> vocabulary on a primary screen is **record, payment, expense, connection, share, balance** —
+> never normalization, classification, evidence, import batch, parser or a confidence score —
+> and `web/` still performs no financial arithmetic. Adding a record is still a
+> `DecisionDialog` that states its consequence first; nothing on these screens decides anything
+> on its own.
+>
+> **A calm decision flow, and a screen that no longer writes (2026-09-19).** The product surface
+> was re-composed again, and one safety defect was closed. The nav is now **four questions plus
+> one action** — Home, Spending, People, Records, with **Add records** as a persistent button;
+> `/more` became `/records` and both routes still resolve, so no specialist screen moved. **Home
+> hands over one decision first** and reports the figures beneath it. **Needs attention is a
+> queue**: one payment at a time, the category choices visible immediately with a recommendation,
+> a few alternatives and the full list, the supporting records beside the decision, and a **Decide
+> later** that is client-only and writes nothing. The visual system is warm and editorial — bone
+> canvas, charcoal ink, one moss accent, a serif for headings only, 16px body, 48px primary
+> controls — with every text token still clearing AA in both themes and axe still at 0 violations.
+>
+> **The defect worth knowing: opening the front page used to start a ledger-wide analysis.** A
+> component mounted on `/` fired `POST /api/analysis` from an effect whenever any record was
+> unread — writing a proposal against every record on file because somebody looked at a screen.
+> ADR-0061 below is unchanged and still correct: it is about **the import path**, where the run is
+> scoped to the batch the same request just committed. Opening a screen is not that. The unscoped
+> run is now an offer behind a `DecisionDialog` that states what it does, and the frontend suite
+> asserts that rendering a primary screen issues no POST at all. Nothing else about the analysis
+> changed — same service, same single-flight, same guarantee that it approves nothing.
+
+> **An import reads what it just wrote (2026-09-19).**
+> [ADR-0061](docs/decisions/0061-an-import-reads-what-it-just-wrote.md) removes **Analyze
+> records** from the normal experience. `POST /api/imports/statement` runs
+> `services.prepareRecords` scoped to the batch it just committed and returns `prepared`, so a
+> person imports a statement and is told what is on it — _"I found a few things to confirm"_ and
+> **Review suggestions** — without pressing anything. `prepareRecords` is a single-flight around
+> `analyzeRecords`: overlapping callers join one run, which matters now that nobody presses a
+> button. A failure in the reading never fails the import, because the rows are already
+> committed. Two things were wrong underneath and are fixed: `recordsAwaitingAnalysis` counted
+> only un-normalized rows (so a ledger normalized by an earlier version reported nothing to do
+> over records nothing had read), and now counts rows a reading would **still** say something
+> about — which is also what stops it sticking on tax lines nothing will ever propose for; and
+> the purpose stage reported `skipped` whenever no provider was configured, long after the local
+> reader had started proposing. `/payments` keeps the two pipeline buttons for audit.
+>
+> **Reading a statement line's purpose (2026-09-18).**
+> [ADR-0060](docs/decisions/0060-a-statement-line-says-what-it-was-for-and-what-it-is-not.md)
+> adds a **second deterministic leg** to `classifyPayment`: `domain/purpose.ts` reads what a
+> line was likely for from its own words, the merchant's recurrence, and what the person
+> has confirmed before — locally, with no model, no network and no merchant directory. It matters
+> most for what it refuses. **The nature of the row is decided before any category is
+> considered**: a tax line, an instalment repayment and any credit are never proposed at all,
+> and interest and card fees are proposed as `Bills & subscriptions`, never as the merchant
+> printed beside them. On the owner's own statements 40 of 120 rows are a bare `CGST`/`SGST` and
+> 13 carry `INTEREST`, so a reader that matched merchant words first would overstate spending
+> and attribute it to a shop nobody paid. The proposal, the review route and the confirmation
+> are the **existing** ones (`recordClassificationProposal` → `decideInference`); what is new is
+> who writes the proposal when no model exists. Confidence reaches the screen as a phrase, never
+> a number, and the alternatives are re-derived from the pure function rather than stored.
+>
 > **Active handoff (2026-09-16).** Work is in progress on direct website import of original IDFC
 > FIRST credit-card statement PDFs. Read
 > [`docs/superpowers/plans/2026-09-16-native-idfc-pdf-import-handoff.md`](docs/superpowers/plans/2026-09-16-native-idfc-pdf-import-handoff.md)

@@ -533,6 +533,10 @@ export const AUDITABLE_ENTITY_TYPES = [
   // decision — but "who did I send what to, when, and did it arrive" has to be answerable
   // later, and an audit event is how every other outward act answers it.
   'proof_pack_delivery',
+  // Declining a suggested pattern removes something from a screen and nothing from the ledger,
+  // which is exactly why it has to be attributable: the reading that produced it is unchanged,
+  // so the only record that the offer stopped is this one (ADR-0065).
+  'rule_proposal_dismissal',
 ] as const;
 export type AuditableEntityType = (typeof AUDITABLE_ENTITY_TYPES)[number];
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { EvidenceIntake } from "@/components/evidence/evidence-intake";
+import type { EvidenceIntakeKind } from "@/components/evidence/evidence-intake";
 import { PageHeader } from "@/components/page-header";
 import { ResponsiveTable } from "@/components/responsive-table";
 import { EmptyBlock, ErrorBlock, LoadingStatus, TableSkeleton } from "@/components/status";
@@ -48,6 +49,9 @@ function EvidenceLibrary() {
   // `?linkage=unlinked` is what the palette's "attached to nothing" command links to. It
   // supplies the default; an explicit choice on the filter always wins.
   const requestedLinkage = searchParams.get("linkage");
+  // `?intake=` is what **Add records** links to, so "Add a bill or receipt" opens the form it
+  // names rather than landing on the library and leaving the reader to find the right button.
+  const requestedIntake = intakeKind(searchParams.get("intake"));
 
   const [type, setType] = useState<EvidenceType | "">("");
   const [chosenLinkage, setChosenLinkage] = useState<"linked" | "unlinked" | "" | null>(null);
@@ -68,7 +72,7 @@ function EvidenceLibrary() {
       <PageHeader
         title="Evidence"
         description="Every document, notification and note this ledger holds. A record here is the immutable source; what the system believes it means lives beside it, never over it."
-        actions={<EvidenceIntake />}
+        actions={<EvidenceIntake requested={requestedIntake} />}
       />
 
       <div className="flex flex-wrap items-end gap-4">
@@ -243,4 +247,21 @@ function EvidenceLibrary() {
 
 function noteKindLabel(kind: string): string {
   return kind === "settlement_claim" ? "Somebody's claim a debt was settled" : "Explanation";
+}
+
+/** `?intake=document|receipt|note|notification` → the form to open, or `null`. */
+function intakeKind(raw: string | null): EvidenceIntakeKind | null {
+  switch (raw) {
+    case "document":
+    case "receipt":
+    case "file":
+      return "file";
+    case "note":
+      return "note";
+    case "notification":
+    case "screenshot":
+      return "notification";
+    default:
+      return null;
+  }
 }

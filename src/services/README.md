@@ -43,7 +43,9 @@ import (phase 6):
   `src/api` depends on `src/services`, never `src/db`, directly.
 - `import-service.ts` — `importBankStatementCsv`: parse, then `ImportBatch` + immutable
   `Payment` rows, with deterministic duplicate handling at both the file and the row level
-  (ADR-0019). Classifies nothing.
+  (ADR-0019). Classifies nothing. `importStatement` does the same for every format, and checks the
+  kind of account first — the statement's own word, or for a CSV/XLSX the importer's — refusing a
+  missing, contradicted or mismatched kind before anything is written (ADR-0066–0068).
 - `normalization-service.ts` — `normalizePayments`: refines `channel` from `reference_type`
   (ADR-0020), resolves a catalogued merchant by exact alias-key match, and moves payments
   `imported → normalized` in one audited transaction. Acts **only** on `imported` payments, so a

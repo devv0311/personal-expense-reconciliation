@@ -10,12 +10,16 @@
  */
 
 export * from './allocation.js';
+export * from './anomaly.js';
+export * from './attention.js';
 export * from './adjustment.js';
 export * from './balance.js';
 export * from './balance-reading.js';
 export * from './cash-balance.js';
 export * from './cash-flow.js';
 export * from './classification.js';
+export * from './connection.js';
+export * from './purpose.js';
 export * from './entities.js';
 export * from './enums.js';
 export * from './errors.js';
@@ -27,6 +31,7 @@ export * from './expense.js';
 export * from './group-expansion.js';
 export * from './ids.js';
 export * from './immutability.js';
+export * from './instalment.js';
 export * from './lifecycle.js';
 export * from './money.js';
 export * from './normalization.js';
@@ -43,4 +48,6 @@ export * from './rules.js';
 export * from './splitwise-audit.js';
 export * from './splitwise-drift.js';
 export * from './splitwise-remote-change.js';
+export * from './statement-balance.js';
+export * from './learning.js';
 export * from './ledger-query.js';

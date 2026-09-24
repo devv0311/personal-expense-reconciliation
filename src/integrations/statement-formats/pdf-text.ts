@@ -57,8 +57,33 @@ export interface PdfTextResult {
   readonly hasTextLayer: boolean;
   /** The extracted lines, in document order, with runs of whitespace collapsed. */
   readonly lines: readonly string[];
+  /**
+   * Where each line's words sat on the page, one entry per entry in `lines`.
+   *
+   * Only the standards-complete reader knows positions, so only it fills this in. A layout that
+   * reads a statement by column — an amount printed under "Withdrawal" is a debit, one under
+   * "Deposit" a credit — needs it, because a PDF's text alone does not say which of two empty
+   * cells a number was printed in (ADR-0066).
+   */
+  readonly layout?: readonly PdfLineLayout[];
   /** Why extraction produced nothing, when it did. */
   readonly reason?: string;
+}
+
+/** One line of extracted text, as positioned words. */
+export interface PdfLineLayout {
+  /** 1-based page the line was drawn on. */
+  readonly page: number;
+  /** The line's non-blank text items, in document order. */
+  readonly items: readonly PdfTextItem[];
+}
+
+/** One text item as PDF.js placed it, in PDF user-space units from the page's left edge. */
+export interface PdfTextItem {
+  readonly text: string;
+  readonly left: number;
+  /** `left` plus the width PDF.js measured for the item. */
+  readonly right: number;
 }
 
 /**
@@ -169,6 +194,7 @@ export async function extractPdfTextWithPdfJs(bytes: Uint8Array): Promise<PdfTex
     }
 
     const lines: string[] = [];
+    const layout: PdfLineLayout[] = [];
     let textLength = 0;
     /** Refuses the document rather than keeping the part that fit. */
     const tooMuchText = (): PdfTextResult => ({
@@ -182,20 +208,33 @@ export async function extractPdfTextWithPdfJs(bytes: Uint8Array): Promise<PdfTex
       try {
         const content = await page.getTextContent({ includeMarkedContent: false });
         let current = '';
+        // The positioned words of `current`, kept in step with it so `layout[i]` always
+        // describes `lines[i]`. Bounded by the same line-length check, since every item added
+        // here also adds its text to `current`.
+        let currentItems: PdfTextItem[] = [];
         for (const item of content.items) {
           if (!('str' in item)) continue;
           // `hasEOL` is the document's claim about where a line ends, so a document that never
           // makes it must not be able to grow one unbounded string.
           if (current.length + item.str.length > MAX_PDF_LINE_LENGTH) return tooMuchText();
           current += item.str;
+          if (item.str.trim() !== '') {
+            // PDF.js types the transform loosely; it is a 6-number matrix whose fifth entry is
+            // the item's x position, in the same units as its width.
+            const left = (item.transform as readonly number[])[4] ?? 0;
+            currentItems.push({ text: item.str, left, right: left + item.width });
+          }
           if (!item.hasEOL) continue;
           const line = normaliseExtractedLine(current);
+          const items = currentItems;
           current = '';
+          currentItems = [];
           if (line === '') continue;
           if (lines.length >= MAX_PDF_LINES || textLength + line.length > MAX_TEXT_LENGTH) {
             return tooMuchText();
           }
           lines.push(line);
+          layout.push({ page: pageNumber, items });
           textLength += line.length;
         }
         const trailing = normaliseExtractedLine(current);
@@ -204,6 +243,7 @@ export async function extractPdfTextWithPdfJs(bytes: Uint8Array): Promise<PdfTex
             return tooMuchText();
           }
           lines.push(trailing);
+          layout.push({ page: pageNumber, items: currentItems });
           textLength += trailing.length;
         }
       } finally {
@@ -222,7 +262,7 @@ export async function extractPdfTextWithPdfJs(bytes: Uint8Array): Promise<PdfTex
           'than a generated statement. Nothing was read and no transaction was invented.',
       };
     }
-    return { hasTextLayer: true, lines };
+    return { hasTextLayer: true, lines, layout };
   } catch (error) {
     return { hasTextLayer: false, lines: [], reason: describePdfFailure(error) };
   } finally {

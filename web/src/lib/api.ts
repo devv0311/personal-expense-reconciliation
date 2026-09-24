@@ -48,6 +48,7 @@ import type {
   ImportHistoryResult,
   ImportStatementResult,
   MultiFormatImportResult,
+  StatementPreview,
   JobKind,
   JobListResult,
   JobStatus,
@@ -58,7 +59,18 @@ import type {
   NormalizePaymentsResult,
   NotificationEvidenceType,
   OccasionSummary,
+  AllocationPreviewResult,
+  AnalysisResult,
+  AnomaliesResult,
+  RuleProposalsResult,
+  InstalmentsResult,
+  AttentionResult,
+  ConfirmedLinksResult,
+  ConnectionResult,
+  PersonBalanceSummary,
+  SpendingSummaryResult,
   OutstandingResult,
+  OverviewResult,
   OwnSpendResult,
   PaymentChannel,
   PaymentContextResult,
@@ -288,9 +300,18 @@ export async function getReviewQueue(filter: ReviewQueueFilter = {}): Promise<Re
  * shipping a half-built editor for it would be a way to approve something nobody read
  * (`docs/roadmap.md` phase 21 scope, ADR-0049).
  */
+/**
+ * Agreeing with a proposal, correcting it, or declining it.
+ *
+ * `modify` carries the corrected proposal and goes through the *same* route, the same two
+ * validation gates and the same audit trail as an agreement — which is the whole reason
+ * choosing a different category is a correction here rather than a second write path
+ * somewhere else.
+ */
 export async function decideInference(input: {
   readonly inferenceId: string;
-  readonly decision: "accept" | "reject";
+  readonly decision: "accept" | "reject" | "modify";
+  readonly modifiedOutput?: ClassificationProposalInput;
   readonly reason?: string;
 }): Promise<unknown> {
   return request(`/api/review/inferences/${input.inferenceId}/decision`, {
@@ -298,9 +319,18 @@ export async function decideInference(input: {
     body: JSON.stringify({
       actor: ACTOR,
       decision: input.decision,
+      ...(input.modifiedOutput === undefined ? {} : { modifiedOutput: input.modifiedOutput }),
       ...(input.reason === undefined ? {} : { reason: input.reason }),
     }),
   });
+}
+
+/** A corrected classification, in exactly the shape the API's own parser accepts. */
+export interface ClassificationProposalInput {
+  readonly proposedKind: "expense";
+  readonly relationshipType: string;
+  readonly category: string | null;
+  readonly paidByPersonHint: null;
 }
 
 export async function decidePaymentDuplicate(input: {
@@ -806,6 +836,10 @@ export async function importBankCsv(input: {
  *
  * Bytes rather than text is not a detail: an `.xlsx` is a ZIP and a `.pdf` is a binary
  * document, and decoding either as UTF-8 before it reaches the parser destroys it.
+ *
+ * `statementKind` is the person's answer to "what kind of account is this statement from?",
+ * sent only for a file that does not say so itself — every CSV and XLSX. The API refuses such a
+ * file without it, and refuses any account of a different kind (ADR-0068).
  */
 export async function importStatement(input: {
   readonly accountId: string;
@@ -814,10 +848,28 @@ export async function importStatement(input: {
   readonly contentBase64: string;
   readonly filename: string;
   readonly fileReference?: string;
+  readonly statementKind?: AccountType;
 }): Promise<MultiFormatImportResult> {
   return request<MultiFormatImportResult>("/api/imports/statement", {
     method: "POST",
     body: JSON.stringify({ actor: ACTOR, ...compact(input) }),
+  });
+}
+
+/**
+ * Reads a statement and says what is on it. **Writes nothing** (ADR-0066).
+ *
+ * Called the moment a file is chosen, so the import dialog can say what the file is and which
+ * accounts it can go into before anybody confirms anything. Carries no actor, because nothing
+ * is recorded.
+ */
+export async function previewStatement(input: {
+  readonly contentBase64: string;
+  readonly filename: string;
+}): Promise<StatementPreview> {
+  return request<StatementPreview>("/api/imports/preview", {
+    method: "POST",
+    body: JSON.stringify({ formatId: "auto", ...input }),
   });
 }
 
@@ -1503,6 +1555,103 @@ export async function resyncSettlementToSplitwise(input: {
   );
 }
 
+/* --------------------------------------------------------------------------- overview */
+
+/**
+ * The one read the front page makes.
+ *
+ * Deliberately a single call rather than four: every figure on that screen has to agree with
+ * every other, and four independent reads taken milliseconds apart can disagree. The period is
+ * optional because the API picks a sensible one and tells us which it used.
+ */
+export async function getOverview(range?: AnalyticsRange): Promise<OverviewResult> {
+  return request<OverviewResult>(`/api/overview${range === undefined ? "" : periodQuery(range)}`);
+}
+
+/* --------------------------------------------------------------------------- analysis */
+
+/**
+ * The one action that replaced two buttons named after the pipeline.
+ *
+ * It records proposals and approves nothing, so it takes an actor — a run is attributable —
+ * without ever being a decision. What comes back names every stage, including one that could
+ * not run, so a screen can never report a partial run as a finished one.
+ */
+export async function analyzeRecords(input: {
+  actor: string;
+  reason?: string;
+  importBatchId?: string;
+}): Promise<AnalysisResult> {
+  return request<AnalysisResult>("/api/analysis", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/* --------------------------------------------------------------------------- spending */
+
+/**
+ * What you spent, in one read.
+ *
+ * `months` says how far the trend beside the total reaches. It is a length, not a figure: the
+ * API still computes every month it returns, and a trend shorter than the period a screen is
+ * showing would be a chart that quietly disagrees with the total above it.
+ */
+export async function getSpendingSummary(
+  range?: AnalyticsRange,
+  months?: number,
+): Promise<SpendingSummaryResult> {
+  const period = range === undefined ? "" : periodQuery(range);
+  const trend = months === undefined ? "" : `${period === "" ? "?" : "&"}months=${months}`;
+  return request<SpendingSummaryResult>(`/api/spending${period}${trend}`);
+}
+
+/* ----------------------------------------------------------------------------- people */
+
+/** Why one person's balance is what it is — the events behind it, not just the figure. */
+export async function getPersonBalance(personId: string): Promise<PersonBalanceSummary> {
+  return request<PersonBalanceSummary>(`/api/people/${personId}/balance`);
+}
+
+/* ------------------------------------------------------------------- allocation preview */
+
+/**
+ * What a split would do, computed by the ledger.
+ *
+ * Writes nothing and takes no actor. It exists so a share screen can show the resulting
+ * amounts without dividing anything here — rule 1, and the only way the preview and the
+ * approval are guaranteed to agree.
+ */
+export async function previewAllocation(
+  expenseId: string,
+  decision: AllocationDecisionInput,
+): Promise<AllocationPreviewResult> {
+  return request<AllocationPreviewResult>(`/api/expenses/${expenseId}/allocation/preview`, {
+    method: "POST",
+    body: JSON.stringify(decision),
+  });
+}
+
+/* ------------------------------------------------------------------------- connection */
+
+/**
+ * One real-world event, composed by the API.
+ *
+ * A single call on purpose: the movement, the records that describe it, the expense it funded
+ * and who shared it all have to agree with each other, and four reads taken milliseconds apart
+ * can disagree. Composing them here would also mean joining financial facts in the browser,
+ * which this package does not do.
+ */
+export async function getConnection(paymentId: string): Promise<ConnectionResult> {
+  return request<ConnectionResult>(`/api/connections/${paymentId}`);
+}
+
+/** Everything waiting on a person, as the questions those decisions actually are. */
+export async function getAttention(options: { limit?: number } = {}): Promise<AttentionResult> {
+  const query = options.limit === undefined ? "" : `?limit=${options.limit}`;
+  return request<AttentionResult>(`/api/attention${query}`);
+}
+
 /* -------------------------------------------------------------------------- analytics */
 
 /** Every analytics read takes the same period, and the API refuses one that runs backwards. */
@@ -1772,5 +1921,69 @@ export async function askLedger(question: string): Promise<AskResult> {
   return request<AskResult>("/api/ask", {
     method: "POST",
     body: JSON.stringify({ question }),
+  });
+}
+
+/* ------------------------------------------------------------------------------ links */
+
+/**
+ * What has already been connected, and how each connection was decided.
+ *
+ * The companion read to `/api/attention`: one says what is still open, this says what is
+ * closed. A review surface that only ever counted down would give somebody no way to check
+ * their own past decisions, which is the only way a wrong one is ever found.
+ */
+export async function getConfirmedLinks(limit?: number): Promise<ConfirmedLinksResult> {
+  return request<ConfirmedLinksResult>(`/api/links${limit === undefined ? "" : `?limit=${limit}`}`);
+}
+
+/** Instalment plans, read from the rows a statement printed (ADR-0062). A pure read. */
+export async function getInstalments(): Promise<InstalmentsResult> {
+  return request<InstalmentsResult>("/api/instalments");
+}
+
+/** What is worth a second look, with the rows each comparison used (ADR-0063). A pure read. */
+export async function getAnomalies(): Promise<AnomaliesResult> {
+  return request<AnomaliesResult>("/api/anomalies");
+}
+
+/** Patterns a person's confirmations suggest. A read: none of them is active (ADR-0064). */
+export async function getRuleProposals(): Promise<RuleProposalsResult> {
+  return request<RuleProposalsResult>("/api/rule-proposals");
+}
+
+/** Approves one pattern. The only way a pattern ever starts matching anything. */
+export async function approveRuleProposal(input: {
+  proposalId: string;
+  name?: string;
+  reason?: string;
+  actor: string;
+}): Promise<{ ruleId: string }> {
+  return request<{ ruleId: string }>("/api/rule-proposals", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** Declines a pattern, with a reason, so it stops being offered (ADR-0065). */
+export async function dismissRuleProposal(input: {
+  proposalId: string;
+  reason: string;
+  actor: string;
+}): Promise<{ proposalKey: string }> {
+  return request<{ proposalKey: string }>("/api/rule-proposals/dismiss", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** Offers a declined pattern again. The record of declining it is closed, never deleted. */
+export async function restoreRuleProposal(input: {
+  proposalKey: string;
+  actor: string;
+}): Promise<{ restored: number }> {
+  return request<{ restored: number }>("/api/rule-proposals/restore", {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 }

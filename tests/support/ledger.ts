@@ -145,6 +145,23 @@ export interface PaymentSpec {
   readonly state?: PaymentState;
   /** Paired with `state: 'ignored'`, e.g. `duplicate_of:<id>` or `out_of_scope`. */
   readonly ignoredReason?: string | null;
+  /**
+   * The batch that delivered the row. Defaults to the cast's one synthetic batch.
+   *
+   * A second capture of one movement — the UPI app's copy of a bank line — arrives in a batch
+   * of its own, and the possible-duplicate rule reads that: two different lines of one batch
+   * are two movements (`invariants.md` #10). {@link addImportBatch} makes one.
+   */
+  readonly importBatchId?: ImportBatchId;
+}
+
+/** Another synthetic import batch, for a row that arrived separately from the cast's own. */
+export async function addImportBatch(db: Database): Promise<ImportBatchId> {
+  const [batch] = await db
+    .insert(schema.importBatches)
+    .values({ sourceChannel: 'synthetic', parserVersion: 'scenario-suite' })
+    .returning({ id: schema.importBatches.id });
+  return asId<'import_batch'>(batch!.id);
 }
 
 /** Inserts a payment as the importer would have. */
@@ -154,7 +171,7 @@ export async function addPayment(db: Database, cast: Cast, spec: PaymentSpec): P
     .values({
       ...(spec.id === undefined ? {} : { id: spec.id }),
       accountId: spec.accountId,
-      importBatchId: cast.importBatchId,
+      importBatchId: spec.importBatchId ?? cast.importBatchId,
       amount: spec.amount,
       direction: spec.direction,
       occurredAt: spec.occurredAt,

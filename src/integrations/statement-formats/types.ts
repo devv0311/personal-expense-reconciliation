@@ -14,6 +14,7 @@
  */
 
 import type {
+  AccountType,
   Paise,
   PaymentChannel,
   PaymentDirection,
@@ -67,6 +68,15 @@ export type StatementParseResult =
       readonly ok: true;
       readonly formatId: string;
       readonly parserVersion: string;
+      /**
+       * The kind of account the document says it is a statement of, or `null` when it does not
+       * say (ADR-0067).
+       *
+       * A fact about the **document**, not about the layout that read it: a card statement read
+       * by a generic line shape a caller named is still a card's. `formatId`'s own declared kind
+       * is therefore not enough to check an import against, and this is what is checked.
+       */
+      readonly accountKind: AccountType | null;
       readonly rows: readonly StatementRow[];
       readonly warnings: readonly StatementWarning[];
     }
@@ -99,4 +109,19 @@ export interface StatementFormatDescriptor {
   readonly carriesRunningBalance: boolean;
   /** `true` when auto-detection can recognise the format from its content alone. */
   readonly detectable: boolean;
+  /**
+   * The kind of account a document in this format says it belongs to, or `null` when it cannot
+   * say.
+   *
+   * What an import is checked against is the parsed document's own `accountKind`, which is this
+   * whenever this format read it — and still the document's kind when a format that cannot tell
+   * was asked to read a document that does. An import into an account of a different kind is
+   * refused before anything is written, either way round (ADR-0066, ADR-0067).
+   */
+  readonly accountKind: AccountType | null;
+  /**
+   * Whether a successful read was checked against the statement's own printed balances, day by
+   * day, so that it is known to be complete rather than merely "what the layout matched".
+   */
+  readonly checksPrintedBalances: boolean;
 }
