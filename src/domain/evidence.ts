@@ -131,6 +131,67 @@ export function parseEvidenceMediaType(value: string): EvidenceMediaType {
   return match;
 }
 
+/** The four-character HEIF brands a phone's `.heic` can carry (ISO/IEC 23008-12). */
+const HEIF_BRANDS = new Set([
+  'heic',
+  'heix',
+  'hevc',
+  'hevx',
+  'heim',
+  'heis',
+  'hevm',
+  'hevs',
+  'mif1',
+  'msf1',
+]);
+
+/**
+ * Refuses a document whose bytes are not the format its declared type names.
+ *
+ * The allowlist above decides how a document is rendered back to a person, and the content
+ * route serves it under that declared type with `nosniff`. A file that *says* `image/png` and is
+ * really HTML, an SVG or anything else would therefore never execute — but it is still not the
+ * evidence it claims to be, extraction cannot read it, and storing it is CWE-434's door left
+ * ajar. This checks the format's own signature (its "magic bytes"), nothing more: it is not a
+ * parser and proves nothing about the content beyond its container.
+ */
+export function assertEvidenceBytesMatchMediaType(
+  mediaType: EvidenceMediaType,
+  bytes: Uint8Array,
+): void {
+  const at = (offset: number, text: string): boolean =>
+    bytes.length >= offset + text.length &&
+    [...text].every((char, index) => bytes[offset + index] === char.charCodeAt(0));
+  const matches = (() => {
+    switch (mediaType) {
+      case 'image/jpeg':
+        return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+      case 'image/png':
+        return at(0, '\x89PNG\r\n\x1a\n');
+      case 'image/webp':
+        return at(0, 'RIFF') && at(8, 'WEBP');
+      case 'image/heic':
+        return at(4, 'ftyp') && HEIF_BRANDS.has(String.fromCharCode(...bytes.subarray(8, 12)));
+      case 'application/pdf': {
+        // The PDF header may follow up to 1,024 bytes of leading junk (ISO 32000-1, 7.5.2 note).
+        const head = bytes.subarray(0, 1024 + 5);
+        for (let index = 0; index + 5 <= head.length; index += 1) {
+          if (at(index, '%PDF-')) return true;
+        }
+        return false;
+      }
+    }
+  })();
+  if (!matches) {
+    throw new DomainError(
+      'EVIDENCE_CONTENT_MISMATCH',
+      `The file was sent as "${mediaType}", but its contents are not that format, so it was not ` +
+        'stored. Upload the original photo, screenshot or PDF.',
+      { mediaType },
+    );
+  }
+}
+
 /** The extension a stored document of this type is written under. */
 export function extensionForEvidenceMediaType(mediaType: EvidenceMediaType): string {
   return EVIDENCE_MEDIA_TYPE_EXTENSIONS[mediaType];

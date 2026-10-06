@@ -50,7 +50,7 @@ import {
   postDistributeAdjustment,
   postExpenseAdjustment,
 } from './adjustment-routes.js';
-import { postAllocation } from './allocation-routes.js';
+import { postAllocation, postExpenseRelationship } from './allocation-routes.js';
 import { getBalanceRoute } from './balance-routes.js';
 import {
   getEvidenceMatchesRoute,
@@ -388,6 +388,12 @@ export const ALLOCATION_ROUTES: readonly ApiRoute[] = [
   { method: 'GET', path: '/api/expenses/:expenseId/history', handler: getExpenseHistoryRoute },
   { method: 'POST', path: '/api/expenses/:expenseId/occasion', handler: postExpenseOccasion },
   { method: 'POST', path: '/api/expenses/:expenseId/allocation', handler: postAllocation },
+  // Correcting the kind of an expense approved as personal, with its split (ADR-0073).
+  {
+    method: 'POST',
+    path: '/api/expenses/:expenseId/relationship',
+    handler: postExpenseRelationship,
+  },
   {
     method: 'POST',
     path: '/api/expenses/:expenseId/adjustments/distribute',

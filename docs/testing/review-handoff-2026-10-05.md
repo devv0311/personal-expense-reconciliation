@@ -96,7 +96,7 @@ permission to commit, push, deploy or touch real data.
 1. **ADR-0071 — ratified as built.** A counted payment stays in a possible-duplicate pair as the survivor; the
    uncounted copy cannot be counted until a person confirms or dismisses the pair. Alternatives:
    keep only the queue change (nothing refused) or only the refusal.
-2. **Approved-Personal kind correction — deferred from this release.** Not built; the design stays a proposal. Proposal: a successor, audited decision
+2. **Approved-Personal kind correction — deferred from this release; since built as [ADR-0073](../decisions/0073-an-expense-approved-as-personal-is-corrected-by-a-new-decision.md)** (not a successor expense: a new audited decision on the same expense, with its split, in one transaction). Original text kept: Proposal: a successor, audited decision
    (`POST /api/expenses/:id/relationship`, reason required) that supersedes the allocation, only
    personal → debt-creating kinds, refused once synced; see the readiness report for the rules touched.
 3. **ADR-0068 update (layout choice) — ratified as built.** The person chooses among only the layouts that fit, nothing preselected.

@@ -20,7 +20,7 @@
  * for one expense.
  */
 
-import { EXPENSE_STATES, asId } from '../domain/index.js';
+import { EXPENSE_STATES, asId, kindCorrectionTargets } from '../domain/index.js';
 import type { ExpenseState, PersonId } from '../domain/index.js';
 import { getExpenseLedgerRow, listExpensePage, ServiceError } from '../services/index.js';
 
@@ -77,7 +77,12 @@ export async function getExpenseRoute(
   if (expense === null) {
     throw new ServiceError('ENTITY_NOT_FOUND', `No expense with id ${expenseId}.`, { expenseId });
   }
-  return jsonResponse(200, expense);
+  // Which kinds this expense could be corrected to now (ADR-0073), so a screen offers the action
+  // only where the ledger would take it. Advice: the correction checks again, under a lock.
+  return jsonResponse(200, {
+    ...expense,
+    kindCorrection: { targets: kindCorrectionTargets(expense) },
+  });
 }
 
 /* ------------------------------------------------------------------------- validation */

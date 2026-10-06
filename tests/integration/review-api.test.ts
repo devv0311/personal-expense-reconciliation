@@ -540,6 +540,7 @@ describe('the surface itself', () => {
       'GET /api/expenses/:expenseId/history',
       'POST /api/expenses/:expenseId/occasion',
       'POST /api/expenses/:expenseId/allocation',
+      'POST /api/expenses/:expenseId/relationship',
       'POST /api/expenses/:expenseId/adjustments/distribute',
       'POST /api/expenses/:expenseId/adjustments',
       'GET /api/expenses/:expenseId/adjustments',

@@ -60,6 +60,8 @@ export type DomainErrorCode =
   | 'EVIDENCE_PAYLOAD_INVALID'
   /** A document arrived in a format this system does not store (`domain/evidence.ts`). */
   | 'EVIDENCE_MEDIA_TYPE_UNSUPPORTED'
+  /** The bytes of an uploaded document are not the format its declared type names. */
+  | 'EVIDENCE_CONTENT_MISMATCH'
   /** A recorded `Evidence` link was re-pointed or cleared rather than superseded. */
   | 'EVIDENCE_LINK_IMMUTABLE'
   /** An `AIInference` decision named an actor that is neither a person nor a `Rule` (#17). */

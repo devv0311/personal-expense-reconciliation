@@ -12,7 +12,16 @@ import { Label } from "@/components/ui/label";
 import type { AllocationDecisionInput } from "@/lib/api";
 import { formatDate } from "@/lib/dates";
 import { parseRupeeInput } from "@/lib/money";
-import { useAllocationPreview, useApproveAllocation, useExpense, usePeople } from "@/lib/queries";
+import { isUnansweredRequest } from "@/lib/api";
+import {
+  DecidedDifferently,
+  UncertainResult,
+  useAllocationPreview,
+  useApproveAllocation,
+  useCorrectExpenseKind,
+  useExpense,
+  usePeople,
+} from "@/lib/queries";
 import type { AllocationPreviewResult } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +47,12 @@ export function ShareExpense({ expenseId }: { expenseId: string }) {
   const expense = useExpense(expenseId);
   const people = usePeople();
   const approve = useApproveAllocation(expenseId);
+  const correct = useCorrectExpenseKind(expenseId);
+  // The kind this expense is being corrected to, when it was approved as just yours (ADR-0073).
+  // `null` is the ordinary case: saving who shared it, under the kind it already has.
+  const [correctTo, setCorrectTo] = useState<string | null>(null);
+  // The last correction attempt ended without an answer, so the next one reads the ledger first.
+  const [unanswered, setUnanswered] = useState(false);
 
   const [picked, setPicked] = useState<readonly string[] | null>(null);
   const [mode, setMode] = useState<"evenly" | "exact">("evenly");
@@ -75,7 +90,12 @@ export function ShareExpense({ expenseId }: { expenseId: string }) {
 
   // A read, keyed by the decision: an unchanged selection is answered from cache and a changed
   // one refetches, with no effect setting state by hand.
-  const previewQuery = useAllocationPreview(expenseId, decision);
+  const previewQuery = useAllocationPreview(
+    expenseId,
+    decision,
+    undefined,
+    correctTo === null ? undefined : { relationshipType: correctTo },
+  );
   const preview = previewQuery.data ?? null;
   const previewError = previewQuery.error;
 
@@ -94,6 +114,18 @@ export function ShareExpense({ expenseId }: { expenseId: string }) {
   }
 
   const roster = people.data;
+  const correctable = expense.data.kindCorrection?.targets ?? [];
+  // The ledger refuses a correction that leaves only the payer with a share — "shared" with
+  // nobody. Mirrored from the preview's own shares so the button never offers what will fail.
+  const nobodyElse =
+    correctTo !== null &&
+    preview !== null &&
+    preview.refusal === null &&
+    !preview.shares.some(
+      (share) =>
+        share.amount !== "0" &&
+        (share.beneficiaryType === "group" || share.beneficiaryId !== preview.paidBy.personId),
+    );
   const payerName =
     roster.find((person) => person.id === expense.data.paidByPersonId)?.displayName ??
     "Somebody not on the roster";
@@ -115,6 +147,18 @@ export function ShareExpense({ expenseId }: { expenseId: string }) {
           </span>
         )}
       </div>
+
+      {correctable.length > 0 && (
+        <KindCorrection
+          targets={correctable}
+          value={correctTo}
+          onChange={(next) => {
+            setCorrectTo(next);
+            setUnanswered(false);
+            correct.reset();
+          }}
+        />
+      )}
 
       <Section
         title="Who benefited"
@@ -215,14 +259,20 @@ export function ShareExpense({ expenseId }: { expenseId: string }) {
           </EmptyBlock>
         )}
         {preview !== null && <Preview preview={preview} />}
+        {nobodyElse && (
+          <p className="mt-3 max-w-prose text-meta text-attention">
+            Name at least one other person with a share. With only the person who paid named, nobody
+            owes anything, so it would not be shared at all.
+          </p>
+        )}
       </Section>
 
       <div className="flex flex-wrap gap-3 border-t border-rule pt-4">
         <Button
           onClick={() => setConfirming(true)}
-          disabled={preview === null || preview.refusal !== null}
+          disabled={preview === null || preview.refusal !== null || nobodyElse}
         >
-          Save who shared it
+          {correctTo === null ? "Save who shared it" : "Correct it and save who shared it"}
         </Button>
         <Link
           href={`/expenses/${expenseId}`}
@@ -233,7 +283,49 @@ export function ShareExpense({ expenseId }: { expenseId: string }) {
       </div>
 
       <DecisionDialog
-        open={confirming}
+        open={confirming && correctTo !== null}
+        onClose={() => {
+          setConfirming(false);
+          // A "changed another way" answer means the screen is stale: refresh it once it is read.
+          if (correct.error instanceof DecidedDifferently) {
+            correct.invalidate();
+            setCorrectTo(null);
+          }
+          correct.reset();
+        }}
+        title="Correct what this expense was"
+        consequence={<CorrectionConsequence preview={preview} kind={correctTo ?? ""} />}
+        confirmLabel={unanswered ? "Check the ledger and continue" : "Correct it"}
+        reasonLabel="Why it is being corrected"
+        reasonRequired
+        reasonPlaceholder="For example: it was dinner with a flatmate, not just mine"
+        pending={correct.isPending}
+        error={correct.error}
+        onConfirm={(reason) => {
+          if (decision === null || correctTo === null || reason === undefined) return;
+          correct.mutate(
+            {
+              relationshipType: correctTo,
+              decision,
+              reason,
+              ...(unanswered ? { recheck: true } : {}),
+            },
+            {
+              onSuccess: () => {
+                setConfirming(false);
+                setUnanswered(false);
+                setCorrectTo(null);
+              },
+              onError: (error) => {
+                setUnanswered(error instanceof UncertainResult || isUnansweredRequest(error));
+              },
+            },
+          );
+        }}
+      />
+
+      <DecisionDialog
+        open={confirming && correctTo === null}
         onClose={() => {
           setConfirming(false);
           approve.reset();
@@ -253,6 +345,94 @@ export function ShareExpense({ expenseId }: { expenseId: string }) {
         }}
       />
     </div>
+  );
+}
+
+const CORRECTION_WORDS: Record<string, { readonly label: string; readonly hint: string }> = {
+  shared: { label: "Shared", hint: "Other people benefited and owe their share." },
+  paid_on_behalf: {
+    label: "Paid on somebody else's behalf",
+    hint: "You fronted it for someone; they owe what they were given.",
+  },
+  household_shared_flat: {
+    label: "A shared household cost",
+    hint: "Rent, utilities, groceries for the flat — split between the household.",
+  },
+};
+
+/**
+ * Correcting an expense approved as just yours (ADR-0073), offered only where the ledger said it
+ * could be — `kindCorrection.targets` on the expense read, never a rule re-decided here.
+ */
+function KindCorrection({
+  targets,
+  value,
+  onChange,
+}: {
+  targets: readonly string[];
+  value: string | null;
+  onChange: (next: string | null) => void;
+}) {
+  return (
+    <Section
+      title="Recorded as just yours"
+      headingId="share-kind"
+      description="It was approved as just yours, so nobody owes anything for it. If other people shared it, correct that here: it is recorded as a new decision with your reason, and the amount and the payment do not change."
+    >
+      <fieldset className="flex flex-col gap-2">
+        <legend className="sr-only">What it really was</legend>
+        <label className="flex items-start gap-3 text-body">
+          <input
+            type="radio"
+            name="kind-correction"
+            className="mt-1.5"
+            checked={value === null}
+            onChange={() => onChange(null)}
+          />
+          <span>
+            Leave it as just mine
+            <span className="block text-meta text-ink-muted">Nothing is corrected.</span>
+          </span>
+        </label>
+        {targets.map((target) => (
+          <label key={target} className="flex items-start gap-3 text-body">
+            <input
+              type="radio"
+              name="kind-correction"
+              className="mt-1.5"
+              checked={value === target}
+              onChange={() => onChange(target)}
+            />
+            <span>
+              {CORRECTION_WORDS[target]?.label ?? target.replace(/_/g, " ")}
+              <span className="block text-meta text-ink-muted">
+                {CORRECTION_WORDS[target]?.hint ?? ""}
+              </span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+    </Section>
+  );
+}
+
+/** What correcting it does, stated before the button — the preview's own figures and wording. */
+function CorrectionConsequence({
+  preview,
+  kind,
+}: {
+  preview: AllocationPreviewResult | null;
+  kind: string;
+}) {
+  const words = (CORRECTION_WORDS[kind]?.label ?? kind.replace(/_/g, " ")).toLowerCase();
+  return (
+    <>
+      This changes it from <strong>just yours</strong> to <strong>{words}</strong>, records why, and
+      saves who shared it — together, or not at all.{" "}
+      {preview !== null && preview.refusal === null && <Owes preview={preview} />} The amount, the
+      payment and the category stay exactly as they are, and the earlier decision stays in its
+      history.
+    </>
   );
 }
 

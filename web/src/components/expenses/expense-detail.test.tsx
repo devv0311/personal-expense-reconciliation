@@ -20,14 +20,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderDetail(refundState: unknown = REFUND_STATE_PENDING): ApiMock {
+function renderDetail(
+  refundState: unknown = REFUND_STATE_PENDING,
+  expense: unknown = EXPENSE,
+): ApiMock {
   const api = mockApi({
     "/api/expenses/exp-1/refund-allocation": refundState,
     "/api/expenses/exp-1/payment-links": { links: [] },
     "/api/expenses/exp-1/items": { items: [] },
     "/api/expenses/exp-1/adjustments/distribute": { allocationId: "alloc-2" },
     "/api/expenses/exp-1/adjustments": { adjustmentId: "adj-2" },
-    "/api/expenses/exp-1": EXPENSE,
+    "/api/expenses/exp-1": expense,
     "/api/people": { people: PEOPLE },
     // The refund form offers unexplained credits as the arrival of the money coming back.
     "/api/payments": { payments: [], total: 0, filteredTotalIsExact: true, limit: 50, offset: 0 },
@@ -38,6 +41,22 @@ function renderDetail(refundState: unknown = REFUND_STATE_PENDING): ApiMock {
 }
 
 describe("the expense detail screen", () => {
+  it("offers correcting an expense approved as just yours only where the ledger lists it", async () => {
+    renderDetail(REFUND_STATE_PENDING, {
+      ...EXPENSE,
+      relationshipType: "personal",
+      kindCorrection: { targets: ["shared", "paid_on_behalf", "household_shared_flat"] },
+    });
+    const link = await screen.findByRole("link", { name: "Recorded as just yours — correct it" });
+    expect(link).toHaveAttribute("href", "/expenses/exp-1/share");
+  });
+
+  it("does not offer a correction the ledger did not list", async () => {
+    renderDetail(REFUND_STATE_PENDING, { ...EXPENSE, kindCorrection: { targets: [] } });
+    await screen.findByText("Net cost");
+    expect(screen.queryByRole("link", { name: /correct it/ })).toBeNull();
+  });
+
   it("leads with the net cost and keeps the immutable gross beside it", async () => {
     renderDetail();
 

@@ -25,7 +25,11 @@
  * because it writes nothing at all — the same shape `POST /api/ask` already has.
  */
 
-import { EXPENSE_RELATIONSHIP_TYPES, asId } from '../domain/index.js';
+import {
+  DEBT_CREATING_RELATIONSHIP_TYPES,
+  EXPENSE_RELATIONSHIP_TYPES,
+  asId,
+} from '../domain/index.js';
 import type { ExpenseRelationshipType } from '../domain/index.js';
 import { getPrimaryUserPerson } from '../db/index.js';
 import {
@@ -199,12 +203,14 @@ export async function postAllocationPreview(
   const overrides = parseGroupShareOverrides(body);
   const userPerson = await getPrimaryUserPerson(deps.db);
   const ifApprovedAs = parseIfApprovedAs(body);
+  const ifCorrectedTo = parseIfCorrectedTo(body);
 
   return jsonResponse(
     200,
     await previewAllocation(deps.db, {
       expenseId,
       ...(ifApprovedAs === undefined ? {} : { ifApprovedAs }),
+      ...(ifCorrectedTo === undefined ? {} : { ifCorrectedTo }),
       // The approval route's own parser, so a preview can never accept a shape the approval
       // would refuse — which would make it a preview of something that cannot happen.
       decision: parseAllocationDecision(body),
@@ -232,6 +238,27 @@ function parseIfApprovedAs(
       raw as Record<string, unknown>,
       'relationshipType',
       EXPENSE_RELATIONSHIP_TYPES,
+    ),
+  };
+}
+
+/**
+ * `ifCorrectedTo: { relationshipType }` — preview the split as if an expense approved as personal
+ * were corrected to that kind (ADR-0073). Only the three kinds other people share are accepted.
+ */
+function parseIfCorrectedTo(
+  body: Record<string, unknown>,
+): { readonly relationshipType: ExpenseRelationshipType } | undefined {
+  const raw = body['ifCorrectedTo'];
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ApiRequestError('"ifCorrectedTo" must be an object.', 'ifCorrectedTo');
+  }
+  return {
+    relationshipType: requireOneOf(
+      raw as Record<string, unknown>,
+      'relationshipType',
+      DEBT_CREATING_RELATIONSHIP_TYPES,
     ),
   };
 }

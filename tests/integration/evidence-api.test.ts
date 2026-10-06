@@ -89,6 +89,19 @@ async function ingestOne(fields: Record<string, string> = {}): Promise<string> {
 }
 
 describe('POST /api/evidence/files', () => {
+  it('refuses a file whose bytes are not the format it was declared as, and stores nothing', async () => {
+    for (const [bytes, mediaType] of [
+      [Buffer.from('<html><script>alert(1)</script></html>'), 'image/png'],
+      [Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'), 'image/jpeg'],
+      [syntheticDocument('a-photo', 'image/jpeg'), 'application/pdf'],
+    ] as const) {
+      const response = await api.handle(upload({}, { bytes: Uint8Array.from(bytes), mediaType }));
+      expect(response.status).toBe(422);
+      expect((await json(response))['error']).toMatchObject({ code: 'EVIDENCE_CONTENT_MISMATCH' });
+    }
+    expect(store.size()).toBe(0);
+  });
+
   it('stores an uploaded document and reports where it went', async () => {
     const response = await api.handle(upload());
     const body = await json(response);

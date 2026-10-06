@@ -1651,10 +1651,42 @@ export async function previewAllocation(
    * kind. The ledger refuses it for one already approved.
    */
   ifApprovedAs?: { readonly relationshipType: string },
+  /**
+   * For an expense already approved as personal: show the split as if it were corrected to this
+   * kind (ADR-0073). The ledger refuses it wherever the correction itself would be refused.
+   */
+  ifCorrectedTo?: { readonly relationshipType: string },
 ): Promise<AllocationPreviewResult> {
   return request<AllocationPreviewResult>(`/api/expenses/${expenseId}/allocation/preview`, {
     method: "POST",
-    body: JSON.stringify(ifApprovedAs === undefined ? decision : { ...decision, ifApprovedAs }),
+    body: JSON.stringify({
+      ...decision,
+      ...(ifApprovedAs === undefined ? {} : { ifApprovedAs }),
+      ...(ifCorrectedTo === undefined ? {} : { ifCorrectedTo }),
+    }),
+  });
+}
+
+/**
+ * Corrects an expense approved as personal into a kind other people share, and saves who shared
+ * it, as one decision (ADR-0073). Sent against the kind the screen showed — `personal` — so a
+ * repeat after a lost answer, or another tab, is refused (409) rather than applied twice.
+ */
+export async function correctExpenseKind(input: {
+  readonly expenseId: string;
+  readonly relationshipType: string;
+  readonly decision: AllocationDecisionInput;
+  readonly reason: string;
+}): Promise<unknown> {
+  return request(`/api/expenses/${input.expenseId}/relationship`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: ACTOR,
+      expectedRelationshipType: "personal",
+      relationshipType: input.relationshipType,
+      reason: input.reason,
+      ...input.decision,
+    }),
   });
 }
 

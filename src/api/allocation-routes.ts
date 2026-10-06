@@ -11,7 +11,7 @@
  * the previous version).
  */
 
-import { ALLOCATION_METHODS, asId } from '../domain/index.js';
+import { ALLOCATION_METHODS, DEBT_CREATING_RELATIONSHIP_TYPES, asId } from '../domain/index.js';
 import type {
   AllocationMethod,
   BeneficiaryRef,
@@ -19,7 +19,7 @@ import type {
   Paise,
   PersonId,
 } from '../domain/index.js';
-import { approveAllocation } from '../services/index.js';
+import { approveAllocation, correctExpenseKind } from '../services/index.js';
 import type { AllocationDecision, GroupShareOverride } from '../services/index.js';
 
 import {
@@ -81,6 +81,47 @@ export async function postAllocation(
     },
   });
 
+  return jsonResponse(201, result);
+}
+
+/**
+ * `POST /api/expenses/:expenseId/relationship` — correct an expense approved as `personal` into a
+ * kind other people share, and say who shared it, as one decision (ADR-0073).
+ *
+ * Body: `{ actor, expectedRelationshipType: "personal", relationshipType, reason, method, ... }`,
+ * where `relationshipType` is `shared`, `paid_on_behalf` or `household_shared_flat`, `reason` is
+ * required, and the split fields are exactly the allocation route's. `expectedRelationshipType`
+ * is the kind the person saw: if the ledger holds anything else, nothing is changed (409) — the
+ * answer a retry after a lost response, or a second tab, gets.
+ */
+export async function postExpenseRelationship(
+  deps: ApiDependencies,
+  request: Request,
+  params: RouteParams,
+): Promise<Response> {
+  const expenseId = asId<'expense'>(requireUuid(requireParam(params, 'expenseId'), 'expenseId'));
+  const body = await readJsonObject(request);
+  const actor = requirePersonActor(body);
+  const expectedRelationshipType = requireOneOf(body, 'expectedRelationshipType', [
+    'personal',
+  ] as const);
+  const relationshipType = requireOneOf(body, 'relationshipType', DEBT_CREATING_RELATIONSHIP_TYPES);
+  const reason = requireString(body, 'reason').trim();
+  if (reason.length === 0 || reason.length > 500) {
+    throw new ApiRequestError('"reason" must say why, in at most 500 characters.', 'reason');
+  }
+  const decision = parseAllocationDecision(body);
+  const groupShareOverrides = parseGroupShareOverrides(body);
+
+  const result = await correctExpenseKind(deps.db, {
+    expenseId,
+    expectedRelationshipType,
+    relationshipType,
+    decision,
+    reason,
+    ...(groupShareOverrides === undefined ? {} : { groupShareOverrides }),
+    audit: { actor, source: 'api POST /api/expenses/:expenseId/relationship' },
+  });
   return jsonResponse(201, result);
 }
 

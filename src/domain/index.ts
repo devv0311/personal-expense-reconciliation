@@ -32,6 +32,7 @@ export * from './group-expansion.js';
 export * from './ids.js';
 export * from './immutability.js';
 export * from './instalment.js';
+export * from './kind-correction.js';
 export * from './lifecycle.js';
 export * from './money.js';
 export * from './normalization.js';

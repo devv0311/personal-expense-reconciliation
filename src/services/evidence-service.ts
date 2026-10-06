@@ -26,6 +26,7 @@
 import {
   assertEvidenceLinkOnce,
   parseEvidenceMediaType,
+  assertEvidenceBytesMatchMediaType,
   validateEvidencePayload,
 } from '../domain/index.js';
 import type {
@@ -118,6 +119,7 @@ export async function ingestEvidenceDocument(
 ): Promise<IngestEvidenceResult> {
   const mediaType = parseEvidenceMediaType(input.mediaType);
   assertWithinSizeLimit(input.bytes.byteLength);
+  assertEvidenceBytesMatchMediaType(mediaType, input.bytes);
 
   const links = {
     linkedPaymentId: input.linkedPaymentId ?? null,

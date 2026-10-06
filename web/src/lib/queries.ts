@@ -270,15 +270,25 @@ export function useAllocationPreview(
   expenseId: string,
   decision: api.AllocationDecisionInput | null,
   ifApprovedAs?: { readonly relationshipType: string },
+  ifCorrectedTo?: { readonly relationshipType: string },
 ) {
   const key =
     decision === null
       ? ""
-      : JSON.stringify(ifApprovedAs === undefined ? decision : { decision, ifApprovedAs });
+      : JSON.stringify(
+          ifApprovedAs === undefined && ifCorrectedTo === undefined
+            ? decision
+            : { decision, ifApprovedAs, ifCorrectedTo },
+        );
   return useQuery({
     queryKey: queryKeys.allocationPreview(expenseId, key),
     queryFn: () =>
-      api.previewAllocation(expenseId, decision as api.AllocationDecisionInput, ifApprovedAs),
+      api.previewAllocation(
+        expenseId,
+        decision as api.AllocationDecisionInput,
+        ifApprovedAs,
+        ifCorrectedTo,
+      ),
     enabled: decision !== null,
   });
 }
@@ -1295,6 +1305,130 @@ export function useApproveAllocation(expenseId: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.expenseHistory(expenseId) });
     },
   });
+}
+
+const CORRECTION_UNCERTAIN =
+  "The connection dropped, so we can't yet tell whether the correction was recorded. Nothing will be sent again until the ledger has been checked — press the button to check and continue.";
+const CORRECTION_NOT_RECORDED =
+  "The connection dropped, and when we checked, the ledger still had it as just yours: the correction was not recorded. The ledger is checked again before anything is sent — you can try again.";
+
+/**
+ * Correcting an expense approved as personal into one other people shared, with who shared it
+ * (ADR-0073) — one write, which the ledger applies whole or not at all.
+ *
+ * The write is made against the kind this screen showed, so the ledger itself refuses a second
+ * application. What this adds is the answer a person needs when the first answer never arrived:
+ * before sending again, and after any dropped connection or "already changed" refusal, it reads
+ * what the ledger holds and says which of three things is true — the correction is there exactly
+ * as asked (done), it is not there (try again), or the expense was changed some other way (look
+ * again; nothing from this dialog was applied).
+ */
+export function useCorrectExpenseKind(expenseId: string) {
+  const queryClient = useQueryClient();
+  const invalidate = () => {
+    invalidateExpense(queryClient, expenseId);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.expenseHistory(expenseId) });
+  };
+  const mutation = useMutation({
+    mutationFn: async (input: {
+      readonly relationshipType: string;
+      readonly decision: api.AllocationDecisionInput;
+      readonly reason: string;
+      /** An earlier attempt ended without an answer: read before sending anything again. */
+      readonly recheck?: boolean;
+    }): Promise<void> => {
+      const kindWords = (kind: string) =>
+        kind === "personal" ? "just yours" : kind.replace(/_/g, " ");
+
+      /** What the ledger holds, compared with what this dialog asked. */
+      const reconcile = async (): Promise<
+        | { readonly kind: "committed" | "not_recorded" | "unreadable" }
+        | { readonly kind: "different"; readonly said: string }
+      > => {
+        let expense;
+        try {
+          expense = await api.getExpense(expenseId);
+        } catch {
+          return { kind: "unreadable" };
+        }
+        if (expense.relationshipType === "personal") return { kind: "not_recorded" };
+        if (expense.relationshipType !== input.relationshipType) {
+          return { kind: "different", said: `recorded as ${kindWords(expense.relationshipType)}` };
+        }
+        // The kind is the one asked. The split is ours only if it names the same people the same
+        // way; a correction saved by somebody else with another split is not this one.
+        try {
+          const history = await api.getExpenseHistory(expenseId);
+          const current = history.allocationVersions.find(
+            (version) => version.supersededAt === null,
+          );
+          if (current === undefined) return { kind: "unreadable" };
+          const key = (type: string, id: string) => `${type}:${id}`;
+          const held = current.lines.map((line) => key(line.beneficiaryType, line.beneficiaryId));
+          const asked =
+            input.decision.method === "equal"
+              ? input.decision.beneficiaries.map((who) => key(who.type, who.id))
+              : "lines" in input.decision
+                ? input.decision.lines.map((line) =>
+                    key(line.beneficiary.type, line.beneficiary.id),
+                  )
+                : [];
+          const same =
+            current.method === input.decision.method &&
+            held.length === asked.length &&
+            asked.every((entry) => held.includes(entry));
+          return same
+            ? { kind: "committed" }
+            : {
+                kind: "different",
+                said: `recorded as ${kindWords(expense.relationshipType)}, split between ${
+                  current.lines.map((line) => line.beneficiaryName ?? "somebody").join(", ") ||
+                  "nobody"
+                }`,
+              };
+        } catch {
+          return { kind: "unreadable" };
+        }
+      };
+      const differently = (said: string) =>
+        new DecidedDifferently(
+          `This expense was already changed another way — it is ${said} — so nothing from this dialog was applied. Look at it again before deciding.`,
+        );
+      const settle = async (fallback: unknown) => {
+        const seen = await reconcile();
+        if (seen.kind === "committed") return;
+        if (seen.kind === "different") throw differently(seen.said);
+        if (seen.kind === "not_recorded" && fallback === "network") {
+          throw new UncertainResult(CORRECTION_NOT_RECORDED, "not_recorded");
+        }
+        if (seen.kind === "unreadable") throw new UncertainResult(CORRECTION_UNCERTAIN);
+        throw fallback;
+      };
+
+      if (input.recheck === true) {
+        const seen = await reconcile();
+        if (seen.kind === "committed") return;
+        if (seen.kind === "different") throw differently(seen.said);
+        if (seen.kind === "unreadable") throw new UncertainResult(CORRECTION_UNCERTAIN);
+      }
+      try {
+        await api.correctExpenseKind({
+          expenseId,
+          relationshipType: input.relationshipType,
+          decision: input.decision,
+          reason: input.reason,
+        });
+      } catch (error) {
+        if (api.isUnansweredRequest(error)) return settle("network");
+        // "Already changed": an earlier attempt may have landed with its answer lost. Any other
+        // structured refusal is the ledger answering, and its message stands.
+        if (error instanceof api.ApiError && error.status === 409) return settle(error);
+        throw error;
+      }
+    },
+    onSuccess: invalidate,
+  });
+  return { ...mutation, invalidate };
 }
 
 export function useRecordSettlement() {

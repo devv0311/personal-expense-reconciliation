@@ -79,12 +79,23 @@ export function ExpenseDetail({ expenseId }: { expenseId: string }) {
           </>
         }
         actions={
-          <Link
-            href={`/expenses/${expenseId}/history`}
-            className="text-meta text-accent underline underline-offset-2"
-          >
-            Every split it has had
-          </Link>
+          <div className="flex flex-wrap gap-4">
+            {(row.kindCorrection?.targets.length ?? 0) > 0 && (
+              // Offered only where the ledger said a correction is open (ADR-0073).
+              <Link
+                href={`/expenses/${expenseId}/share`}
+                className="text-meta text-accent underline underline-offset-2"
+              >
+                Recorded as just yours — correct it
+              </Link>
+            )}
+            <Link
+              href={`/expenses/${expenseId}/history`}
+              className="text-meta text-accent underline underline-offset-2"
+            >
+              Every split it has had
+            </Link>
+          </div>
         }
       />
 

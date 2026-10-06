@@ -31,6 +31,11 @@ export interface ExpenseLedgerRow {
   readonly relationshipType: string;
   readonly paidByPersonId: string;
   readonly state: ExpenseState;
+  /**
+   * Only on the single-expense read: the kinds this expense could be corrected to now (ADR-0073),
+   * empty when no correction is open. The ledger decides; a screen only offers what it lists.
+   */
+  readonly kindCorrection?: { readonly targets: readonly string[] };
 }
 
 export interface ExpensePage {

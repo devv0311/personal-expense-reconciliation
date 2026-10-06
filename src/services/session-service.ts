@@ -141,7 +141,7 @@ export async function signIn(db: Database, input: SignInInput): Promise<SignInRe
   const user = await getUserByEmail(db, input.email.trim().toLowerCase());
   const refuse = (): never => {
     throw new ServiceError(
-      'PRECONDITION_FAILED',
+      'AUTHENTICATION_FAILED',
       'That email and password do not match an account.',
     );
   };

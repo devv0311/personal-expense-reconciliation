@@ -10,6 +10,7 @@ import {
   DEBT_CREATING_RELATIONSHIP_TYPES,
   assertExpenseTransition,
   buildAllocationLines,
+  checkKindCorrection,
   isDomainError,
   expandGroupAllocationLine,
   isItemSourcedMethod,
@@ -44,7 +45,7 @@ import {
 } from '../db/index.js';
 import type { AllocationLineDraft, Database, Executor } from '../db/index.js';
 
-import { runAudited, type AuditMeta } from './audit.js';
+import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
 import { ServiceError } from './errors.js';
 import { loadCurrentAllocation, requireExpenseSnapshot, type ExpenseSnapshot } from './loaders.js';
 
@@ -126,76 +127,87 @@ export async function approveAllocation(
   db: Database,
   input: ApproveAllocationInput,
 ): Promise<ApproveAllocationResult> {
-  return runAudited(db, input.audit, async ({ exec, record }) => {
-    const expense = await requireExpenseSnapshot(exec, input.expenseId);
-    assertAllocatable(expense);
+  return runAudited(db, input.audit, (ctx) => approveAllocationWithin(ctx, input));
+}
 
-    const lines = await buildLines(exec, expense, input.decision);
-    validateAllocationLineAmounts(lines);
-    validateAllocationSum(lines, expense.netAmount);
-    if (isItemSourcedMethod(input.decision.method)) {
-      validateItemBasedLineSums(lines, await loadAllocatableItems(exec, expense.id));
-    }
+/**
+ * {@link approveAllocation} inside a unit of work the caller already holds — so a decision that
+ * must commit together with its split (correcting an expense's kind, ADR-0073) cannot leave the
+ * expense changed and undivided. Every rule, and every audit event, is the same.
+ */
+export async function approveAllocationWithin(
+  ctx: AuditContext,
+  input: Omit<ApproveAllocationInput, 'audit'>,
+): Promise<ApproveAllocationResult> {
+  const { exec, record } = ctx;
+  const expense = await requireExpenseSnapshot(exec, input.expenseId);
+  assertAllocatable(expense);
 
-    const drafts = await Promise.all(
-      lines.map((line) => toDraft(exec, expense, line, input.groupShareOverrides ?? [])),
-    );
+  const lines = await buildLines(exec, expense, input.decision);
+  validateAllocationLineAmounts(lines);
+  validateAllocationSum(lines, expense.netAmount);
+  if (isItemSourcedMethod(input.decision.method)) {
+    validateItemBasedLineSums(lines, await loadAllocatableItems(exec, expense.id));
+  }
 
-    const previous = await loadCurrentAllocation(exec, expense.id);
-    const decidedAt = input.decidedAt ?? new Date();
-    if (previous !== null) {
-      await supersedeAllocation(exec, previous.allocation.id, decidedAt);
-      await record({
-        entityType: 'allocation',
-        entityId: previous.allocation.id,
-        action: 'supersede',
-        oldValue: { method: previous.allocation.method, lines: serialise(previous.lines) },
-        newValue: { supersededAt: decidedAt.toISOString() },
-      });
-    }
+  const drafts = await Promise.all(
+    lines.map((line) => toDraft(exec, expense, line, input.groupShareOverrides ?? [])),
+  );
 
-    const inserted = await insertAllocationWithLines(exec, {
+  const previous = await loadCurrentAllocation(exec, expense.id);
+  const decidedAt = input.decidedAt ?? new Date();
+  if (previous !== null) {
+    await supersedeAllocation(exec, previous.allocation.id, decidedAt);
+    await record({
+      entityType: 'allocation',
+      entityId: previous.allocation.id,
+      action: 'supersede',
+      oldValue: { method: previous.allocation.method, lines: serialise(previous.lines) },
+      newValue: { supersededAt: decidedAt.toISOString() },
+    });
+  }
+
+  const inserted = await insertAllocationWithLines(exec, {
+    expenseId: expense.id,
+    method: input.decision.method,
+    decidedBy: input.decidedBy,
+    decidedAt,
+    lines: drafts,
+  });
+
+  await record({
+    entityType: 'allocation',
+    entityId: inserted.allocationId,
+    action: 'create',
+    newValue: {
       expenseId: expense.id,
       method: input.decision.method,
       decidedBy: input.decidedBy,
-      decidedAt,
-      lines: drafts,
-    });
-
-    await record({
-      entityType: 'allocation',
-      entityId: inserted.allocationId,
-      action: 'create',
-      newValue: {
-        expenseId: expense.id,
-        method: input.decision.method,
-        decidedBy: input.decidedBy,
-        netAmount: expense.netAmount.toString(),
-        lines: serialise(lines),
-      },
-    });
-
-    // "I agree this was the group dinner" and "I agree it was split exactly this way" are
-    // different decisions; only the second one moves an approved expense to allocated.
-    if (expense.state === 'approved') {
-      assertExpenseTransition('approved', 'allocated');
-      await updateExpenseState(exec, expense.id, 'allocated');
-      await record({
-        entityType: 'expense',
-        entityId: expense.id,
-        action: 'update',
-        oldValue: { state: 'approved' },
-        newValue: { state: 'allocated' },
-      });
-    }
-
-    return {
-      allocationId: inserted.allocationId,
-      supersededAllocationId: previous?.allocation.id ?? null,
-      lines,
-      netAmount: expense.netAmount,
-    };
+      netAmount: expense.netAmount.toString(),
+      lines: serialise(lines),
+    },
   });
+
+  // "I agree this was the group dinner" and "I agree it was split exactly this way" are
+  // different decisions; only the second one moves an approved expense to allocated.
+  if (expense.state === 'approved') {
+    assertExpenseTransition('approved', 'allocated');
+    await updateExpenseState(exec, expense.id, 'allocated');
+    await record({
+      entityType: 'expense',
+      entityId: expense.id,
+      action: 'update',
+      oldValue: { state: 'approved' },
+      newValue: { state: 'allocated' },
+    });
+  }
+
+  return {
+    allocationId: inserted.allocationId,
+    supersededAllocationId: previous?.allocation.id ?? null,
+    lines,
+    netAmount: expense.netAmount,
+  };
 }
 
 /* ========================================================================== the preview */
@@ -260,10 +272,17 @@ export interface PreviewAllocationInput {
    * Preview the split **as if the expense were approved with this relationship type** — for an
    * expense still waiting for approval, so a person can see what choosing `shared` would mean
    * before choosing it. Refused for an expense that is already approved: its kind is part of
-   * what was approved, and this build has no mechanism for correcting one afterwards, so
-   * previewing a change nobody can make would be a promise it cannot keep.
+   * what was approved. The one correction that exists afterwards — personal to a kind people
+   * share (ADR-0073) — has its own preview, `ifCorrectedTo`, so it is never confused with this.
    */
   readonly ifApprovedAs?: { readonly relationshipType: ExpenseRelationshipType };
+  /**
+   * Preview the split **as if this approved `personal` expense were corrected to this kind** —
+   * the preview half of `services.correctExpenseKind` (ADR-0073). Refused, exactly as the
+   * correction would be, for an expense that is not approved as `personal` or is past
+   * `allocated`. Mutually exclusive with `ifApprovedAs`.
+   */
+  readonly ifCorrectedTo?: { readonly relationshipType: ExpenseRelationshipType };
   readonly decision: AllocationDecision;
   readonly groupShareOverrides?: readonly GroupShareOverride[];
   /** Whose ledger this is, so a share can be labelled "You" and a direction can be stated. */
@@ -288,7 +307,18 @@ export async function previewAllocation(
   input: PreviewAllocationInput,
 ): Promise<AllocationPreviewResult> {
   const snapshot = await requireExpenseSnapshot(db, input.expenseId);
-  const expense = hypotheticallyApproved(snapshot, input.ifApprovedAs);
+  if (input.ifApprovedAs !== undefined && input.ifCorrectedTo !== undefined) {
+    throw new ServiceError(
+      'PRECONDITION_FAILED',
+      'A preview is either "as if approved" (an expense still waiting) or "as if corrected" (one ' +
+        'already approved as personal), never both.',
+      { expenseId: input.expenseId },
+    );
+  }
+  const expense =
+    input.ifCorrectedTo === undefined
+      ? hypotheticallyApproved(snapshot, input.ifApprovedAs)
+      : hypotheticallyCorrected(snapshot, input.ifCorrectedTo);
   const people = await listPeople(db);
   const names = new Map<string, string>(
     people.map((person): [string, string] => [person.id, person.displayName]),
@@ -462,6 +492,29 @@ function hypotheticallyApproved(
     );
   }
   return { ...expense, relationshipType: ifApprovedAs.relationshipType, state: 'approved' };
+}
+
+/**
+ * The expense as it would stand once its approved `personal` kind is corrected (ADR-0073), or a
+ * refusal worded exactly as the correction itself would word it. Nothing is written.
+ */
+function hypotheticallyCorrected(
+  expense: ExpenseSnapshot,
+  ifCorrectedTo: NonNullable<PreviewAllocationInput['ifCorrectedTo']>,
+): ExpenseSnapshot {
+  const refusal = checkKindCorrection({
+    currentRelationshipType: expense.relationshipType,
+    expectedRelationshipType: expense.relationshipType,
+    targetRelationshipType: ifCorrectedTo.relationshipType,
+    state: expense.state,
+  });
+  if (refusal !== null) {
+    throw new ServiceError('PRECONDITION_FAILED', refusal.message, {
+      expenseId: expense.id,
+      reason: refusal.reason,
+    });
+  }
+  return { ...expense, relationshipType: ifCorrectedTo.relationshipType };
 }
 
 function assertAllocatable(expense: ExpenseSnapshot): void {

@@ -104,24 +104,26 @@ export function toErrorResponse(error: unknown): Response {
     const status =
       error.code === 'ENTITY_NOT_FOUND'
         ? 404
-        : error.code === 'PRECONDITION_FAILED' ||
-            error.code === 'STATEMENT_ACCOUNT_MISMATCH' ||
-            error.code === 'STATEMENT_KIND_CONFLICT'
-          ? 409
-          : error.code === 'AI_PROPOSAL_INVALID'
-            ? 422
-            : error.code === 'IMPORT_SOURCE_INVALID' || error.code === 'STATEMENT_KIND_REQUIRED'
-              ? 400
-              : error.code === 'EVIDENCE_DOCUMENT_TOO_LARGE' ||
-                  error.code === 'STATEMENT_FILE_TOO_LARGE'
-                ? 413
-                : error.code === 'EVIDENCE_STORE_UNAVAILABLE'
-                  ? 503
-                  : error.code === 'SPLITWISE_SYNC_FAILED'
-                    ? 502
-                    : error.code === 'LEDGER_QUESTION_UNAVAILABLE'
-                      ? 503
-                      : 500;
+        : error.code === 'AUTHENTICATION_FAILED'
+          ? 401
+          : error.code === 'PRECONDITION_FAILED' ||
+              error.code === 'STATEMENT_ACCOUNT_MISMATCH' ||
+              error.code === 'STATEMENT_KIND_CONFLICT'
+            ? 409
+            : error.code === 'AI_PROPOSAL_INVALID'
+              ? 422
+              : error.code === 'IMPORT_SOURCE_INVALID' || error.code === 'STATEMENT_KIND_REQUIRED'
+                ? 400
+                : error.code === 'EVIDENCE_DOCUMENT_TOO_LARGE' ||
+                    error.code === 'STATEMENT_FILE_TOO_LARGE'
+                  ? 413
+                  : error.code === 'EVIDENCE_STORE_UNAVAILABLE'
+                    ? 503
+                    : error.code === 'SPLITWISE_SYNC_FAILED'
+                      ? 502
+                      : error.code === 'LEDGER_QUESTION_UNAVAILABLE'
+                        ? 503
+                        : 500;
     return jsonResponse(status, {
       error: { code: error.code, message: error.message },
     } satisfies ApiErrorBody);

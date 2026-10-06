@@ -44,20 +44,21 @@ What the 5 October 2026 readiness verification actually showed — scope stated,
   photographed documents, which stays an explicit opt-in (ADR-0051).
 - **Owner decisions (6 Oct 2026):** ADR-0071 (a possible duplicate stays asked while either copy can
   still count, so one movement cannot be counted twice) and the ADR-0068 layout choice are
-  **ratified as built**. Correcting the kind of an expense _already approved_ as personal is
-  **deferred from this release** — no mechanism exists and a design is kept as a proposal only (a
-  statement line can now be approved as shared _before_ approval).
-- **No dynamic security scan (DAST) has been run, and nothing here claims security clearance.** The
-  official Hawk CLI (6.5.0) is installed and a HawkScan DAST run on 6 Oct 2026 against the synthetic loopback target
-  (twelve described operations; the multipart upload route and every route outside that subset were not
-  scanned) found one Low issue (`X-Content-Type-Options` missing, fixed and re-checked) and no other confirmed
-  finding; that is bounded evidence, not a guarantee. Manual probing found and fixed three defects (a
-  cross-site write and a `Host` check — [ADR-0072](docs/decisions/0072-a-write-is-accepted-only-from-the-web-origin-this-ledger-serves.md),
-  **ratified by the owner on 6 October 2026** — and unbounded XLSX inflation); every production dependency advisory is
-  closed, and a few development-tooling advisories remain because their only offered fix is a downgrade or
-  does not exist. A local fingerprint check, kept outside the repository, was run read-only against the owner's
-  statement exports with no identifier or name match; ledger-only content was not covered (see the
-  readiness report).
+  **ratified as built**. Correcting the kind of an expense _already approved_ as personal, deferred
+  from that release, is now **built**
+  ([ADR-0073](docs/decisions/0073-an-expense-approved-as-personal-is-corrected-by-a-new-decision.md)):
+  one audited decision, with a required reason, that makes it shared and saves who shared it
+  together; the amount never changes.
+- **Security: bounded evidence, not clearance.** An authenticated HawkScan DAST of a synthetic
+  loopback target (21 described operations, including the new correction route, evidence reads and
+  intake) found one Low, by-design item: the signed-in owner's own email, returned to them. Forty
+  scripted probes found and fixed two more issues: a failed sign-in now answers 401, and an upload
+  whose bytes are not its declared format is refused. Earlier rounds closed a cross-site write, a
+  `Host` check ([ADR-0072](docs/decisions/0072-a-write-is-accepted-only-from-the-web-origin-this-ledger-serves.md))
+  and unbounded XLSX inflation. Every production dependency advisory is closed. One development-only
+  lint chain (`braces`) has no patched release and is unreachable in this configuration. Scope,
+  exclusions and the real-ledger read-only acceptance:
+  [`docs/testing/release-2026-10-06.md`](docs/testing/release-2026-10-06.md).
 - **No background worker runs.** The job queue (`src/services/job-service.ts`) has a runner,
   but nothing starts it. No screen queues a job and no journey above needs one — imports and
   analysis run inside the request (ADR-0061) — but a job posted directly to `POST /api/jobs`

@@ -13,6 +13,11 @@ export type ServiceErrorCode =
   | 'ENTITY_NOT_FOUND'
   /** The operation is not valid for the entity's current state. */
   | 'PRECONDITION_FAILED'
+  /**
+   * Sign-in credentials did not match an account (401). One code for "no such account" and
+   * "wrong password", so it is no enumeration oracle (round-19 security review).
+   */
+  | 'AUTHENTICATION_FAILED'
   /** A source file could not be read; every rejected row is reported (Phase 6). */
   | 'IMPORT_SOURCE_INVALID'
   /**

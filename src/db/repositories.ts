@@ -316,6 +316,28 @@ export async function updateExpenseClassification(
     .where(eq(expenses.id, expenseId));
 }
 
+/**
+ * Changes an expense's `relationship_type` **only if it still holds `expected`** — the write
+ * half of correcting an approved expense's kind (ADR-0073). Returns whether a row changed.
+ *
+ * The condition is the guard, not decoration: the service has already checked the kind under a
+ * row lock, and this makes a second writer that slipped past every other check change nothing
+ * rather than overwrite a decision it never saw. `amount` is not in the `set`, and never is.
+ */
+export async function updateExpenseRelationshipTypeIfCurrent(
+  exec: Executor,
+  expenseId: ExpenseId,
+  expected: ExpenseRelationshipType,
+  next: ExpenseRelationshipType,
+): Promise<boolean> {
+  const rows = await exec
+    .update(expenses)
+    .set({ relationshipType: next, updatedAt: new Date() })
+    .where(and(eq(expenses.id, expenseId), eq(expenses.relationshipType, expected)))
+    .returning({ id: expenses.id });
+  return rows.length === 1;
+}
+
 /** One row of `listExpenses` — the ledger view (`docs/roadmap.md` phase 13). */
 export interface ExpenseLedgerRow {
   readonly id: ExpenseId;

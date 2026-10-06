@@ -123,7 +123,7 @@ async function seedSharedDinner(): Promise<string> {
 /** A receipt document attached to the expense, so the pack actually cites it. */
 async function attachReceipt(expenseId: string): Promise<EvidenceId> {
   const result = await ingestEvidenceDocument(database.db, {
-    bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+    bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]),
     mediaType: 'application/pdf',
     type: 'receipt_image',
     capturedAt: new Date('2026-07-01T10:05:00.000Z'),
@@ -300,7 +300,7 @@ describe('POST /api/proof-packs/:recipientPersonId/deliveries', () => {
         evidenceId,
         filename: transport.sent[0]!.attachments[0]!.filename,
         mediaType: 'application/pdf',
-        byteSize: 4,
+        byteSize: 5,
       },
     ]);
   });

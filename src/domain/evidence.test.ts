@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { DomainError } from './errors.js';
 import {
+  assertEvidenceBytesMatchMediaType,
   assertEvidenceLinkOnce,
   claimsSettlement,
   evidenceMediaTypeForExtension,
@@ -255,5 +256,63 @@ describe('assertEvidenceLinkOnce — fill in later, never rewrite', () => {
     expect(() => assertEvidenceLinkOnce(linked, { ...linked, linkedPaymentId: null })).toThrow(
       /orphan/i,
     );
+  });
+});
+
+describe('assertEvidenceBytesMatchMediaType', () => {
+  const bytes = (...parts: Array<string | number[]>) =>
+    Uint8Array.from(
+      parts.flatMap((part) =>
+        typeof part === 'string' ? [...part].map((char) => char.charCodeAt(0)) : part,
+      ),
+    );
+  const PNG = bytes([0x89], 'PNG\r\n\x1a\n', [0, 0, 0, 13]);
+  const JPEG = bytes([0xff, 0xd8, 0xff, 0xe0]);
+  const WEBP = bytes('RIFF', [0, 0, 0, 0], 'WEBPVP8 ');
+  const HEIC = bytes([0, 0, 0, 24], 'ftypheic', [0, 0, 0, 0]);
+  const PDF = bytes('%PDF-1.7\n');
+
+  it('accepts each allowlisted format by its own signature', () => {
+    expect(() => assertEvidenceBytesMatchMediaType('image/png', PNG)).not.toThrow();
+    expect(() => assertEvidenceBytesMatchMediaType('image/jpeg', JPEG)).not.toThrow();
+    expect(() => assertEvidenceBytesMatchMediaType('image/webp', WEBP)).not.toThrow();
+    expect(() => assertEvidenceBytesMatchMediaType('image/heic', HEIC)).not.toThrow();
+    expect(() => assertEvidenceBytesMatchMediaType('application/pdf', PDF)).not.toThrow();
+    expect(() =>
+      assertEvidenceBytesMatchMediaType('image/heic', bytes([0, 0, 0, 24], 'ftypmif1')),
+    ).not.toThrow();
+  });
+
+  it('accepts a PDF header after leading bytes, within the first 1,024', () => {
+    expect(() =>
+      assertEvidenceBytesMatchMediaType('application/pdf', bytes(' '.repeat(1000), '%PDF-1.4')),
+    ).not.toThrow();
+    expect(() =>
+      assertEvidenceBytesMatchMediaType('application/pdf', bytes(' '.repeat(1100), '%PDF-1.4')),
+    ).toThrow(/not that format/);
+  });
+
+  it('refuses HTML, SVG or another format declared as an image or a PDF', () => {
+    const html = bytes('<html><script>alert(1)</script></html>');
+    const svg = bytes('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    for (const type of [
+      'image/png',
+      'image/jpeg',
+      'image/webp',
+      'image/heic',
+      'application/pdf',
+    ] as const) {
+      expect(() => assertEvidenceBytesMatchMediaType(type, html)).toThrow(/not that format/);
+      expect(() => assertEvidenceBytesMatchMediaType(type, svg)).toThrow(/not that format/);
+    }
+    expect(() => assertEvidenceBytesMatchMediaType('image/png', JPEG)).toThrow();
+    expect(() => assertEvidenceBytesMatchMediaType('image/jpeg', PDF)).toThrow();
+    expect(() =>
+      assertEvidenceBytesMatchMediaType('image/webp', bytes('RIFF', [0, 0, 0, 0], 'WAVE')),
+    ).toThrow();
+    expect(() =>
+      assertEvidenceBytesMatchMediaType('image/heic', bytes([0, 0, 0, 24], 'ftypisom')),
+    ).toThrow();
+    expect(() => assertEvidenceBytesMatchMediaType('image/png', new Uint8Array())).toThrow();
   });
 });

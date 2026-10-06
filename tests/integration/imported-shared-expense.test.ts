@@ -8,8 +8,9 @@
  * `relationshipType`), sees the split the ledger would compute for it first, and approving it
  * allocates through the existing allocation route.
  *
- * It also pins what is deliberately not offered: previewing a different kind for an expense
- * that is already approved, because this build has no mechanism for correcting one.
+ * It also pins what is deliberately not offered here: previewing "as if approved" for an expense
+ * that is already approved. Correcting an approved personal expense afterwards is a separate,
+ * explicit decision with its own preview (ADR-0073, `expense-kind-correction.test.ts`).
  *
  * Every figure is synthetic and worked out by hand in the assertions.
  */

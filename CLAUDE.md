@@ -3,9 +3,11 @@
 > **Readiness hardening (2026-10-05, uncommitted at the time of writing).** Two things changed
 > that are easy to get wrong. **A statement line's kind is chosen before approval:** the category
 > dialog asks "Who was this for?" and shows the ledger's own split for a shared kind (the
-> allocation preview answers "as if approved as…" for a not-yet-approved expense); the kind of an
-> expense _already_ approved still cannot be changed — no mechanism exists, and a design is
-> proposed in `docs/testing/readiness-verification-2026-10-05.md`, not built. **A movement
+> allocation preview answers "as if approved as…" for a not-yet-approved expense). An expense
+> _already_ approved as **personal** can now be corrected to a kind other people share, by an
+> explicit decision with a required reason that saves its split in the same transaction
+> (`POST /api/expenses/:id/relationship`, preview `ifCorrectedTo`, [ADR-0073](docs/decisions/0073-an-expense-approved-as-personal-is-corrected-by-a-new-decision.md));
+> no other kind change after approval exists, and `amount` still never changes. **A movement
 > cannot be counted twice by deferring its duplicate question:** a counted payment stays in a
 > possible-duplicate pair as the survivor, and every act that counts a payment
 > (`services.assertPaymentMayBeCounted`) refuses an uncounted copy until a person has confirmed
@@ -22,8 +24,8 @@
 > A file whose columns fit two layouts is imported by the person **choosing** one in the dialog
 > (`ambiguousLayouts` on the preview; nothing preselected; the layout is never evidence of the
 > account kind) — ADR-0068's update, **ratified by the owner on 6 October 2026, as built**. Correcting
-> the kind of an expense already approved as personal is **deferred from this release**
-> (design proposal only, not built). **The API now refuses a write sent by a web page on another origin, and any
+> the kind of an expense already approved as personal, deferred from the 6 October readiness
+> release, was **built afterwards as ADR-0073** on the owner's instruction. **The API now refuses a write sent by a web page on another origin, and any
 > request addressed to a non-loopback `Host` on a loopback bind** (`src/request-guard.ts`,
 > [ADR-0072](docs/decisions/0072-a-write-is-accepted-only-from-the-web-origin-this-ledger-serves.md), **ratified by the owner on 6 October 2026, as built**), and the XLSX reader caps the whole workbook's inflated size. A HawkScan run against a synthetic subset of the write routes found one Low header issue (fixed); it is bounded evidence, not clearance.
 >

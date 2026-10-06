@@ -179,7 +179,7 @@ expenses identical.
 **Resolved 6 October 2026 — the owner approved all three recommended decisions:** (1) ADR-0071 is
 **ratified as built**; (2) the ADR-0068 explicit ambiguous-layout selection is **ratified as built**;
 (3) correcting the kind of an expense already approved as Personal is **deferred from this release**
-(the design proposal below stays on file, unbuilt). This is a decision record only: it is not
+(the design proposal below stays on file; **it was later built, as amended, by [ADR-0073](../decisions/0073-an-expense-approved-as-personal-is-corrected-by-a-new-decision.md)**). This is a decision record only: it is not
 permission to commit, push or deploy, and no real data was accessed. The text below is kept as it
 was written, so the options and reasoning stay on record.
 

@@ -210,8 +210,10 @@ describe('signing in', () => {
       password: PASSWORD,
     });
 
-    expect(wrongPassword.status).toBe(409);
-    expect(unknownAccount.status).toBe(409);
+    // 401, not 409: a failed sign-in is an authentication failure, and a client (or a scanner)
+    // reading the status alone must not mistake it for a state conflict (round-19 review).
+    expect(wrongPassword.status).toBe(401);
+    expect(unknownAccount.status).toBe(401);
     const first = (await wrongPassword.json()) as { error: { message: string } };
     const second = (await unknownAccount.json()) as { error: { message: string } };
     // Identical, deliberately: telling the two apart is an account-enumeration oracle.

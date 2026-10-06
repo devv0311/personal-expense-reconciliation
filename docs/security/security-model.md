@@ -66,6 +66,13 @@ governed independently of database access.
 - **Only an allowlist of formats is stored** (JPEG, PNG, WebP, HEIC, PDF), because the declared
   type is what decides how a document is later rendered back to a person. The one route that
   serves a document sets `X-Content-Type-Options: nosniff` for the same reason.
+- **The bytes must be the format they are declared as** (since the round-19 review,
+  6 October 2026). `domain.assertEvidenceBytesMatchMediaType` checks each format's own signature
+  at ingestion, so HTML, SVG or any other file sent as `image/png` is refused (422,
+  `EVIDENCE_CONTENT_MISMATCH`) rather than stored. Before this, such a file was stored and, because
+  of `nosniff`, could never execute. It was still not the evidence it claimed to be (CWE-434,
+  defence in depth). This checks the container only. It is not a parser, and it proves nothing
+  about the content beyond its container.
 
 The development root is `EVIDENCE_STORAGE_PATH` (`.env.example`), which is gitignored: no real
 financial document ever enters the repository.
@@ -123,6 +130,14 @@ object — a worse thing to hold than the individual values were.
   data; log an error reference ID and correlate separately if deeper debugging is needed.
 
 ## Authentication
+
+As built: one password (scrypt, timing-safe comparison), a session token in an `HttpOnly`,
+`SameSite=Lax` cookie (or a `Bearer` header), and `AUTH_REQUIRED` on by default for any
+non-loopback bind. A failed sign-in answers **401 `AUTHENTICATION_FAILED`**, with one message for
+an unknown account and a wrong password, so neither the status nor the text reveals which one
+failed. It answered 409 until the round-19 review. **Known limitation:** there is no attempt limit
+or lockout. On the default loopback bind only local processes can reach the API, and scrypt makes
+each guess slow. Binding to a network interface should add an attempt limit first.
 
 Minimal, single-user session auth for the current phase
 (`docs/architecture/system-architecture.md`) — no third-party OAuth surface to secure yet

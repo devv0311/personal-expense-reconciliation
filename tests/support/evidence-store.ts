@@ -66,14 +66,26 @@ export function createMemoryEvidenceStore(): MemoryEvidenceStore {
   };
 }
 
+/** The leading bytes of each stored format — what ingestion checks the declared type against. */
+const SIGNATURES: Record<string, readonly number[]> = {
+  'image/jpeg': [0xff, 0xd8, 0xff, 0xe0],
+  'image/png': [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  'image/webp': [...Buffer.from('RIFF'), 0, 0, 0, 0, ...Buffer.from('WEBP')],
+  'image/heic': [0, 0, 0, 24, ...Buffer.from('ftypheic')],
+  'application/pdf': [...Buffer.from('%PDF-1.7\n')],
+};
+
 /**
  * A synthetic document with distinguishable bytes.
  *
  * Real receipts are financial documents and never enter this repository
- * (`fixtures/README.md`); a PNG signature followed by a label is enough for every property
- * these tests assert, all of which are about addressing and linkage rather than about pixels.
+ * (`fixtures/README.md`); the declared format's own signature followed by a label is enough for
+ * every property these tests assert, all of which are about addressing and linkage rather than
+ * about pixels. The signature matters since ingestion refuses bytes that are not the format
+ * they are declared as (`domain.assertEvidenceBytesMatchMediaType`).
  */
-export function syntheticDocument(label: string): Uint8Array {
-  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+export function syntheticDocument(label: string, mediaType = 'image/jpeg'): Uint8Array {
+  const signature = SIGNATURES[mediaType];
+  if (signature === undefined) throw new Error(`No synthetic signature for ${mediaType}.`);
   return Uint8Array.from([...signature, ...Buffer.from(label, 'utf8')]);
 }

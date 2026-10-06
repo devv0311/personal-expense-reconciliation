@@ -153,7 +153,11 @@ describe('GET /api/expenses/:expenseId', () => {
       (expense) => expense['id'] === expenseId,
     );
 
-    expect(detail).toEqual(row);
+    // The detail is the listing's row plus one thing only it carries: which kinds this expense
+    // could be corrected to now (ADR-0073) — none for one approved as shared.
+    const { kindCorrection, ...sameAsListing } = detail;
+    expect(sameAsListing).toEqual(row);
+    expect(kindCorrection).toEqual({ targets: [] });
     // The net figure is the domain's, quoted once — a detail screen cannot disagree with the
     // list row that linked to it.
     expect(detail['grossAmount']).toBe('320000');

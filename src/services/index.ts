@@ -27,6 +27,7 @@ export * from './expense-item-service.js';
 export * from './expense-authoring-service.js';
 export * from './expense-ledger-service.js';
 export * from './allocation-service.js';
+export * from './kind-correction-service.js';
 export * from './settlement-service.js';
 export * from './adjustment-service.js';
 export * from './cash-flow-service.js';
