@@ -126,6 +126,14 @@ export interface AttentionItem {
 export interface AttentionSuggestion {
   /** The inference a confirmation decides. `null` when the question carries no proposal. */
   readonly inferenceId: string | null;
+  /**
+   * The expense this proposal created and a confirmation would approve, or `null`.
+   *
+   * What lets the screen ask the ledger what sharing it would mean — a preview of the split as
+   * if this expense were approved as shared (`POST /api/expenses/:id/allocation/preview`) —
+   * before anything is approved.
+   */
+  readonly expenseId: string | null;
   /** The category currently proposed, or `null` when nothing was proposed. */
   readonly category: string | null;
   readonly confidence: ConfidenceLevel;
@@ -288,6 +296,7 @@ function suggestionFor(
     context,
     approvedRules,
     inferenceId: item.kind === 'classification_decision' ? item.inferenceId : null,
+    expenseId: item.kind === 'classification_decision' ? (item.expense?.expenseId ?? null) : null,
     confidence: item.kind === 'classification_decision' ? item.confidence : 'unknown',
     proposed,
   });
@@ -308,6 +317,8 @@ export function readSuggestion(input: {
   };
   readonly context: readonly RelatedPayment[];
   readonly inferenceId: string | null;
+  /** The derived expense a confirmation would approve; omitted when there is none. */
+  readonly expenseId?: string | null;
   readonly confidence: ConfidenceLevel;
   readonly proposed: string | null;
   /** Patterns the person approved (ADR-0064). Omitted means none are in play. */
@@ -342,6 +353,7 @@ export function readSuggestion(input: {
 
   return {
     inferenceId: input.inferenceId,
+    expenseId: input.expenseId ?? null,
     category: leading,
     confidence: input.confidence,
     why,
@@ -366,6 +378,13 @@ function askedFor(item: ReviewQueueItem): AttentionQuestion {
       reasons: item.reasons,
       candidateCount: item.matchCandidates.filter((candidate) => candidate.status === 'proposed')
         .length,
+    });
+  }
+  if (item.kind === 'possible_duplicate') {
+    return attentionQuestion({
+      kind: item.kind,
+      reasons: item.reasons,
+      oneAlreadyCounts: item.candidate.counted === true,
     });
   }
   return attentionQuestion({ kind: item.kind, reasons: item.reasons });
@@ -418,8 +437,18 @@ function factsFor(item: ReviewQueueItem): readonly AttentionFact[] {
     case 'possible_duplicate':
       return [
         { label: 'Both are for', kind: 'money', value: item.payment.amount },
-        { label: 'First recorded', kind: 'date', value: item.candidate.occurredAt },
-        { label: 'Recorded again', kind: 'date', value: item.payment.occurredAt },
+        // When one already counts the dates say which: "first" and "again" would name the wrong
+        // one whenever the counted copy is the later of the two.
+        {
+          label: item.candidate.counted === true ? 'Already counted' : 'First recorded',
+          kind: 'date',
+          value: item.candidate.occurredAt,
+        },
+        {
+          label: item.candidate.counted === true ? 'Not counted yet' : 'Recorded again',
+          kind: 'date',
+          value: item.payment.occurredAt,
+        },
         { label: 'What the record says', kind: 'text', value: item.payment.description },
       ];
     case 'unmatched_evidence': {

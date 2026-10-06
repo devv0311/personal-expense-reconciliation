@@ -135,11 +135,16 @@ export function nonDebtRelationshipWords(relationshipType: string): string | nul
   if ((DEBT_CREATING_RELATIONSHIP_TYPES as readonly string[]).includes(relationshipType)) {
     return null;
   }
+  // The second sentence of each says what is true, not what would be convenient: the kind of an
+  // expense is chosen when it is approved, and nothing in this version changes it afterwards.
+  // (It used to point at "the expense itself", where no such control exists.)
   return relationshipType === 'gift'
     ? 'This is recorded as a gift, so nobody owes anything for it however it is divided. ' +
-        'Change what it was on the expense itself if that is not right.'
+        'What kind of expense it is was decided when it was approved and cannot be changed here.'
     : 'This is recorded as something bought for one person, so naming anybody else divides ' +
-        'it without creating a debt. Change what it was on the expense itself if it was shared.';
+        'it without creating a debt. What kind of expense it is was decided when it was ' +
+        'approved and cannot be changed here. A shared expense is one approved as shared, or ' +
+        'recorded by hand as shared.';
 }
 
 /**

@@ -42,6 +42,7 @@ import { isAiContractError, parseTransactionClassification } from '../ai/index.j
 import type { TransactionClassification } from '../ai/index.js';
 import {
   getEvidenceObservationByEvidenceId,
+  listClaimedPaymentIds,
   listDismissedDuplicatePairs,
   listEvidenceMatchCandidatesForEvidenceIds,
   listPendingClassificationInferences,
@@ -89,6 +90,12 @@ export interface ReviewPaymentView {
   readonly description: string;
   readonly counterpartyType: string;
   readonly state: string;
+  /**
+   * Whether something already counts this payment — an approved decision, a funding link or a
+   * settlement. Read by a possible-duplicate item, where the counted half is the one that
+   * survives and can never be the one discarded (ADR-0071). Absent everywhere else.
+   */
+  readonly counted?: boolean;
 }
 
 /** The DERIVED expense behind an expense-kind proposal. Null for a settlement proposal. */
@@ -371,6 +378,13 @@ async function possibleDuplicateItems(exec: Executor): Promise<PossibleDuplicate
   if (candidates.length < 2) return [];
 
   const dismissed = new Set(await listDismissedDuplicatePairs(exec));
+  // Which of them something already counts (ADR-0071). A pair is asked about while at least one
+  // half can still be discarded, so a pair of two counted payments is not offered — nothing
+  // here could be answered "yes" — and in a pair of one, the counted half is the survivor.
+  const counted = await listClaimedPaymentIds(
+    exec,
+    candidates.map((row) => row.id),
+  );
   const items: PossibleDuplicateItem[] = [];
 
   // The candidate set is already narrowed to payments sharing an amount and a direction with
@@ -387,8 +401,15 @@ async function possibleDuplicateItems(exec: Executor): Promise<PossibleDuplicate
       if (!isPossibleDuplicate(earlier, later)) {
         continue;
       }
+      const earlierCounts = counted.has(earlier.id);
+      const laterCounts = counted.has(later.id);
+      if (earlierCounts && laterCounts) continue;
       const id = possibleDuplicateKey(earlier.id, later.id);
       if (dismissed.has(id)) continue;
+      // The copy a reviewer can discard is the one that does not count. When neither counts it
+      // is the later one, as it always was; when one does, it is the other, whichever is later.
+      const discardable = earlierCounts ? later : laterCounts ? earlier : later;
+      const survivor = discardable === later ? earlier : later;
       items.push({
         kind: 'possible_duplicate',
         id,
@@ -396,8 +417,8 @@ async function possibleDuplicateItems(exec: Executor): Promise<PossibleDuplicate
         // The pair is as old as its earlier leg — that is when the money moved.
         occurredAt: earlier.occurredAt,
         reasons: ['possible_duplicate'],
-        payment: toPaymentView(later),
-        candidate: toPaymentView(earlier),
+        payment: toPaymentView(discardable, counted.has(discardable.id)),
+        candidate: toPaymentView(survivor, counted.has(survivor.id)),
       });
     }
   }
@@ -534,7 +555,7 @@ async function rejectedClassificationItems(exec: Executor): Promise<RejectedClas
   }));
 }
 
-function toPaymentView(payment: PaymentRow): ReviewPaymentView {
+function toPaymentView(payment: PaymentRow, counted = false): ReviewPaymentView {
   return {
     paymentId: payment.id,
     amount: payment.amount,
@@ -544,5 +565,6 @@ function toPaymentView(payment: PaymentRow): ReviewPaymentView {
     description: payment.rawDescription,
     counterpartyType: payment.counterpartyType,
     state: payment.state,
+    counted,
   };
 }

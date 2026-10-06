@@ -771,6 +771,35 @@ describe('what you spent', () => {
     expect(spending.cameBack.total).toBe('0');
   });
 
+  it("ends the month-by-month trend with the period's own month, not the one after it", async () => {
+    // A period's end is exclusive — "July" is `to=2026-08-01` — so the trend window has to be
+    // worked out from the last instant *inside* the period. Taken from the end's own month it
+    // came out one month short: the single month of "This month" was an empty window, and a
+    // three-month trend dropped its first month, while the total beside it counted both.
+    await sharedExpense({ amount: paise(60000n), paidByPersonId: cast.userPersonId });
+    const period = 'from=2026-07-01T00:00:00.000Z&to=2026-08-01T00:00:00.000Z';
+
+    const oneMonth = await json<{
+      total: { amount: string };
+      months: { month: string; netTotal: string; expenseCount: number }[];
+    }>(`/api/spending?${period}&months=1`);
+    expect(oneMonth.months).toEqual([{ month: '2026-07', netTotal: '60000', expenseCount: 1 }]);
+    expect(oneMonth.months[0]?.netTotal).toBe(oneMonth.total.amount);
+
+    const threeMonths = await json<{ months: { month: string; netTotal: string }[] }>(
+      `/api/spending?${period}&months=3`,
+    );
+    // Oldest first, ending in July; the two empty months before it carry no row.
+    expect(threeMonths.months.map((entry) => entry.month)).toEqual(['2026-07']);
+
+    // The same expense, asked about from a window that started a month earlier and still ends
+    // in July: it must appear exactly once, in July — a window that starts too late would lose it.
+    const earlier = await json<{ months: { month: string }[] }>(
+      `/api/spending?from=2026-05-01T00:00:00.000Z&to=2026-08-01T00:00:00.000Z&months=3`,
+    );
+    expect(earlier.months.map((entry) => entry.month)).toEqual(['2026-07']);
+  });
+
   it('counts one payment with several supporting records once', async () => {
     const { paymentId } = await sharedExpense({
       amount: paise(60000n),

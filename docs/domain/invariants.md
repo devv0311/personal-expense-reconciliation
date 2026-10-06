@@ -207,6 +207,15 @@ never a mutation of `NetBalance` itself, and never treated as equivalent to a re
     even word for word: a statement prints one for every charge it taxes, and the two GST halves
     of one charge are equal by construction.
 
+    **A copy that counts keeps its pair alive, and the other copy cannot be counted unasked
+    (ADR-0071, ratified by the owner on 6 October 2026).** Approving one copy of a possible duplicate used to remove
+    the question — a counted payment was never a candidate — so the other copy could be approved
+    too. The counted copy now stays in the pair as the survivor (never the copy discarded: the
+    lifecycle still has no `linked → ignored` edge), and every act that counts a payment — a
+    decision, a settlement, a funding link — refuses an uncounted copy until a person has either
+    confirmed it as a duplicate or recorded that the two are real movements. The matching rule
+    above is untouched, and a payment discarded as a duplicate cannot be counted at all.
+
     **Across imports, one movement is one day, one amount and one name (ADR-0070 — the owner's
     policy, accepted 22 September 2026).** Two lines from different imports are a possible
     duplicate only on the **same calendar day** (the date a statement printed — no longer a

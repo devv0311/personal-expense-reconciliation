@@ -165,6 +165,8 @@ export interface ReviewPaymentView {
   readonly description: string;
   readonly counterpartyType: string;
   readonly state: string;
+  /** On a possible-duplicate item: something already counts this payment (ADR-0071). */
+  readonly counted?: boolean;
 }
 
 export interface ReviewExpenseView {
@@ -1125,7 +1127,20 @@ export type StatementPreview =
       readonly readable: false;
       readonly formatId: string;
       readonly problems: readonly { readonly lineNumber: number; readonly message: string }[];
+      /**
+       * Present only when automatic detection refused because several layouts fit the columns
+       * equally well. These are the valid choices — nothing recommended, nothing chosen — and
+       * naming one as `formatId` reads the same bytes with it.
+       */
+      readonly ambiguousLayouts?: readonly StatementLayoutChoice[];
     };
+
+/** One layout a person may choose for a file whose columns fit more than one. */
+export interface StatementLayoutChoice {
+  readonly id: string;
+  readonly label: string;
+  readonly headerHint: string;
+}
 
 export type PreparedImport =
   | { readonly ran: true; readonly analysis: AnalysisResult }
@@ -1415,6 +1430,8 @@ export interface AppliedRule {
 
 export interface AttentionSuggestion {
   readonly inferenceId: string | null;
+  /** The derived expense a confirmation approves; what the share preview is asked about. */
+  readonly expenseId?: string | null;
   readonly category: string | null;
   readonly confidence: ConfidenceLevel;
   readonly why: readonly string[];

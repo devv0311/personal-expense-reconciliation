@@ -38,17 +38,25 @@ export function ExpenseForm() {
   const [funded, setFunded] = useState<"payment" | "external">("payment");
   const [paymentId, setPaymentId] = useState("");
   const [evidenceId, setEvidenceId] = useState("");
+  const [approveNow, setApproveNow] = useState(false);
 
   const people = usePeople();
   const candidates = usePayments({ onlyUnexplained: true, limit: 50 });
   const create = useCreateExpense();
 
   const parsed = parseRupeeInput(amount);
+  // The ledger refuses both of these (ADR-0006, the Expense invariants), so they are said before
+  // the button rather than after it. Neither is arithmetic: they compare who paid with what funded.
+  const payerIsYou = people.data?.find((person) => person.id === paidByPersonId)?.isUser === true;
+  const payerMismatch =
+    paidByPersonId !== "" &&
+    ((funded === "payment" && !payerIsYou) || (funded === "external" && approveNow && payerIsYou));
   const ready =
     description.trim() !== "" &&
     parsed.ok &&
     paidByPersonId !== "" &&
-    (funded === "payment" ? paymentId !== "" : evidenceId.trim() !== "");
+    (funded === "payment" ? paymentId !== "" : evidenceId.trim() !== "") &&
+    !payerMismatch;
 
   return (
     <>
@@ -75,7 +83,7 @@ export function ExpenseForm() {
             </>
           )
         }
-        confirmLabel="Record it"
+        confirmLabel={approveNow ? "Record it and count it" : "Record it"}
         confirmDisabled={!ready}
         reasonLabel="Note for the audit trail"
         pending={create.isPending}
@@ -93,6 +101,7 @@ export function ExpenseForm() {
               ...(funded === "payment"
                 ? { funding: [{ paymentId, amount: parsed.paise }] }
                 : { evidenceId: evidenceId.trim() }),
+              ...(approveNow ? { state: "approved" as const } : {}),
               ...(reason === undefined ? {} : { reason }),
             },
             {
@@ -257,6 +266,31 @@ export function ExpenseForm() {
               </p>
             </div>
           )}
+
+          {payerMismatch && (
+            <p className="text-meta text-attention" role="alert">
+              {funded === "payment"
+                ? "A movement in this ledger left your own account, so you paid for this — choose yourself as who paid, or record it as somebody else’s payment with no movement."
+                : "You paid for this, so it cannot be counted with no movement behind it. Record the payment and link it, or leave it unticked to keep it as a proposal until the payment arrives."}
+            </p>
+          )}
+
+          <label className="flex items-start gap-2 text-body text-ink">
+            <input
+              type="checkbox"
+              className="mt-1 size-4 accent-[var(--color-accent)]"
+              checked={approveNow}
+              onChange={(event) => setApproveNow(event.target.checked)}
+            />
+            <span>
+              Count it as spending now
+              <span className="block text-micro text-ink-faint">
+                {approveNow
+                  ? "This approves the expense as you have entered it: it is counted in spending, it can be shared out, and its amount can never be edited afterwards — a correction is a refund or an adjustment recorded against it."
+                  : "Left unticked, it is only a proposal: it stays out of every total, and nobody can be named as having shared it, until it is approved."}
+              </span>
+            </span>
+          </label>
         </div>
       </DecisionDialog>
     </>

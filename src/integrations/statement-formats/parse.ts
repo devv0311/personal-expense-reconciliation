@@ -353,6 +353,7 @@ function tiedLayoutsRefusal(
     ok: false,
     formatId: 'auto',
     parserVersion: STATEMENT_PARSER_VERSION,
+    ambiguousFormatIds: formats.map((format) => format.id),
     errors: [
       {
         lineNumber: 1,
@@ -360,7 +361,8 @@ function tiedLayoutsRefusal(
         rawValue: header,
         // Shown verbatim by the import screen, which cannot name a layout — so the way forward
         // offered is one a person holding the file can take. A caller of the API can still name
-        // one with `formatId`; the labels here are the ones `GET /api/imports/formats` lists.
+        // one with `formatId`; the labels here are the ones `GET /api/imports/formats` lists, and
+        // `ambiguousFormatIds` carries the same choices as data for the website to offer.
         message:
           "This file's columns fit more than one layout this build reads equally well — " +
           `${formats.map((format) => format.label).join('; ')} — and those layouts read some ` +

@@ -122,6 +122,67 @@ describe("one question at a time", () => {
     ).not.toBeInTheDocument();
   });
 
+  describe("a payment that may be the same money as another", () => {
+    const DUPLICATE_OF_PAY_1 = {
+      ...DOCUMENT_QUESTION,
+      id: "pair-1",
+      kind: "possible_duplicate",
+      question: "Is this the same payment recorded twice?",
+      subject: { kind: "payment_pair" as const, paymentId: "pay-2", otherPaymentId: "pay-1" },
+    };
+    const UNRELATED_DUPLICATE = {
+      ...DUPLICATE_OF_PAY_1,
+      id: "pair-9",
+      subject: { kind: "payment_pair" as const, paymentId: "pay-8", otherPaymentId: "pay-9" },
+    };
+
+    it("is asked about that before it is asked what it was for", async () => {
+      // The defect this closes. The queue stops offering a pair once either copy is approved,
+      // so answering "what was it for" first on one copy let the other be approved too — one
+      // dinner in Spending as two dinners, with nobody ever asked if they were the same.
+      renderPage(attentionResult([CLASSIFICATION_QUESTION, DUPLICATE_OF_PAY_1]));
+
+      await screen.findByRole("heading", { name: "Is this the same payment recorded twice?" });
+      expect(screen.getByText("1 of 2")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: "What was this payment for?" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("asks it before either copy's category question, whichever copy comes first", async () => {
+      const otherCopy = {
+        ...CLASSIFICATION_QUESTION,
+        id: "inf-2",
+        subject: { kind: "payment" as const, paymentId: "pay-2" },
+      };
+      renderPage(attentionResult([otherCopy, CLASSIFICATION_QUESTION, DUPLICATE_OF_PAY_1]));
+
+      await screen.findByRole("heading", { name: "Is this the same payment recorded twice?" });
+      // One check, shown once — not once per copy it touches.
+      expect(screen.getByText("1 of 3")).toBeInTheDocument();
+    });
+
+    it("leaves a duplicate check about other payments behind the questions it does not touch", async () => {
+      renderPage(attentionResult([UNRELATED_DUPLICATE, CLASSIFICATION_QUESTION]));
+
+      await screen.findByRole("heading", { name: "What was this payment for?" });
+      expect(
+        screen.queryByRole("heading", { name: "Is this the same payment recorded twice?" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("lets the check be set aside without writing anything, and moves on to the category", async () => {
+      const user = userEvent.setup();
+      renderPage(attentionResult([CLASSIFICATION_QUESTION, DUPLICATE_OF_PAY_1]));
+
+      await screen.findByRole("heading", { name: "Is this the same payment recorded twice?" });
+      await user.click(screen.getByRole("button", { name: "Decide later" }));
+
+      await screen.findByRole("heading", { name: "What was this payment for?" });
+      expect(writes()).toHaveLength(0);
+    });
+  });
+
   it("brings the next question forward when one is set aside, and writes nothing doing it", async () => {
     renderPage(attentionResult([CLASSIFICATION_QUESTION, DOCUMENT_QUESTION]));
     const user = userEvent.setup();

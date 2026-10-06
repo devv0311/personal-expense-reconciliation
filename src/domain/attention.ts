@@ -32,6 +32,12 @@ export interface AttentionQuestionInput {
   readonly proposedKind?: string | null;
   /** For a document: how many payments are currently being proposed for it. */
   readonly candidateCount?: number;
+  /**
+   * For a possible duplicate: one of the two payments already counts (ADR-0071). The other
+   * cannot be counted until this is answered, so the wording says so rather than "both are
+   * counted", which would be untrue of it.
+   */
+  readonly oneAlreadyCounts?: boolean;
 }
 
 /**
@@ -54,7 +60,10 @@ export function attentionQuestion(input: AttentionQuestionInput): AttentionQuest
           'Two payments on record are for the same amount on the same day, and nothing on them ' +
           'tells them apart: they name the same or a similar payee, or are the same kind of ' +
           'payment. ' +
-          'Nothing has been discarded — until you say, both are counted.',
+          (input.oneAlreadyCounts === true
+            ? 'One of them already counts. Nothing has been discarded, and the other cannot be ' +
+              'counted until you say whether they are one payment.'
+            : 'Nothing has been discarded — until you say, both are counted.'),
       };
     case 'rejected_classification':
       return {

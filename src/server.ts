@@ -38,6 +38,7 @@ import type { IncomingMessage } from 'node:http';
 import { Readable } from 'node:stream';
 
 import { createApi } from './api/index.js';
+import { applyBaselineHeaders, refuseUntrustedRequest } from './request-guard.js';
 import { createGracefulShutdown } from './server-shutdown.js';
 import type { ApiDependencies } from './api/index.js';
 import { createAiService } from './ai/index.js';
@@ -362,6 +363,23 @@ async function main(): Promise<void> {
       // Safe alongside a single named origin; it would not be with `*`, which is why
       // `CORS_ORIGIN` has never been a wildcard.
       res.setHeader('Access-Control-Allow-Credentials', 'true');
+      applyBaselineHeaders((name, value) => res.setHeader(name, value));
+
+      // CORS only decides what a page may *read*; it does not stop a browser sending a write, nor
+      // a re-pointed domain reaching a loopback port. See `src/request-guard.ts`.
+      const refused = refuseUntrustedRequest(
+        {
+          method: req.method ?? 'GET',
+          origin: singleHeader(req.headers.origin),
+          host: singleHeader(req.headers.host),
+        },
+        { allowedOrigin: CORS_ORIGIN, loopbackBound: LOOPBACK_HOSTS.has(HOST) },
+      );
+      if (refused !== null) {
+        res.writeHead(refused.status, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: { code: refused.code, message: refused.message } }));
+        return;
+      }
 
       if (req.method === 'OPTIONS') {
         res.writeHead(204);
@@ -451,6 +469,12 @@ async function main(): Promise<void> {
 }
 
 /* ------------------------------------------------------------------------- internals */
+
+/** A header as one string, `null` when absent. A repeated header is joined, so it cannot match. */
+function singleHeader(value: string | string[] | undefined): string | null {
+  if (value === undefined) return null;
+  return Array.isArray(value) ? value.join(', ') : value;
+}
 
 function toWebRequest(req: IncomingMessage): Request {
   const host = req.headers.host ?? `localhost:${PORT}`;

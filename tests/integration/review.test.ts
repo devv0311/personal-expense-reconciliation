@@ -299,7 +299,7 @@ describe('listPossibleDuplicateCandidates', () => {
     expect(await listPossibleDuplicateCandidates(database.db)).toEqual([]);
   });
 
-  it('excludes a payment already explained or already discarded', async () => {
+  it('keeps an explained payment only as the half that survives, and never a discarded one', async () => {
     const occurredAt = new Date('2026-07-14T00:00:00Z');
     const linked = await addPayment(database.db, cast, {
       accountId,
@@ -310,7 +310,7 @@ describe('listPossibleDuplicateCandidates', () => {
       channel: 'upi',
       state: 'linked',
     });
-    await addPayment(database.db, cast, {
+    const live = await addPayment(database.db, cast, {
       accountId,
       amount: paise(45_000n),
       direction: 'debit',
@@ -319,13 +319,29 @@ describe('listPossibleDuplicateCandidates', () => {
       channel: 'upi',
       state: 'normalized',
     });
+    await addPayment(database.db, cast, {
+      accountId,
+      amount: paise(45_000n),
+      direction: 'debit',
+      occurredAt,
+      rawDescription: 'UPI-COFFEE-SHOP',
+      channel: 'upi',
+      state: 'ignored',
+      ignoredReason: 'duplicate_of:elsewhere',
+    });
 
-    // A linked payment is explained by an expense or a settlement, and the lifecycle has no
-    // `linked → ignored` edge to confirm a duplicate with.
+    // An explained payment is a candidate as the half that already counts: the live copy is the
+    // one a second approval would count again, so the pair must stay askable (ADR-0071). It is
+    // still never the half that can be discarded — the lifecycle draws no `linked → ignored`
+    // edge — which `confirmPossibleDuplicate` enforces. A discarded payment is never a candidate.
     const candidates = await listPossibleDuplicateCandidates(database.db);
-    expect(candidates.map((row) => row.id)).not.toContain(linked);
-    // …and with its twin gone, the survivor has nothing to pair with either.
-    expect(candidates).toEqual([]);
+    expect(candidates.map((row) => row.id).sort()).toEqual([linked, live].sort());
+    // …and with its live twin gone, the explained payment has nothing to pair with.
+    await database.db
+      .update(schema.payments)
+      .set({ state: 'ignored', ignoredReason: 'duplicate_of:elsewhere' })
+      .where(eq(schema.payments.id, live));
+    expect(await listPossibleDuplicateCandidates(database.db)).toEqual([]);
   });
 });
 
@@ -1154,6 +1170,86 @@ describe('confirmPossibleDuplicate', () => {
         audit: AS_REVIEWER,
       }),
     ).rejects.toMatchObject({ code: 'INVALID_STATE_TRANSITION' });
+  });
+
+  describe('a payment confirmed as a duplicate no longer counts, so nothing may explain it', () => {
+    async function discardedCopy() {
+      const proposals = await classifiedFixture();
+      const target = proposals.find((proposal) => proposal.expenseId !== null)!;
+      const survivor = await addPayment(database.db, cast, {
+        accountId,
+        amount: paise(124_000n),
+        direction: 'debit',
+        occurredAt: new Date('2026-07-01T00:00:00Z'),
+        rawDescription: 'UPI-BLINKIT9821PAYTM-BLINKIT INDIA PVT LTD',
+        channel: 'upi',
+        state: 'normalized',
+      });
+      await confirmPossibleDuplicate(database.db, {
+        paymentId: target.paymentId,
+        duplicateOfPaymentId: survivor,
+        audit: AS_REVIEWER,
+      });
+      return { target, survivor };
+    }
+
+    it('stops asking what the discarded copy was for', async () => {
+      // The defect: the copy's proposal stayed in the queue, answerable, long after the person
+      // had said the money was already counted by the other copy.
+      const { target } = await discardedCopy();
+
+      const queue = await listReviewQueue(database.db);
+      const asked = queue.items
+        .filter((item) => item.kind === 'classification_decision')
+        .map((item) => item.inferenceId);
+      expect(asked).not.toContain(target.inferenceId);
+      expect(await listPendingClassificationInferences(database.db)).not.toContainEqual(
+        expect.objectContaining({ inferenceId: target.inferenceId }),
+      );
+    });
+
+    it('refuses to approve what the discarded copy was for, and leaves no expense behind', async () => {
+      // The defect: approving it created an approved expense funded by a payment that had been
+      // discarded as a duplicate — one dinner counted again, with the ledger saying elsewhere
+      // that the payment did not count.
+      const { target } = await discardedCopy();
+
+      for (const decision of ['accept', 'modify'] as const) {
+        await expect(
+          decideInference(database.db, {
+            inferenceId: target.inferenceId,
+            decision,
+            ...(decision === 'modify'
+              ? { modifiedOutput: { proposedKind: 'expense', relationshipType: 'personal' } }
+              : {}),
+            audit: AS_REVIEWER,
+          }),
+        ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+      }
+
+      const [expense] = await database.db
+        .select({ state: schema.expenses.state })
+        .from(schema.expenses)
+        .where(eq(schema.expenses.id, target.expenseId!));
+      expect(expense?.state).not.toBe('approved');
+      const [payment] = await database.db
+        .select({ state: schema.payments.state })
+        .from(schema.payments)
+        .where(eq(schema.payments.id, target.paymentId));
+      expect(payment?.state).toBe('ignored');
+    });
+
+    it('still lets a person reject the stale proposal', async () => {
+      const { target } = await discardedCopy();
+
+      await expect(
+        decideInference(database.db, {
+          inferenceId: target.inferenceId,
+          decision: 'reject',
+          audit: AS_REVIEWER,
+        }),
+      ).resolves.toMatchObject({ status: 'rejected' });
+    });
   });
 
   it('refuses a payment as a duplicate of itself', async () => {

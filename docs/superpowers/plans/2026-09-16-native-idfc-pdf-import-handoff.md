@@ -1,3 +1,9 @@
+> **Superseded (5 October 2026).** This is a historical checkpoint note, kept unedited below. The
+> work it hands off was completed and merged to `main` (PR #38), and the
+> `wip/idfc-pdf-import` branch it names has been deleted; `main` is the only branch. Do not resume
+> from the "Work still required" list. The privacy and scope constraints below still stand. The
+> import is verified for the IDFC FIRST credit-card layout only — never claim general PDF support.
+
 # Native IDFC PDF Import — Claude Handoff
 
 ## Checkpoint

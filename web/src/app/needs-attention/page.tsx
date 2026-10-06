@@ -37,7 +37,8 @@ import type { AttentionItem } from "@/lib/types";
  *    states what it will do (ADR-0049). There is no one-click approval on this screen.
  *  - **What a payment was for comes first.** Those questions can be answered from the card
  *    itself; a duplicate comparison or an unplaced document is different work and sits behind
- *    them in the queue rather than in front of them.
+ *    them in the queue rather than in front of them — except that a payment which may be the
+ *    same money as another is asked about *that* before it is asked what it was for.
  *  - **Both halves of the decision are here.** Below the queue is what has already been
  *    connected, because a review surface that only ever counts down gives a person no way to
  *    check a decision they have already made — and a wrongly attached document looks exactly
@@ -67,13 +68,40 @@ export default function NeedsAttentionPage() {
    * people. Ordering by that rather than by the queue's own priority is what keeps a long run
    * of near-identical duplicate checks from standing in front of the question most people came
    * to answer. Within each band the API's order is preserved.
+   *
+   * One exception, because the order is otherwise how the same money gets counted twice: a
+   * payment's own duplicate question is asked immediately **before** what it was for. The queue
+   * stops offering a pair the moment either copy is approved (ADR-0031 — a counted payment is
+   * never a candidate), so approving the first copy's category first leaves the second copy
+   * approvable with nobody ever having been asked whether it is the same payment. Only the
+   * duplicate questions that touch a payment being asked about move; every other one stays in
+   * the later band, so a long run of unrelated checks still does not stand in front of anything.
+   * Pairs are matched on the payment ids the API names — nothing is computed here.
    */
   const queue = useMemo(() => {
     const active = items.filter((item) => !setAside.includes(item.id));
-    return [
-      ...active.filter((item) => item.suggestion !== null),
-      ...active.filter((item) => item.suggestion === null),
-    ];
+    const purposeQuestions = active.filter((item) => item.suggestion !== null);
+    const others = active.filter((item) => item.suggestion === null);
+    const duplicateChecks = others.filter(
+      (item) => item.kind === "possible_duplicate" && item.subject.kind === "payment_pair",
+    );
+
+    const asked = new Set<string>();
+    const ordered: AttentionItem[] = [];
+    for (const question of purposeQuestions) {
+      if (question.subject.kind === "payment") {
+        const paymentId = question.subject.paymentId;
+        for (const check of duplicateChecks) {
+          if (check.subject.kind !== "payment_pair" || asked.has(check.id)) continue;
+          if (check.subject.paymentId === paymentId || check.subject.otherPaymentId === paymentId) {
+            asked.add(check.id);
+            ordered.push(check);
+          }
+        }
+      }
+      ordered.push(question);
+    }
+    return [...ordered, ...others.filter((item) => !asked.has(item.id))];
   }, [items, setAside]);
 
   const current = queue[0] ?? null;

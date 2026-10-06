@@ -137,6 +137,21 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Whether a failed request ended **without an answer from the ledger**, so the write may or may
+ * not have been recorded — now, or still to come.
+ *
+ * Decided by the API's contract, not by the status alone: the ledger always answers a refusal
+ * with a structured `{ error: { code, message } }` body, and a refused write is rolled back, so a
+ * structured answer — whatever its status — has a known result. An unstructured body (a proxy's
+ * 502/503/504 page, an empty reply) did not come from the ledger and says nothing about it, and a
+ * dropped connection (`status` 0) says even less.
+ */
+export function isUnansweredRequest(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true;
+  return error.status === 0 || error.code === "UNKNOWN_ERROR";
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -866,10 +881,16 @@ export async function importStatement(input: {
 export async function previewStatement(input: {
   readonly contentBase64: string;
   readonly filename: string;
+  /**
+   * The layout the person chose for a file whose columns fit more than one (`ambiguousLayouts`);
+   * automatic detection when absent. The same bytes are read, with exactly this layout, and
+   * nothing is written.
+   */
+  readonly formatId?: string;
 }): Promise<StatementPreview> {
   return request<StatementPreview>("/api/imports/preview", {
     method: "POST",
-    body: JSON.stringify({ formatId: "auto", ...input }),
+    body: JSON.stringify({ ...input, formatId: input.formatId ?? "auto" }),
   });
 }
 
@@ -1625,10 +1646,15 @@ export async function getPersonBalance(personId: string): Promise<PersonBalanceS
 export async function previewAllocation(
   expenseId: string,
   decision: AllocationDecisionInput,
+  /**
+   * For an expense still waiting for approval: show the split as if it were approved as this
+   * kind. The ledger refuses it for one already approved.
+   */
+  ifApprovedAs?: { readonly relationshipType: string },
 ): Promise<AllocationPreviewResult> {
   return request<AllocationPreviewResult>(`/api/expenses/${expenseId}/allocation/preview`, {
     method: "POST",
-    body: JSON.stringify(decision),
+    body: JSON.stringify(ifApprovedAs === undefined ? decision : { ...decision, ifApprovedAs }),
   });
 }
 

@@ -148,6 +148,44 @@ describe("the review queue", () => {
     });
   });
 
+  it("says which copy already counts, and discards only the one that does not", async () => {
+    // The pair the queue keeps once one copy has been approved (ADR-0071): the counted copy is
+    // the survivor whichever is later, and the dialog must not claim the "later" one is discarded.
+    const api = renderReview([
+      {
+        ...DUPLICATE_ITEM,
+        payment: { ...DUPLICATE_ITEM.payment, counted: false },
+        candidate: { ...DUPLICATE_ITEM.candidate, counted: true, state: "linked" },
+      },
+    ]);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByText("Possible duplicate").length).toBeGreaterThan(0),
+    );
+    await user.click(screen.getAllByRole("button", { name: /UPI-UNKNOWN-MERCHANT-8841/ })[0]!);
+
+    expect(await screen.findByText("One of these payments already counts")).toBeInTheDocument();
+    expect(screen.getByText("The payment that already counts")).toBeInTheDocument();
+    expect(screen.getByText("The payment that does not count yet")).toBeInTheDocument();
+    expect(screen.queryByText("The later payment")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /confirm duplicate/i }));
+    const dialog = screen.getByRole("dialog");
+    expect(
+      within(dialog).getByText(/discards the payment that does not count yet/i),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/discards the later payment/i)).not.toBeInTheDocument();
+
+    await user.type(within(dialog).getByLabelText(/reason/i), "Same dinner, two captures");
+    await user.click(within(dialog).getByRole("button", { name: "Confirm duplicate" }));
+    await waitFor(() => expect(api.callsTo("/duplicate")).toHaveLength(1));
+    // The one discarded is the one that does not count; the counted one is named as the survivor.
+    expect(api.bodyOf("/duplicate")).toMatchObject({
+      duplicateOfPaymentId: "pay-earlier",
+    });
+  });
+
   it("shows an unmatched document's reading and its candidates, and links nothing on its own", async () => {
     const api = renderReview([UNMATCHED_EVIDENCE_ITEM]);
     const user = userEvent.setup();

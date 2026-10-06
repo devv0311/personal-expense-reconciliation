@@ -65,6 +65,7 @@ import {
   requireUserPersonId,
   validateClassificationProposal,
 } from './classification-service.js';
+import { assertPaymentMayBeCounted } from './duplicate-guard.js';
 import { ServiceError } from './errors.js';
 import { requirePayment } from './loaders.js';
 import { recordSettlementWithin } from './settlement-service.js';
@@ -159,6 +160,11 @@ export async function decideInference(
   await validateClassificationProposal(db, { payment, proposal, userPersonId });
 
   return runAudited(db, input.audit, async (ctx) => {
+    // Whatever is accepted — an expense or a settlement — explains this payment, so it may not
+    // be one a person has not yet said is a different movement from a payment that already
+    // counts, nor one already discarded as a duplicate (ADR-0071). Inside the transaction, with
+    // the rows locked, so two decisions on the two halves of a pair cannot both pass.
+    await assertPaymentMayBeCounted(ctx.exec, payment.id);
     const result =
       proposal.proposedKind === 'expense'
         ? await acceptAsExpense(ctx, { input, inference, payment, proposal, userPersonId, target })

@@ -29,6 +29,9 @@ import type { AiService } from '../ai/index.js';
 import {
   findClassificationInferenceByPayment,
   getPaymentById,
+  listClaimedPaymentIds,
+  listPaymentsByIds,
+  lockPaymentClasses,
   updatePaymentState,
 } from '../db/index.js';
 import type { AiInferenceRow, Database, Executor, PaymentRow } from '../db/index.js';
@@ -189,7 +192,24 @@ export async function confirmPossibleDuplicate(
   const pairKey = possibleDuplicateKey(payment.id, other.id);
   await runAudited(db, input.audit, async ({ exec, record }) => {
     const reason = duplicateOfReason(canonicalPaymentId);
-    assertPaymentTransition(payment.state, 'ignored');
+    // The state read above may be stale by now: another decision may have counted this payment
+    // since. Take the pair's class lock — the same one every counting act takes, and first, so
+    // a decision on either half cannot interleave with this — read again, and refuse to discard anything that counts — whether the
+    // lifecycle shows it (`linked`) or a hand-entered funding link or a settlement does
+    // (ADR-0071). Discarding it would orphan the expense or settlement it explains.
+    await lockPaymentClasses(exec, [payment.id, other.id]);
+    const [now] = await listPaymentsByIds(exec, [payment.id]);
+    const live = now ?? payment;
+    if (live.state !== 'linked' && (await listClaimedPaymentIds(exec, [live.id])).has(live.id)) {
+      throw new ServiceError(
+        'PRECONDITION_FAILED',
+        `Payment ${live.id} already counts — an expense or a settlement is explained by it — so ` +
+          'it cannot be the copy discarded as a duplicate. Discard the other copy instead, or ' +
+          'record that they are two movements (ADR-0071).',
+        { paymentId: live.id, duplicateOfPaymentId: other.id },
+      );
+    }
+    assertPaymentTransition(live.state, 'ignored');
     await updatePaymentState(exec, payment.id, 'ignored', reason);
     await record({
       entityType: 'payment',

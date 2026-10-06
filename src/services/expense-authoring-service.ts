@@ -44,6 +44,7 @@ import {
   getExpenseById,
   getPaymentById,
   getPersonById,
+  getPrimaryUserPerson,
   insertExpense,
   insertExpenseItems,
   insertPaymentExpenseLink,
@@ -51,11 +52,13 @@ import {
   listExpenseItemsByExpense,
   listPaymentExpenseLinksByPayment,
   listSettlementsByPayment,
+  lockPaymentClasses,
   supersedeExpenseItems,
 } from '../db/index.js';
-import type { Database, ExpenseItemRow } from '../db/index.js';
+import type { Database, Executor, ExpenseItemRow } from '../db/index.js';
 
 import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
+import { assertPaymentMayBeCounted } from './duplicate-guard.js';
 import { ServiceError } from './errors.js';
 import { applyEvidenceLink, requireEvidenceRow } from './evidence-service.js';
 import { requireExpenseSnapshot } from './loaders.js';
@@ -100,6 +103,49 @@ export interface CreateExpenseResult {
 }
 
 /**
+ * Who may be named as the payer, given what funded the expense (`domain-model.md`, Expense
+ * invariants; ADR-0006).
+ *
+ * Every payment in this ledger left one of the **user's** accounts, so an expense one funds was
+ * paid by the user — naming somebody else would invert every balance derived from it, and the
+ * classification path already refuses exactly that (`validateClassificationProposal`). The
+ * other half: an expense **approved** with nothing funding it is only legitimate when somebody
+ * else paid; one the user paid, counted as spending with no movement behind it, would put money
+ * into every total that no statement shows. (Left as a proposal it may still await its payment.)
+ *
+ * With no user in the ledger there is nobody to compare against, and nothing is refused.
+ */
+async function assertPayerMatchesFunding(
+  exec: Executor,
+  input: {
+    readonly paidByPersonId: PersonId;
+    readonly funded: boolean;
+    readonly approvedNow: boolean;
+  },
+): Promise<void> {
+  const user = await getPrimaryUserPerson(exec);
+  if (user === null) return;
+  if (input.funded && input.paidByPersonId !== user.personId) {
+    throw new ServiceError(
+      'PRECONDITION_FAILED',
+      'A payment in this ledger left your own account, so an expense it funds was paid by you. ' +
+        'An expense somebody else paid has no payment here at all (ADR-0006) — record it as ' +
+        'paid by them, with evidence, and without a movement.',
+      { field: 'paidByPersonId' },
+    );
+  }
+  if (!input.funded && input.approvedNow && input.paidByPersonId === user.personId) {
+    throw new ServiceError(
+      'PRECONDITION_FAILED',
+      'An expense you paid for cannot be approved with no movement behind it: it would count ' +
+        'as spending that no statement shows. Record the payment and link it, or leave this ' +
+        'expense as a proposal until its payment arrives (domain-model.md, Expense invariants).',
+      { field: 'funding' },
+    );
+  }
+}
+
+/**
  * Records an expense a person entered, in either funding shape.
  *
  * Self-funded: one or more of the user's own payments fund it, and each link is validated
@@ -133,12 +179,25 @@ export async function createExpense(
 
   return runAudited(db, input.audit, async (ctx) => {
     const { exec, record } = ctx;
+    // Funding counts every payment named, and the order those are asked about must not depend on
+    // the order the caller listed them in: take every class lock now, sorted, before the first
+    // link, or two expenses naming the same payments in opposite orders deadlock (ADR-0071).
+    await lockPaymentClasses(
+      exec,
+      funding.map((link) => link.paymentId),
+    );
     const payer = await getPersonById(exec, input.paidByPersonId);
     if (payer === null) {
       throw new ServiceError('ENTITY_NOT_FOUND', 'No such person to have paid this.', {
         paidByPersonId: input.paidByPersonId,
       });
     }
+
+    await assertPayerMatchesFunding(exec, {
+      paidByPersonId: input.paidByPersonId,
+      funded: !externallyFunded,
+      approvedNow: input.state === 'approved',
+    });
 
     if (externallyFunded && (input.evidenceId === undefined || input.evidenceId === null)) {
       throw new ServiceError(
@@ -233,7 +292,14 @@ export async function linkPaymentToExpense(
   input: LinkPaymentToExpenseInput,
 ): Promise<{ readonly linkId: string }> {
   return runAudited(db, input.audit, async ({ exec, record }) => {
-    await requireExpenseSnapshot(exec, input.expenseId);
+    const expense = await requireExpenseSnapshot(exec, input.expenseId);
+    // A funding link says one of the user's payments paid for this expense; it cannot then have
+    // been paid by somebody else.
+    await assertPayerMatchesFunding(exec, {
+      paidByPersonId: expense.paidByPersonId,
+      funded: true,
+      approvedNow: false,
+    });
     return {
       linkId: await linkOnePaymentWithin(
         exec,
@@ -264,6 +330,9 @@ async function linkOnePaymentWithin(
   if (payment === null) {
     throw new ServiceError('ENTITY_NOT_FOUND', 'No such payment.', { paymentId });
   }
+  // Funding an expense is counting the payment (ADR-0071): not while a possible duplicate of a
+  // payment that already counts is unanswered, and never a payment discarded as a duplicate.
+  await assertPaymentMayBeCounted(exec, paymentId);
   if (payment.direction !== 'debit') {
     throw new ServiceError(
       'PRECONDITION_FAILED',

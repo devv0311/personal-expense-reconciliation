@@ -214,28 +214,49 @@ function ClassificationInspector({ item }: { item: ClassificationDecisionItem })
 function DuplicateInspector({ item }: { item: PossibleDuplicateItem }) {
   const [decision, setDecision] = useState<"confirm" | "dismiss" | null>(null);
   const mutation = useDecidePaymentDuplicate();
+  // When one copy already counts, that one survives whichever is later, and the other cannot be
+  // counted until this is answered (ADR-0071). Otherwise it is the usual earlier/later pair.
+  const oneCounts = item.candidate.counted === true;
 
   return (
     <div className="flex flex-col gap-6">
       <NoteList
         items={[
           {
-            title: "Two live payments resemble each other",
-            detail:
-              "Nothing has been discarded. Confirming marks the later one a duplicate of the " +
-              "earlier; dismissing records that they are two real movements.",
+            title: oneCounts
+              ? "One of these payments already counts"
+              : "Two live payments resemble each other",
+            detail: oneCounts
+              ? "Nothing has been discarded. Confirming discards the one that does not count yet, " +
+                "so the same money is not counted twice; dismissing records that they are two " +
+                "real movements, after which both can count."
+              : "Nothing has been discarded. Confirming marks the later one a duplicate of the " +
+                "earlier; dismissing records that they are two real movements.",
           },
         ]}
       />
 
-      <Section title="The later payment" headingId="inspector-later">
+      <Section
+        title={oneCounts ? "The payment that does not count yet" : "The later payment"}
+        headingId="inspector-later"
+      >
         <PaymentSummary
           payment={item.payment}
-          caption="The one a reviewer would normally discard"
+          caption={
+            oneCounts
+              ? "The one that would be discarded"
+              : "The one a reviewer would normally discard"
+          }
         />
       </Section>
-      <Section title="The earlier payment" headingId="inspector-earlier">
-        <PaymentSummary payment={item.candidate} caption="The one that would survive" />
+      <Section
+        title={oneCounts ? "The payment that already counts" : "The earlier payment"}
+        headingId="inspector-earlier"
+      >
+        <PaymentSummary
+          payment={item.candidate}
+          caption={oneCounts ? "The one that stays" : "The one that would survive"}
+        />
       </Section>
 
       <div className="flex flex-wrap gap-3 border-t border-rule pt-4">
@@ -257,9 +278,11 @@ function DuplicateInspector({ item }: { item: PossibleDuplicateItem }) {
         consequence={
           decision === "confirm" ? (
             <>
-              This discards the later payment so the same money is not counted twice. The earlier
-              one stays. The discarded row is not deleted — it is marked, with your reason, and
-              stays readable in the audit trail.
+              {oneCounts
+                ? "This discards the payment that does not count yet, so the same money is not counted twice. "
+                : "This discards the later payment so the same money is not counted twice. The earlier one stays. "}
+              The discarded row is not deleted — it is marked, with your reason, and stays readable
+              in the audit trail.
             </>
           ) : (
             <>

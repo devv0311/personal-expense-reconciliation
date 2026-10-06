@@ -257,7 +257,7 @@ export function ShareExpense({ expenseId }: { expenseId: string }) {
 }
 
 /** The shares and the obligations, exactly as the ledger computed them. */
-function Preview({ preview }: { preview: AllocationPreviewResult }) {
+export function Preview({ preview }: { preview: AllocationPreviewResult }) {
   if (preview.refusal !== null) {
     return (
       <div className="rounded-sm border border-rule p-4">
@@ -333,7 +333,7 @@ function Preview({ preview }: { preview: AllocationPreviewResult }) {
  * promised a debt over one would be stating a consequence that will not happen — on the single
  * screen whose whole job is to state the consequence correctly (ADR-0049).
  */
-function Consequence({ preview }: { preview: AllocationPreviewResult | null }) {
+export function Consequence({ preview }: { preview: AllocationPreviewResult | null }) {
   if (preview === null) return <>Nothing is worked out yet.</>;
   const nobodyOwes = preview.obligations.length === 0;
   return (
@@ -354,7 +354,7 @@ function Consequence({ preview }: { preview: AllocationPreviewResult | null }) {
 }
 
 /** Who would owe whom, straight from the preview. */
-function Owes({ preview }: { preview: AllocationPreviewResult }) {
+export function Owes({ preview }: { preview: AllocationPreviewResult }) {
   if (preview.obligations.length === 0) {
     return <>{preview.noObligationsBecause}</>;
   }

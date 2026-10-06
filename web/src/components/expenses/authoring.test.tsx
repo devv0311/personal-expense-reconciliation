@@ -106,6 +106,104 @@ describe("recording an expense", () => {
     expect(body["funding"]).toBeUndefined();
     expect(body["evidenceId"]).toBe("ev-1");
     expect(body["paidByPersonId"]).toBe("p-alex");
+    // Recording alone approves nothing: the default is a proposal.
+    expect(body["state"]).toBeUndefined();
+  });
+
+  it("can be counted at once, but only when the person says so and the dialog states it", async () => {
+    // The defect: an expense somebody else paid for can only be recorded here, and every one
+    // came out `proposed` — which no screen could then approve, so it could never be counted or
+    // shared. The API has always accepted `state: "approved"`; nothing in the browser sent it.
+    const api = renderForm();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Record an expense" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("What it was"), "Flat internet");
+    await user.type(within(dialog).getByLabelText("Amount"), "1200");
+    await waitFor(() =>
+      expect(within(dialog).getByRole("option", { name: /Alex/ })).toBeInTheDocument(),
+    );
+    await user.selectOptions(within(dialog).getByLabelText("Who paid"), "p-alex");
+    await user.click(within(dialog).getByRole("radio", { name: /Somebody else paid/ }));
+    await user.type(within(dialog).getByLabelText("Evidence id"), "ev-1");
+
+    const countIt = within(dialog).getByRole("checkbox", { name: /Count it as spending now/ });
+    expect(countIt).not.toBeChecked();
+    expect(within(dialog).getByText(/only a proposal/)).toBeInTheDocument();
+
+    await user.click(countIt);
+    expect(within(dialog).getByText(/its amount can never be edited/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Record it and count it" }));
+
+    await waitFor(() =>
+      expect(api.calls.filter((call) => call.method === "POST")).not.toHaveLength(0),
+    );
+    const body = api.calls.find((call) => call.method === "POST")?.body as Record<string, unknown>;
+    expect(body["state"]).toBe("approved");
+    expect(body["amount"]).toBe("120000");
+  });
+});
+
+describe("recording an expense the ledger would refuse", () => {
+  function renderForm(): ApiMock {
+    const api = mockApi({
+      "/api/payments": paymentPage([UNEXPLAINED_PAYMENT]),
+      "/api/people": { people: PEOPLE },
+      "/api/expenses": {
+        expenseId: "exp-new",
+        state: "approved",
+        fundedByPaymentIds: [],
+        externallyFunded: true,
+      },
+    });
+    renderWithQuery(<ExpenseForm />);
+    return api;
+  }
+
+  it("says an expense you paid cannot be counted at once with no movement behind it", async () => {
+    // The ledger refuses it (the Expense invariants): it would count as spending no statement
+    // shows. Said before the button, and the button stays off.
+    const api = renderForm();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Record an expense" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("What it was"), "Electrician");
+    await user.type(within(dialog).getByLabelText("Amount"), "1500");
+    await waitFor(() =>
+      expect(within(dialog).getByRole("option", { name: /Dev/ })).toBeInTheDocument(),
+    );
+    await user.selectOptions(within(dialog).getByLabelText("Who paid"), "p-dev");
+    await user.click(within(dialog).getByRole("radio", { name: /Somebody else paid/ }));
+    await user.type(within(dialog).getByLabelText("Evidence id"), "ev-1");
+    await user.click(within(dialog).getByRole("checkbox", { name: /Count it as spending now/ }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/cannot be counted/i);
+    expect(within(dialog).getByRole("button", { name: /Record it and count it/ })).toBeDisabled();
+
+    // Unticked, it is a proposal again and may be recorded.
+    await user.click(within(dialog).getByRole("checkbox", { name: /Count it as spending now/ }));
+    expect(within(dialog).getByRole("button", { name: "Record it" })).toBeEnabled();
+    expect(api.callsTo("/api/expenses").filter((call) => call.method === "POST")).toHaveLength(0);
+  });
+
+  it("says a movement from your own account cannot have been paid by somebody else", async () => {
+    renderForm();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Record an expense" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("What it was"), "Dinner");
+    await user.type(within(dialog).getByLabelText("Amount"), "2400");
+    await waitFor(() =>
+      expect(within(dialog).getByRole("option", { name: /Alex/ })).toBeInTheDocument(),
+    );
+    await user.selectOptions(within(dialog).getByLabelText("Who paid"), "p-alex");
+    await user.selectOptions(within(dialog).getByLabelText("Movement"), UNEXPLAINED_PAYMENT.id);
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/left your own account/i);
+    expect(within(dialog).getByRole("button", { name: "Record it" })).toBeDisabled();
   });
 });
 

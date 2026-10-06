@@ -25,7 +25,8 @@
  * because it writes nothing at all — the same shape `POST /api/ask` already has.
  */
 
-import { asId } from '../domain/index.js';
+import { EXPENSE_RELATIONSHIP_TYPES, asId } from '../domain/index.js';
+import type { ExpenseRelationshipType } from '../domain/index.js';
 import { getPrimaryUserPerson } from '../db/index.js';
 import {
   getPersonBalanceSummary,
@@ -48,6 +49,7 @@ import {
   optionalTimestampParam,
   optionalString,
   readJsonObject,
+  requireOneOf,
   requireString,
   requireParam,
   requirePersonActor,
@@ -196,11 +198,13 @@ export async function postAllocationPreview(
   const body = await readJsonObject(request);
   const overrides = parseGroupShareOverrides(body);
   const userPerson = await getPrimaryUserPerson(deps.db);
+  const ifApprovedAs = parseIfApprovedAs(body);
 
   return jsonResponse(
     200,
     await previewAllocation(deps.db, {
       expenseId,
+      ...(ifApprovedAs === undefined ? {} : { ifApprovedAs }),
       // The approval route's own parser, so a preview can never accept a shape the approval
       // would refuse — which would make it a preview of something that cannot happen.
       decision: parseAllocationDecision(body),
@@ -208,6 +212,28 @@ export async function postAllocationPreview(
       userPersonId: userPerson?.personId ?? null,
     }),
   );
+}
+
+/**
+ * `ifApprovedAs: { relationshipType }` — preview the split as if a not-yet-approved expense were
+ * approved as that kind. Absent, the preview reads the expense as it stands. The kind is one of
+ * the expense vocabulary's own five; anything else is refused here rather than previewed.
+ */
+function parseIfApprovedAs(
+  body: Record<string, unknown>,
+): { readonly relationshipType: ExpenseRelationshipType } | undefined {
+  const raw = body['ifApprovedAs'];
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ApiRequestError('"ifApprovedAs" must be an object.', 'ifApprovedAs');
+  }
+  return {
+    relationshipType: requireOneOf(
+      raw as Record<string, unknown>,
+      'relationshipType',
+      EXPENSE_RELATIONSHIP_TYPES,
+    ),
+  };
 }
 
 /* ------------------------------------------------------------------------- validation */

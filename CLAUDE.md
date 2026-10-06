@@ -1,5 +1,32 @@
 # CLAUDE.md — Engineering Context for This Repository
 
+> **Readiness hardening (2026-10-05, uncommitted at the time of writing).** Two things changed
+> that are easy to get wrong. **A statement line's kind is chosen before approval:** the category
+> dialog asks "Who was this for?" and shows the ledger's own split for a shared kind (the
+> allocation preview answers "as if approved as…" for a not-yet-approved expense); the kind of an
+> expense _already_ approved still cannot be changed — no mechanism exists, and a design is
+> proposed in `docs/testing/readiness-verification-2026-10-05.md`, not built. **A movement
+> cannot be counted twice by deferring its duplicate question:** a counted payment stays in a
+> possible-duplicate pair as the survivor, and every act that counts a payment
+> (`services.assertPaymentMayBeCounted`) refuses an uncounted copy until a person has confirmed
+> or dismissed the pair —
+> [ADR-0071](docs/decisions/0071-a-possible-duplicate-stays-asked-while-either-copy-can-still-count.md),
+> **ratified by the owner on 6 October 2026, as built**; the matching rule (ADR-0070) is unchanged. An approved
+> expense also now needs consistent funding: payer = the user for a payment-funded expense, and an
+> expense the user paid cannot be approved with no movement behind it.
+> Every counting act takes **one advisory lock per payment class (direction + amount) before it
+> reads or locks anything else**, and a transaction counting several payments names them all up
+> front — the first version locked row-then-twins and could deadlock (`40P01`); see ADR-0071. A
+> split is validated server-side (an unknown person is refused), and an approved-but-unsplit
+> expense is finished with the split alone, never by re-sending the approval.
+> A file whose columns fit two layouts is imported by the person **choosing** one in the dialog
+> (`ambiguousLayouts` on the preview; nothing preselected; the layout is never evidence of the
+> account kind) — ADR-0068's update, **ratified by the owner on 6 October 2026, as built**. Correcting
+> the kind of an expense already approved as personal is **deferred from this release**
+> (design proposal only, not built). **The API now refuses a write sent by a web page on another origin, and any
+> request addressed to a non-loopback `Host` on a loopback bind** (`src/request-guard.ts`,
+> [ADR-0072](docs/decisions/0072-a-write-is-accepted-only-from-the-web-origin-this-ledger-serves.md), **ratified by the owner on 6 October 2026, as built**), and the XLSX reader caps the whole workbook's inflated size. A HawkScan run against a synthetic subset of the write routes found one Low header issue (fixed); it is bounded evidence, not clearance.
+>
 > **Across imports, one movement is one day, one amount and one name (2026-09-22, accepted; live
 > since 22 Sep 22:51 IST).** [ADR-0070](docs/decisions/0070-one-movement-recorded-twice-is-one-day-one-amount-one-name.md)
 > amends ADR-0069 and ADR-0031 with the owner's duplicate policy: the same calendar day, the same
@@ -106,12 +133,15 @@
 > who writes the proposal when no model exists. Confidence reaches the screen as a phrase, never
 > a number, and the alternatives are re-derived from the pure function rather than stored.
 >
-> **Active handoff (2026-09-16).** Work is in progress on direct website import of original IDFC
-> FIRST credit-card statement PDFs. Read
+> **Superseded: the 2026-09-16 handoff for native IDFC PDF import.** _Kept as history; do not
+> resume work from it._ The checkpoint it describes (`wip/idfc-pdf-import`) was completed and
+> merged to `main` (PR #38), and that branch no longer exists — the repository has
+> one branch, `main`. The handoff file
 > [`docs/superpowers/plans/2026-09-16-native-idfc-pdf-import-handoff.md`](docs/superpowers/plans/2026-09-16-native-idfc-pdf-import-handoff.md)
-> before modifying the checkpoint on `wip/idfc-pdf-import`. The user's real statements and all
-> extracted financial data are private local verification material and must never enter Git,
-> fixtures, snapshots, or logs.
+> is retained and marked superseded. What has _not_ changed from it: the user's real statements
+> and all extracted financial data are private local verification material and must never enter
+> Git, fixtures, snapshots, or logs; and one synthetic IDFC FIRST layout is not general PDF
+> support.
 >
 > **[ADR-0058](docs/decisions/0058-a-real-issuers-pdf-needs-a-standards-complete-local-reader.md)
 > amends ADR-0051 and changes two things worth knowing before reading either.** First,

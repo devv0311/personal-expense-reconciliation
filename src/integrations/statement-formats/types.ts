@@ -85,6 +85,13 @@ export type StatementParseResult =
       readonly formatId: string;
       readonly parserVersion: string;
       readonly errors: readonly StatementRowError[];
+      /**
+       * Set only when the refusal is a **tie**: auto-detection found these layouts fitting the
+       * header equally well and chose none of them. The ids are the valid choices — a screen
+       * offers exactly these, and naming one as `formatId` reads the same bytes with it. Absent
+       * for every other refusal, including a file no layout fits.
+       */
+      readonly ambiguousFormatIds?: readonly string[];
     };
 
 /** How a format's bytes are laid out before any column has a meaning. */

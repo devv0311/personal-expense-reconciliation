@@ -9,6 +9,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { deflateRawSync } from 'node:zlib';
 
 import { describe, expect, it } from 'vitest';
 
@@ -238,6 +239,27 @@ describe('refusals', () => {
     expect(message).not.toContain('generic_bank_csv');
     expect(message).toContain('Nothing was imported');
     expect(message).not.toContain('No supported format matched');
+    // The same choices as data, in detection order, so a screen can offer exactly them. Only a
+    // tie carries them: a file no layout fits, or one it fits uniquely, does not.
+    expect(result.ambiguousFormatIds).toEqual(['generic_bank_csv', 'card_statement_csv']);
+  });
+
+  it('carries no choices when nothing matched or exactly one layout did', () => {
+    const none = parseStatement({
+      bytes: new TextEncoder().encode('colour,shape\nred,round\n'),
+      formatId: 'auto',
+    });
+    expect(none.ok).toBe(false);
+    if (!none.ok) expect(none.ambiguousFormatIds).toBeUndefined();
+
+    const one = parseStatement({
+      bytes: new TextEncoder().encode(
+        'Date,Narration,Chq./Ref.No.,Value Dt,Withdrawal Amt.,Deposit Amt.,Closing Balance\n' +
+          '03/08/26,SYNTHETIC,REF1,03/08/26,10.00,0.00,90.00\n',
+      ),
+      formatId: 'auto',
+    });
+    expect(one.ok).toBe(true);
   });
 
   it('reads the same file once its layout is named explicitly', () => {
@@ -316,6 +338,30 @@ describe('xlsx', () => {
 
   it('reports bytes that are not a workbook rather than reading zero rows', () => {
     expect(() => readXlsxFirstSheet(new Uint8Array([1, 2, 3, 4]))).toThrow(XlsxReadError);
+  });
+
+  it('refuses a workbook whose entries together inflate past the limit, not only one entry', () => {
+    // Five 16 MiB runs of zeros: each is far under the per-entry cap and the whole file is a few
+    // kilobytes, but together they exceed what any statement could need.
+    const entry = (name: string, content: Uint8Array): Buffer => {
+      const data = deflateRawSync(content);
+      const header = Buffer.alloc(30);
+      header.writeUInt32LE(0x04034b50, 0);
+      header.writeUInt16LE(20, 4);
+      header.writeUInt16LE(8, 8);
+      header.writeUInt32LE(data.length, 18);
+      header.writeUInt32LE(content.length, 22);
+      header.writeUInt16LE(Buffer.byteLength(name), 26);
+      return Buffer.concat([header, Buffer.from(name), data]);
+    };
+    const zeros = new Uint8Array(16 * 1024 * 1024);
+    const workbook = Buffer.concat(
+      [0, 1, 2, 3, 4].map((index) => entry(`xl/padding${index}.bin`, zeros)),
+    );
+    expect(workbook.length).toBeLessThan(200 * 1024);
+    expect(() => readXlsxFirstSheet(new Uint8Array(workbook))).toThrow(
+      /expands to more than this reader will decompress in total/,
+    );
   });
 });
 

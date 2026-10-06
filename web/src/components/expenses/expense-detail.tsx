@@ -261,7 +261,12 @@ export function ExpenseDetail({ expenseId }: { expenseId: string }) {
 function ExpenseWarnings({ state }: { state: RefundAllocationState }) {
   const items: { title: string; detail: string }[] = [];
 
-  if (!state.obligationsReflectAdjustments) {
+  // `obligationsReflectAdjustments` is also false for an expense with no allocation yet, where
+  // there is no refund and nothing out of date — only shares nobody has named. The warning is
+  // for a refund that has not reached the shares, so it needs one to exist: an adjustment on
+  // record, or a reversed one leaving the shares ahead of the net amount (ADR-0052).
+  const hasRefundActivity = state.basis !== "none" || state.pendingDistribution;
+  if (!state.obligationsReflectAdjustments && hasRefundActivity) {
     items.push({
       title: "The obligations below are out of date",
       detail:

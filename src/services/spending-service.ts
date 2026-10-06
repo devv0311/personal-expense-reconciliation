@@ -114,11 +114,16 @@ export async function getSpendingSummary(
  *
  * Built from the period rather than from the clock, so a caller asking about July gets a trend
  * ending in July. UTC month boundaries, like every other period in this system.
+ *
+ * A period's end is exclusive (July is `[1 Jul, 1 Aug)`), so the month it ends in is the one
+ * containing its **last instant**, not the one the end itself falls in. Counting back from the
+ * end's own month made every trend one month short — the single month of "This month" was an
+ * empty window, and "Last 3 months" lost its first.
  */
 function trailingMonths(period: AnalyticsPeriod, months: number): AnalyticsPeriod {
-  const end = period.end;
+  const lastInstant = new Date(period.end.getTime() - 1);
   const start = new Date(
-    Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - Math.max(1, months) + 1, 1),
+    Date.UTC(lastInstant.getUTCFullYear(), lastInstant.getUTCMonth() - Math.max(1, months) + 1, 1),
   );
-  return { start, end };
+  return { start, end: period.end };
 }

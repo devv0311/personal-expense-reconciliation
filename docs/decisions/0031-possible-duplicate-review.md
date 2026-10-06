@@ -1,9 +1,12 @@
 # 0031. A possible duplicate is confirmed or dismissed by a human, and both are recorded
 
 **Status:** Accepted — **amended in part by
-[ADR-0069](0069-two-lines-of-one-statement-are-two-movements.md)** (which pairs are offered) and
+[ADR-0069](0069-two-lines-of-one-statement-are-two-movements.md)** (which pairs are offered),
 **[ADR-0070](0070-one-movement-recorded-twice-is-one-day-one-amount-one-name.md)** (the calendar day
-and the name replace the 24-hour window, which is no longer a caller option)
+and the name replace the 24-hour window, which is no longer a caller option) and
+**[ADR-0071](0071-a-possible-duplicate-stays-asked-while-either-copy-can-still-count.md)** (a
+counted payment stays in a pair as the survivor, so the other copy cannot be counted unasked;
+ratified by the owner on 6 October 2026)
 
 ## Context
 

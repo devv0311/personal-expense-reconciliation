@@ -517,9 +517,11 @@ describe("reading a statement before it is imported", () => {
       "/api/imports/preview": BANK_PREVIEW,
     });
 
+    // Named in the reading and again in the summary of what importing will do.
     expect(
-      await within(dialog).findByText(/IDFC FIRST Bank — savings or current account statement/),
-    ).toBeInTheDocument();
+      (await within(dialog).findAllByText(/IDFC FIRST Bank — savings or current account statement/))
+        .length,
+    ).toBeGreaterThan(0);
     expect(within(dialog).getByText(/5 movements/)).toBeInTheDocument();
     expect(within(dialog).getByText("₹1,484.56")).toBeInTheDocument();
     expect(within(dialog).getByText("₹51,012.34")).toBeInTheDocument();
@@ -959,6 +961,371 @@ describe("saying what a CSV or spreadsheet is a statement of", () => {
     await user.click(within(dialog).getByRole("button", { name: "Import it" }));
     await waitFor(() => expect(api.callsTo("/api/imports/statement")).toHaveLength(1));
     expect(api.bodyOf("/api/imports/statement")).not.toHaveProperty("statementKind");
+  });
+});
+
+describe("choosing how a file is read when its columns fit two layouts", () => {
+  const GENERIC = {
+    id: "generic_bank_csv",
+    label: "Generic export — date, description, amount, type and reference columns (CSV or XLSX)",
+    headerHint: "date,description,amount_inr,type,reference",
+  };
+  const MARKER = {
+    id: "card_statement_csv",
+    label: "Amount with a debit/credit marker column (CSV or XLSX)",
+    headerHint: "Transaction Date, Transaction Description, Amount, Debit/Credit",
+  };
+  const AMBIGUOUS = {
+    readable: false,
+    formatId: "auto",
+    problems: [{ lineNumber: 1, message: "This file's columns fit more than one layout." }],
+    ambiguousLayouts: [GENERIC, MARKER],
+  };
+  /** What each layout makes of the same file: the figures are the API's, never the screen's. */
+  const READ_AS = {
+    generic_bank_csv: {
+      readable: true,
+      formatId: "generic_bank_csv",
+      formatLabel: GENERIC.label,
+      accountKind: null,
+      checksPrintedBalances: false,
+      movementCount: 4,
+      debitCount: 2,
+      creditCount: 2,
+      totalDebits: "165050",
+      totalCredits: "5032525",
+      firstDate: "2026-09-01",
+      lastDate: "2026-09-04",
+      closingBalance: null,
+      warnings: [],
+      alreadyImported: null,
+    },
+    card_statement_csv: {
+      readable: true,
+      formatId: "card_statement_csv",
+      formatLabel: MARKER.label,
+      accountKind: null,
+      checksPrintedBalances: false,
+      movementCount: 4,
+      debitCount: 3,
+      creditCount: 1,
+      totalDebits: "197575",
+      totalCredits: "5000000",
+      firstDate: "2026-09-01",
+      lastDate: "2026-09-04",
+      closingBalance: null,
+      warnings: [],
+      alreadyImported: null,
+    },
+  } as const;
+  const IMPORTED = {
+    outcome: "imported",
+    importBatchId: "batch-layout",
+    contentHash: "h1",
+    paymentIds: ["p1", "p2", "p3", "p4"],
+    duplicates: [],
+    formatId: "generic_bank_csv",
+    warnings: [],
+    closingBalanceCandidate: null,
+  };
+  const CHOICE = /How should this file be read/;
+  const KIND = /What kind of account is this statement from/;
+
+  const csv = (name = "statement.csv", text = "date,description,amount_inr,type,reference\n") =>
+    new File([text], name, { type: "text/csv" });
+
+  /** A preview route that answers like the API: a tie for `auto`, the chosen reading otherwise. */
+  function previewRoute(overrides: Record<string, unknown> = {}) {
+    return (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { formatId?: string };
+      if (body.formatId === undefined || body.formatId === "auto") return AMBIGUOUS;
+      return (
+        overrides[body.formatId] ??
+        (READ_AS as Record<string, unknown>)[body.formatId] ?? {
+          readable: false,
+          formatId: body.formatId,
+          problems: [{ lineNumber: 1, message: "Not a layout this build reads." }],
+        }
+      );
+    };
+  }
+
+  async function chooseAmbiguousFile(
+    extra: Record<string, unknown> = {},
+    overrides: Record<string, unknown> = {},
+  ) {
+    const api = mockApi({
+      "/api/accounts": { accounts: [ACCOUNT] },
+      "/api/imports/preview": previewRoute(overrides),
+      "/api/imports/statement": IMPORTED,
+      ...extra,
+    });
+    renderWithQuery(<ImportStatementForm />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Import a statement" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.upload(within(dialog).getByLabelText("Statement file"), csv());
+    await within(dialog).findByRole("group", { name: CHOICE });
+    return { api, dialog, user };
+  }
+
+  const previews = (api: ApiMock) => api.callsTo("/api/imports/preview");
+
+  it("offers exactly the layouts that fit, in plain words, with none chosen and no refusal shown", async () => {
+    const { api, dialog } = await chooseAmbiguousFile();
+
+    const group = within(dialog).getByRole("group", { name: CHOICE });
+    const options = within(group).getAllByRole("radio");
+    expect(options).toHaveLength(2);
+    for (const option of options) expect(option).not.toBeChecked();
+    expect(within(group).getByText(/Generic export/)).toBeInTheDocument();
+    expect(within(group).getByText(/debit\/credit marker/)).toBeInTheDocument();
+    // The layouts' own header lines, so somebody can compare them with the file in front of them.
+    expect(within(group).getByText(GENERIC.headerHint)).toBeInTheDocument();
+    // It is a question, not a failure, and it is not asked as if one answer were right.
+    expect(within(dialog).queryByText(/can’t be imported/)).toBeNull();
+    expect(within(dialog).getByText(/read some rows differently/i)).toBeInTheDocument();
+    // Nothing is asked about the kind of account until the file can be read, and nothing is sent.
+    expect(within(dialog).queryByLabelText(KIND)).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Import it" })).toBeDisabled();
+    expect(api.callsTo("/api/imports/statement")).toHaveLength(0);
+    // Only the automatic reading was asked for so far.
+    expect(previews(api)).toHaveLength(1);
+    expect(previews(api)[0]!.body).toMatchObject({ formatId: "auto" });
+  });
+
+  it("reads the same file with the chosen layout and shows its figures with the account it will go into", async () => {
+    const { api, dialog, user } = await chooseAmbiguousFile();
+
+    await user.click(within(dialog).getByRole("radio", { name: /Generic export/ }));
+    await within(dialog).findByText(/4 movements/);
+
+    const [, chosen] = previews(api);
+    expect(chosen!.body).toMatchObject({ formatId: "generic_bank_csv", filename: "statement.csv" });
+    expect((chosen!.body as { contentBase64: string }).contentBase64).toBe(
+      btoa("date,description,amount_inr,type,reference\n"),
+    );
+    expect(within(dialog).getByText("₹1,650.50")).toBeInTheDocument();
+    expect(within(dialog).getByText("₹50,325.25")).toBeInTheDocument();
+
+    // The account question follows, unanswered, and the summary says what is still missing.
+    expect(within(dialog).getByLabelText(KIND)).toHaveValue("");
+    const summary = within(dialog).getByRole("region", { name: "What importing will do" });
+    expect(within(summary).getByText(/not chosen yet/i)).toBeInTheDocument();
+
+    await user.selectOptions(within(dialog).getByLabelText(KIND), "bank");
+    await user.selectOptions(
+      within(dialog).getByLabelText(/Account this statement belongs to/),
+      ACCOUNT.id,
+    );
+    await user.type(within(dialog).getByLabelText(/Where it came from/), "my-export");
+    expect(within(summary).getByText(/HDFC Savings/)).toBeInTheDocument();
+    expect(within(summary).getByText(/a bank account/i)).toBeInTheDocument();
+    expect(within(summary).getByText(/said by you/i)).toBeInTheDocument();
+    expect(within(summary).getByText(/Generic export/)).toBeInTheDocument();
+    expect(api.callsTo("/api/imports/statement")).toHaveLength(0);
+  });
+
+  it("imports with exactly the layout chosen and the kind the person said, once", async () => {
+    const { api, dialog, user } = await chooseAmbiguousFile();
+
+    await user.click(within(dialog).getByRole("radio", { name: /debit\/credit marker/ }));
+    await within(dialog).findByText(/4 movements/);
+    await user.selectOptions(within(dialog).getByLabelText(KIND), "bank");
+    await user.selectOptions(
+      within(dialog).getByLabelText(/Account this statement belongs to/),
+      ACCOUNT.id,
+    );
+    await user.type(within(dialog).getByLabelText(/Where it came from/), "my-export");
+    await user.click(within(dialog).getByRole("button", { name: "Import it" }));
+
+    await waitFor(() => expect(api.callsTo("/api/imports/statement")).toHaveLength(1));
+    expect(api.bodyOf("/api/imports/statement")).toMatchObject({
+      formatId: "card_statement_csv",
+      statementKind: "bank",
+      accountId: ACCOUNT.id,
+      filename: "statement.csv",
+    });
+  });
+
+  it("clears the earlier reading while another layout is being read, and shows only the new one", async () => {
+    const { dialog, user } = await chooseAmbiguousFile();
+
+    await user.click(within(dialog).getByRole("radio", { name: /Generic export/ }));
+    await within(dialog).findByText("₹1,650.50");
+    await user.click(within(dialog).getByRole("radio", { name: /debit\/credit marker/ }));
+
+    await within(dialog).findByText("₹1,975.75");
+    expect(within(dialog).queryByText("₹1,650.50")).toBeNull();
+    expect(within(dialog).getByText(/3 movements|Money out \(3\)/)).toBeInTheDocument();
+  });
+
+  it("starts again when the file changes: the choice, the reading and the answers are all forgotten", async () => {
+    const { api, dialog, user } = await chooseAmbiguousFile();
+    await user.click(within(dialog).getByRole("radio", { name: /Generic export/ }));
+    await within(dialog).findByText(/4 movements/);
+    await user.selectOptions(within(dialog).getByLabelText(KIND), "bank");
+
+    await user.upload(
+      within(dialog).getByLabelText("Statement file"),
+      csv("other.csv", "date,description,amount_inr,type,reference\n2026-09-09,X,1.00,Debit,R\n"),
+    );
+
+    const group = await within(dialog).findByRole("group", { name: CHOICE });
+    for (const option of within(group).getAllByRole("radio")) expect(option).not.toBeChecked();
+    expect(within(dialog).queryByText(/4 movements/)).toBeNull();
+    expect(within(dialog).queryByLabelText(KIND)).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Import it" })).toBeDisabled();
+    expect(previews(api).at(-1)!.body).toMatchObject({ formatId: "auto", filename: "other.csv" });
+  });
+
+  it("says why a layout could not read the file, keeps the others on offer, and lets another be tried", async () => {
+    const { api, dialog, user } = await chooseAmbiguousFile(
+      {},
+      {
+        generic_bank_csv: {
+          readable: false,
+          formatId: "generic_bank_csv",
+          problems: [
+            { lineNumber: 3, message: "“Refund” is not a direction this format recognises." },
+          ],
+        },
+      },
+    );
+
+    await user.click(within(dialog).getByRole("radio", { name: /Generic export/ }));
+    expect(await within(dialog).findByText(/not a direction this format recognises/)).toBeVisible();
+    expect(within(dialog).getByText(/choose a different layout above/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Import it" })).toBeDisabled();
+    // The choice is still there to change.
+    expect(within(dialog).getAllByRole("radio")).toHaveLength(2);
+
+    await user.click(within(dialog).getByRole("radio", { name: /debit\/credit marker/ }));
+    await within(dialog).findByText(/4 movements/);
+    expect(within(dialog).queryByText(/not a direction this format recognises/)).toBeNull();
+    expect(api.callsTo("/api/imports/statement")).toHaveLength(0);
+  });
+
+  it("keeps the account-kind rule: a layout is not an answer, and a card cannot take a bank statement", async () => {
+    const card = { ...ACCOUNT, id: "a-card", name: "Synthetic Card", type: "card", last4: null };
+    const { dialog, user } = await chooseAmbiguousFile({
+      "/api/accounts": { accounts: [ACCOUNT, card] },
+    });
+
+    // Choosing the layout whose label is the card-like one still asks the question.
+    await user.click(within(dialog).getByRole("radio", { name: /debit\/credit marker/ }));
+    await within(dialog).findByText(/4 movements/);
+    expect(within(dialog).getByLabelText(KIND)).toHaveValue("");
+
+    await user.selectOptions(within(dialog).getByLabelText(KIND), "bank");
+    expect(
+      within(dialog).getByRole("option", { name: /Synthetic Card — not a bank account/ }),
+    ).toBeDisabled();
+    await user.type(within(dialog).getByLabelText(/Where it came from/), "x");
+    await user.selectOptions(
+      within(dialog).getByLabelText(/Account this statement belongs to/),
+      ACCOUNT.id,
+    );
+    expect(within(dialog).getByRole("button", { name: "Import it" })).toBeEnabled();
+  });
+
+  it("writes nothing when the dialog is closed, and offers a fresh start when it is opened again", async () => {
+    const { api, dialog, user } = await chooseAmbiguousFile();
+    await user.click(within(dialog).getByRole("radio", { name: /Generic export/ }));
+    await within(dialog).findByText(/4 movements/);
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(api.callsTo("/api/imports/statement")).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Import a statement" }));
+    const reopened = await screen.findByRole("dialog");
+    expect(within(reopened).queryByRole("group", { name: CHOICE })).toBeNull();
+    expect(within(reopened).queryByText(/4 movements/)).toBeNull();
+    expect(within(reopened).getByRole("button", { name: "Import it" })).toBeDisabled();
+  });
+
+  it("shows the API's refusal after the choice and lets the person retry without choosing again", async () => {
+    const { api, dialog, user } = await chooseAmbiguousFile();
+    // The first import is refused with a real 409; the second goes through.
+    const answered = global.fetch;
+    let attempts = 0;
+    global.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (input.toString().includes("/api/imports/statement")) {
+        attempts += 1;
+        if (attempts === 1) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                error: { code: "STATEMENT_ACCOUNT_MISMATCH", message: "That account is a card." },
+              }),
+              { status: 409, headers: { "content-type": "application/json" } },
+            ),
+          );
+        }
+      }
+      return answered(input, init);
+    }) as unknown as typeof global.fetch;
+
+    await user.click(within(dialog).getByRole("radio", { name: /Generic export/ }));
+    await within(dialog).findByText(/4 movements/);
+    await user.selectOptions(within(dialog).getByLabelText(KIND), "bank");
+    await user.selectOptions(
+      within(dialog).getByLabelText(/Account this statement belongs to/),
+      ACCOUNT.id,
+    );
+    await user.type(within(dialog).getByLabelText(/Where it came from/), "x");
+    await user.click(within(dialog).getByRole("button", { name: "Import it" }));
+
+    expect(await within(dialog).findByText(/That account is a card/)).toBeInTheDocument();
+    // Still on screen with the choice, the reading and the answers intact: nothing to redo.
+    expect(within(dialog).getByRole("radio", { name: /Generic export/ })).toBeChecked();
+    expect(within(dialog).getByText(/4 movements/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Import it" })).toBeEnabled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Import it" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const sent = api.callsTo("/api/imports/statement");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body).toMatchObject({ formatId: "generic_bank_csv", statementKind: "bank" });
+  });
+
+  it("can be operated from the keyboard alone: the layouts are one labelled radio group and Space chooses", async () => {
+    const { api, dialog, user } = await chooseAmbiguousFile();
+
+    const first = within(dialog).getAllByRole("radio")[0]!;
+    first.focus();
+    await user.keyboard("[Space]");
+    expect(first).toBeChecked();
+    await within(dialog).findByText(/4 movements/);
+    expect(previews(api).at(-1)!.body).toMatchObject({ formatId: "generic_bank_csv" });
+    // Choosing never imports: that stays a button behind the dialog's own confirmation.
+    expect(api.callsTo("/api/imports/statement")).toHaveLength(0);
+  });
+
+  it("leaves a file detection could read on its own exactly as it was: no question, automatic layout", async () => {
+    const api = mockApi({
+      "/api/accounts": { accounts: [ACCOUNT] },
+      "/api/imports/preview": READ_AS.generic_bank_csv,
+      "/api/imports/statement": IMPORTED,
+    });
+    renderWithQuery(<ImportStatementForm />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Import a statement" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.upload(within(dialog).getByLabelText("Statement file"), csv());
+    await within(dialog).findByText(/4 movements/);
+
+    expect(within(dialog).queryByRole("group", { name: CHOICE })).toBeNull();
+    await user.selectOptions(within(dialog).getByLabelText(KIND), "bank");
+    await user.selectOptions(
+      within(dialog).getByLabelText(/Account this statement belongs to/),
+      ACCOUNT.id,
+    );
+    await user.type(within(dialog).getByLabelText(/Where it came from/), "x");
+    await user.click(within(dialog).getByRole("button", { name: "Import it" }));
+    await waitFor(() => expect(api.callsTo("/api/imports/statement")).toHaveLength(1));
+    expect(api.bodyOf("/api/imports/statement")).toMatchObject({ formatId: "auto" });
   });
 });
 

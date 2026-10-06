@@ -57,6 +57,29 @@ describe("the expense detail screen", () => {
     expect(screen.getByText(/not current or verified/i)).toBeInTheDocument();
   });
 
+  it("does not claim a refund was recorded on an expense nobody has refunded or shared yet", async () => {
+    // The defect: a new expense has no allocation, so the API reports that its obligations do
+    // not "reflect adjustments" — true of a missing allocation, and nothing to do with a refund.
+    // The screen read that flag as "a refund has been recorded" and said so about an expense
+    // whose own panel, a moment below, reads "No adjustment recorded".
+    renderDetail({
+      ...REFUND_STATE_PENDING,
+      basis: "none",
+      attributedReduction: "0",
+      unattributedReduction: "0",
+      pendingReduction: "0",
+      pendingDistribution: false,
+      obligationsReflectAdjustments: false,
+      items: [],
+      currentAllocation: null,
+      projectedLines: null,
+    });
+
+    await waitFor(() => expect(screen.getByText("Net cost")).toBeInTheDocument());
+    expect(screen.queryByText("The obligations below are out of date")).not.toBeInTheDocument();
+    expect(screen.queryByText(/A refund has been recorded/)).not.toBeInTheDocument();
+  });
+
   it("drops that warning once every recorded adjustment has reached the allocation", async () => {
     renderDetail(REFUND_STATE_SETTLED);
 

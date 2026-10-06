@@ -22,6 +22,13 @@ import { inflateRawSync } from 'node:zlib';
 /** Guards against a zip bomb: a personal bank statement is not 200 MB of XML. */
 const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
 
+/**
+ * The same bound across the whole workbook. A per-entry cap alone lets many small, highly
+ * compressible entries each inflate to the cap, so a megabyte-sized upload could hold gigabytes
+ * of memory before a single row was read.
+ */
+const MAX_WORKBOOK_BYTES = 64 * 1024 * 1024;
+
 export class XlsxReadError extends Error {
   constructor(message: string) {
     super(message);
@@ -77,6 +84,7 @@ function readZipEntries(bytes: Uint8Array): Map<string, Uint8Array> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const entries = new Map<string, Uint8Array>();
   let offset = 0;
+  let inflatedBytes = 0;
 
   while (offset + 30 <= bytes.length) {
     const signature = view.getUint32(offset, true);
@@ -112,10 +120,37 @@ function readZipEntries(bytes: Uint8Array): Map<string, Uint8Array> {
     }
 
     const data = bytes.subarray(dataStart, dataStart + compressedSize);
+    const tooLarge = () =>
+      new XlsxReadError(
+        'This workbook expands to more than this reader will decompress in total, so nothing ' +
+          'was read. A bank statement is far smaller than that; export it as CSV instead.',
+      );
     if (method === 0) {
+      inflatedBytes += data.byteLength;
+      if (inflatedBytes > MAX_WORKBOOK_BYTES) throw tooLarge();
       entries.set(name, data);
     } else if (method === 8) {
-      entries.set(name, new Uint8Array(inflateRawSync(data, { maxOutputLength: MAX_ENTRY_BYTES })));
+      let inflated: Uint8Array;
+      try {
+        // Bounded by what is left of the workbook's budget, not only the per-entry cap, so the
+        // limit holds while inflating rather than being noticed afterwards.
+        inflated = new Uint8Array(
+          inflateRawSync(data, {
+            maxOutputLength: Math.max(
+              1,
+              Math.min(MAX_ENTRY_BYTES, MAX_WORKBOOK_BYTES - inflatedBytes),
+            ),
+          }),
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException | null)?.code === 'ERR_BUFFER_TOO_LARGE') {
+          throw tooLarge();
+        }
+        throw error;
+      }
+      inflatedBytes += inflated.byteLength;
+      if (inflatedBytes > MAX_WORKBOOK_BYTES) throw tooLarge();
+      entries.set(name, inflated);
     } else {
       throw new XlsxReadError(
         `The entry "${name}" uses compression method ${method}, which this reader does not ` +

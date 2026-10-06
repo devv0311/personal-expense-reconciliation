@@ -39,7 +39,10 @@ export interface LedgerReading {
  * One pass. The plans are built first because the anomalies depend on them.
  */
 export async function readInstalmentsAndAnomalies(db: Executor): Promise<LedgerReading> {
-  const rows = await listPaymentPurposeContext(db);
+  // A payment confirmed as a duplicate did not happen twice, so it is neither a charge to repeat
+  // nor an instalment to place: leaving it in made "the same amount, twice" keep reporting a pair
+  // a person had already resolved.
+  const rows = (await listPaymentPurposeContext(db)).filter((row) => row.state !== 'ignored');
 
   const sourceRows = rows.map((row) => ({
     paymentId: row.paymentId,

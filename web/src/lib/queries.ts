@@ -269,11 +269,16 @@ export function useSpendingSummary(range?: AnalyticsRange, months?: number) {
 export function useAllocationPreview(
   expenseId: string,
   decision: api.AllocationDecisionInput | null,
+  ifApprovedAs?: { readonly relationshipType: string },
 ) {
-  const key = decision === null ? "" : JSON.stringify(decision);
+  const key =
+    decision === null
+      ? ""
+      : JSON.stringify(ifApprovedAs === undefined ? decision : { decision, ifApprovedAs });
   return useQuery({
     queryKey: queryKeys.allocationPreview(expenseId, key),
-    queryFn: () => api.previewAllocation(expenseId, decision as api.AllocationDecisionInput),
+    queryFn: () =>
+      api.previewAllocation(expenseId, decision as api.AllocationDecisionInput, ifApprovedAs),
     enabled: decision !== null,
   });
 }
@@ -549,6 +554,282 @@ export function useDecideInference() {
       void queryClient.invalidateQueries({ queryKey: ["expenses"] });
     },
   });
+}
+
+/** Expense states that exist only once a split has been saved. */
+const SPLIT_SAVED_STATES: ReadonlySet<string> = new Set([
+  "allocated",
+  "ready_to_sync",
+  "synced",
+  "reconciled",
+]);
+
+/** Expense states that exist only once the approval has been recorded. */
+const APPROVED_OR_LATER: ReadonlySet<string> = new Set([
+  "approved",
+  "allocated",
+  "ready_to_sync",
+  "synced",
+  "reconciled",
+]);
+
+/**
+ * The connection dropped and the ledger could not be read afterwards either, so whether the last
+ * write was recorded is **not known**. Distinct from a refusal (the ledger answered "no") and from
+ * a failure the ledger confirmed (it answered, and the write is not there).
+ */
+/** The ledger shows this was decided, but not the way this dialog asked: nothing here is applied. */
+export class DecidedDifferently extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DecidedDifferently";
+  }
+}
+
+export class UncertainResult extends Error {
+  /** `unknown`: the ledger could not be read. `not_recorded`: it was read and the write is absent. */
+  readonly outcome: "unknown" | "not_recorded";
+  constructor(message: string, outcome: "unknown" | "not_recorded" = "unknown") {
+    super(message);
+    this.name = "UncertainResult";
+    this.outcome = outcome;
+  }
+}
+
+const DECISION_UNCERTAIN =
+  "The connection dropped, so we can't yet tell whether the approval was recorded. Nothing will be sent again until the ledger has been checked — press the button to check and continue.";
+const DECISION_NOT_RECORDED =
+  "The connection dropped, and when we checked, the ledger had not recorded the approval. The original request could still arrive, so the ledger is checked again before anything is sent — you can try again.";
+const SPLIT_UNCERTAIN =
+  "The connection dropped, so the split may or may not have saved. It will be checked before anything is sent again.";
+const SPLIT_NOT_RECORDED =
+  "The connection dropped, and when we checked, the split was not on record. The original request could still arrive, so the ledger is checked again before anything is sent.";
+
+/**
+ * Approving a statement line as a kind of expense, and — when it is one people share — saving who
+ * shared it, as two recorded steps in a fixed order.
+ *
+ * The approval is the existing `modify` decision (it has always carried the kind); the split is
+ * the existing allocation route. They stay two writes with two audit trails, never one hidden
+ * inside the other. What this adds is the order and the failure: if the split does not save
+ * after the approval did, the question is **kept on screen** with that said plainly, because
+ * refreshing the queue now would remove the question — and the only place the failure was
+ * visible — while the expense sat approved as shared with nobody named. The queue refreshes
+ * once the person has seen it ({@link invalidate}).
+ */
+export function useApproveStatementLine() {
+  const queryClient = useQueryClient();
+  const invalidate = (expenseId: string | null) => {
+    void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+    void queryClient.invalidateQueries({ queryKey: ["expenses"] });
+    if (expenseId !== null) invalidateExpense(queryClient, expenseId);
+    else invalidateOutcomes(queryClient);
+  };
+  const mutation = useMutation({
+    mutationFn: async (input: {
+      readonly inferenceId: string;
+      readonly expenseId: string | null;
+      readonly decision: "accept" | "modify";
+      readonly modifiedOutput?: api.ClassificationProposalInput;
+      readonly reason?: string;
+      /** The split to save once the approval has gone through; absent for a personal expense. */
+      readonly split?: api.AllocationDecisionInput;
+      /**
+       * The approval already committed (an earlier attempt returned `sharingError`), so only the
+       * split is left. Sending the decision again would be refused by the ledger — a proposal is
+       * decided once — and would leave the split impossible to save from the dialog.
+       */
+      readonly alreadyApproved?: boolean;
+      /**
+       * An earlier attempt ended without an answer from the ledger, so what is recorded is read
+       * before anything is sent again.
+       */
+      readonly recheck?: boolean;
+      /**
+       * The category this dialog approves it under. An approval already on record is only "ours" if
+       * its facts match what was asked — kind **and** category — not merely if it is approved.
+       */
+      readonly expectedCategory?: string | null;
+    }): Promise<{ readonly sharingError: Error | null }> => {
+      const alreadyApproved = input.alreadyApproved === true;
+      const isNetwork = (error: unknown) => api.isUnansweredRequest(error);
+
+      /**
+       * Reads what the ledger says about this expense and compares it with what this dialog asked:
+       * `committed` (approved as asked), `pending` (not decided), `different` (decided another way,
+       * e.g. in another tab), or `unreadable`.
+       */
+      const reconcile = async (): Promise<
+        | { readonly kind: "committed" | "pending" | "unreadable" }
+        | { readonly kind: "different"; readonly said: string }
+      > => {
+        if (input.expenseId === null) return { kind: "unreadable" };
+        let expense;
+        try {
+          expense = await api.getExpense(input.expenseId);
+        } catch {
+          return { kind: "unreadable" };
+        }
+        if (!APPROVED_OR_LATER.has(expense.state)) {
+          return expense.state === "rejected"
+            ? { kind: "different", said: "declined" }
+            : { kind: "pending" };
+        }
+        const asked = input.modifiedOutput?.relationshipType;
+        if (asked !== undefined && expense.relationshipType !== asked) {
+          return {
+            kind: "different",
+            said: `approved as ${expense.relationshipType.replace(/_/g, " ")}`,
+          };
+        }
+        if (input.expectedCategory !== undefined && expense.category !== input.expectedCategory) {
+          return {
+            kind: "different",
+            said: `approved under ${expense.category === null ? "no category" : `“${expense.category}”`}`,
+          };
+        }
+        return { kind: "committed" };
+      };
+      const differently = (said: string) =>
+        new DecidedDifferently(
+          `This was already decided another way — it is ${said} — so nothing from this dialog was applied, and the split you chose was not saved. Look at it again before deciding.`,
+        );
+
+      if (!alreadyApproved) {
+        // After a dropped connection the approval may already be on record — or still be on its way.
+        // Look before sending it again, and settle an "already decided" answer the same way.
+        let approvalRecorded = false;
+        if (input.recheck === true) {
+          const seen = await reconcile();
+          if (seen.kind === "unreadable") throw new UncertainResult(DECISION_UNCERTAIN);
+          if (seen.kind === "different") throw differently(seen.said);
+          approvalRecorded = seen.kind === "committed";
+        }
+        if (!approvalRecorded) {
+          try {
+            await api.decideInference({
+              inferenceId: input.inferenceId,
+              decision: input.decision,
+              ...(input.modifiedOutput === undefined
+                ? {}
+                : { modifiedOutput: input.modifiedOutput }),
+              ...(input.reason === undefined ? {} : { reason: input.reason }),
+            });
+          } catch (error) {
+            const alreadyDecided =
+              error instanceof api.ApiError && error.code === "INVALID_STATE_TRANSITION";
+            // A different structured refusal is the ledger answering: its message stands.
+            if (!isNetwork(error) && !alreadyDecided) throw error;
+            const seen = await reconcile();
+            if (seen.kind === "unreadable") throw new UncertainResult(DECISION_UNCERTAIN);
+            if (seen.kind === "different") throw differently(seen.said);
+            if (seen.kind === "pending") {
+              // "Already decided" while the expense reads undecided cannot be reconciled from
+              // either answer: say so rather than choose one.
+              if (alreadyDecided) throw new UncertainResult(DECISION_UNCERTAIN);
+              throw new UncertainResult(DECISION_NOT_RECORDED, "not_recorded");
+            }
+            // Committed as asked — by this attempt, or by the earlier one whose answer was lost.
+          }
+        }
+      }
+      /**
+       * What the ledger holds as this expense's split, compared with the one asked: `none` (no split
+       * yet), `same` (the people and method asked for), `other` (a split somebody else saved), or
+       * `null` when it cannot be read. A saved split is only ours if it is the one we sent.
+       */
+      const readSplit = async (): Promise<
+        | { readonly kind: "none" | "same" }
+        | { readonly kind: "other"; readonly names: string }
+        | null
+      > => {
+        if (input.expenseId === null || input.split === undefined) return null;
+        try {
+          const expense = await api.getExpense(input.expenseId);
+          if (!SPLIT_SAVED_STATES.has(expense.state)) return { kind: "none" };
+          const history = await api.getExpenseHistory(input.expenseId);
+          const current = history.allocationVersions.find(
+            (version) => version.supersededAt === null,
+          );
+          if (current === undefined) return { kind: "none" };
+          const key = (type: string, id: string) => `${type}:${id}`;
+          const asked = new Set(
+            input.split.method === "equal"
+              ? input.split.beneficiaries.map((who) => key(who.type, who.id))
+              : [],
+          );
+          const held = new Set(
+            current.lines.map((line) => key(line.beneficiaryType, line.beneficiaryId)),
+          );
+          const same =
+            current.method === input.split.method &&
+            input.split.method === "equal" &&
+            asked.size === held.size &&
+            [...asked].every((entry) => held.has(entry));
+          return same
+            ? { kind: "same" }
+            : {
+                kind: "other",
+                names:
+                  current.lines.map((line) => line.beneficiaryName ?? "somebody").join(", ") ||
+                  "nobody",
+              };
+        } catch {
+          return null;
+        }
+      };
+      const splitDiffers = (names: string) =>
+        new DecidedDifferently(
+          `This was already split a different way — between ${names} — so the split you chose was not saved and nothing was overwritten. Look at it again before deciding.`,
+        );
+
+      if (input.split === undefined || input.expenseId === null) return { sharingError: null };
+      try {
+        if (alreadyApproved || input.recheck === true) {
+          // The first attempt may have reached the ledger with only its answer lost. Look
+          // before writing: an expense already allocated has its split, and a second save would
+          // only supersede it with the same one.
+          const seen = await readSplit();
+          if (seen === null) throw new TypeError("The ledger could not be read.");
+          if (seen.kind === "same") return { sharingError: null };
+          if (seen.kind === "other") throw splitDiffers(seen.names);
+        }
+        await api.approveAllocation({
+          expenseId: input.expenseId,
+          decision: input.split,
+          ...(input.reason === undefined ? {} : { reason: input.reason }),
+        });
+        return { sharingError: null };
+      } catch (error) {
+        if (error instanceof DecidedDifferently) throw error;
+        if (!isNetwork(error)) {
+          return { sharingError: error instanceof Error ? error : new Error(String(error)) };
+        }
+        // The connection dropped: ask the ledger whether the split is there, and whether it is ours.
+        const seen = await readSplit();
+        if (seen?.kind === "same") return { sharingError: null };
+        if (seen?.kind === "other") throw splitDiffers(seen.names);
+        return {
+          sharingError:
+            seen?.kind === "none"
+              ? new UncertainResult(SPLIT_NOT_RECORDED, "not_recorded")
+              : new UncertainResult(SPLIT_UNCERTAIN),
+        };
+      }
+    },
+    onSuccess: (result, input) => {
+      if (result.sharingError === null) invalidate(input.expenseId);
+    },
+    onError: (error, input) => {
+      // The ledger says this proposal was already decided — in another tab, or by an earlier
+      // attempt whose answer was lost. The card on screen is stale, so refresh the queue rather
+      // than leave a question that can only ever fail.
+      // Not for `DecidedDifferently`: refreshing the queue would drop the card — and the message
+      // saying what the ledger shows — before anybody read it. The dialog refreshes on close.
+      if (error instanceof api.ApiError && error.status === 409) invalidate(input.expenseId);
+    },
+  });
+  return { ...mutation, invalidate };
 }
 
 /** Asks the model again. What comes back is a proposal, so the queue is what changes. */

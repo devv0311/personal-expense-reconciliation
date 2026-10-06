@@ -12,6 +12,8 @@
  * (`invariants.md` #4, #6, #22).
  */
 
+import { createHash } from 'node:crypto';
+
 import { and, asc, desc, eq, exists, inArray, isNull, not, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -1359,6 +1361,140 @@ export async function getPaymentById(
     .from(payments)
     .where(eq(payments.id, paymentId));
   return row === undefined ? null : (row as PaymentRow);
+}
+
+/** The columns of {@link PaymentRow}, in one place for the reads that must lock the row. */
+const PAYMENT_ROW_COLUMNS = {
+  id: payments.id,
+  amount: payments.amount,
+  currency: payments.currency,
+  direction: payments.direction,
+  counterpartyType: payments.counterpartyType,
+  counterpartyId: payments.counterpartyId,
+  state: payments.state,
+  ignoredReason: payments.ignoredReason,
+  occurredAt: payments.occurredAt,
+  externalReference: payments.externalReference,
+  accountId: payments.accountId,
+  importBatchId: payments.importBatchId,
+  channel: payments.channel,
+  referenceType: payments.referenceType,
+  rawDescription: payments.rawDescription,
+} as const;
+
+/**
+ * The payments with these ids, read as the statement sees them — an ordinary read.
+ *
+ * Called **after** {@link lockPaymentClasses}, which is what makes what it returns safe to
+ * decide on: every act that changes whether a payment counts holds that lock first.
+ */
+export async function listPaymentsByIds(
+  exec: Executor,
+  paymentIds: readonly PaymentId[],
+): Promise<PaymentRow[]> {
+  if (paymentIds.length === 0) return [];
+  const rows = await exec
+    .select(PAYMENT_ROW_COLUMNS)
+    .from(payments)
+    .where(inArray(payments.id, [...paymentIds]))
+    .orderBy(asc(payments.id));
+  return rows as PaymentRow[];
+}
+
+/**
+ * The advisory-lock key of a payment's *class*: its direction and its amount.
+ *
+ * `domain.isPossibleDuplicate` pairs only payments that move the same amount the same way, so
+ * every payment that could be counted twice together shares one key, whichever of them is
+ * being decided. A 63-bit digest rather than a row id, so a lock can be taken **before** any
+ * row is read or locked, and so it is the same lock for every transaction. Two classes that
+ * collide merely wait for each other; they cannot be wrongly allowed through.
+ */
+export function paymentClassLockKey(payment: {
+  readonly amount: Paise;
+  readonly direction: string;
+}): bigint {
+  const digest = createHash('sha256')
+    .update(`pes.payment-count:${payment.direction}:${payment.amount.toString()}`)
+    .digest();
+  return BigInt.asIntN(64, digest.readBigUInt64BE(0)) >> 1n;
+}
+
+/**
+ * Takes, for the rest of this transaction, the lock that serialises every act which makes a
+ * payment count (ADR-0071) — **in one global order, before anything else is locked**.
+ *
+ * What it solves is the order of acquisition. The first version of the guard locked the
+ * payment being decided, *then* discovered its twins and locked those. Two decisions on the
+ * two halves of one pair each held their own row and then asked for the other's, and
+ * PostgreSQL aborted one with `40P01`. Here a transaction names every payment it will count
+ * up front, the distinct classes are sorted by key, and the locks are taken one at a time in
+ * that order, so no transaction can hold a later class while waiting for an earlier one.
+ *
+ * Callers that count **several** payments (a funded expense) must pass them all in one call,
+ * before touching any of them; a call for a class already held is a no-op, so the single
+ * payment checks made afterwards cost nothing. Outside a transaction the lock is released at
+ * once, which is harmless: there is then nothing to serialise.
+ *
+ * **What it guarantees, and what it does not.** Any two transactions that count payments of
+ * one class run one after the other, whatever their order and however many payments they
+ * name, and the second reads what the first committed (the default `READ COMMITTED` takes a
+ * fresh snapshot per statement). It does *not* stop an import inserting a new payment mid-way:
+ * a new payment counts nothing until a later guarded act decides it, and that act takes this
+ * lock. It is not a row lock either, so a writer that never counts (normalisation, a
+ * counterparty edit) is neither blocked by it nor blocking it.
+ */
+export async function lockPaymentClasses(
+  exec: Executor,
+  paymentIds: readonly PaymentId[],
+): Promise<void> {
+  const unique = [...new Set(paymentIds)];
+  if (unique.length === 0) return;
+  const rows = await exec
+    .select({ amount: payments.amount, direction: payments.direction })
+    .from(payments)
+    .where(inArray(payments.id, unique));
+
+  const keys = [...new Set(rows.map((row) => paymentClassLockKey(row as never)))].sort((a, b) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  for (const key of keys) {
+    await exec.execute(sql`select pg_advisory_xact_lock(${key.toString()}::bigint)`);
+  }
+}
+
+/**
+ * Payments that something already counts, or has claimed to.
+ *
+ * `linked` is the state a decision gives a payment, but a payment funding an expense by a hand
+ * entered link, or discharged by a settlement, is just as counted and keeps its old state — so
+ * the state alone cannot say. Counted here means any of: state `linked`; a funding link to an
+ * expense that is not `rejected` (a `proposed` expense counts the moment it is approved, so its
+ * payment is already spoken for); or a settlement.
+ */
+export async function listClaimedPaymentIds(
+  exec: Executor,
+  paymentIds: readonly PaymentId[],
+): Promise<Set<string>> {
+  if (paymentIds.length === 0) return new Set();
+  const rows = await exec
+    .select({ id: payments.id })
+    .from(payments)
+    .where(
+      and(
+        inArray(payments.id, [...paymentIds]),
+        sql`(
+          ${payments.state} = 'linked'
+          or exists (
+            select 1 from payment_expense_links l
+            join expenses e on e.id = l.expense_id
+            where l.payment_id = ${payments.id} and e.state <> 'rejected'
+          )
+          or exists (select 1 from settlements s where s.payment_id = ${payments.id})
+        )`,
+      ),
+    );
+  return new Set(rows.map((row) => row.id));
 }
 
 /**
@@ -4126,6 +4262,9 @@ export async function listPendingClassificationInferences(
         eq(aiInferences.inferenceType, 'classify_transaction'),
         eq(aiInferences.inputRefType, 'payment'),
         eq(aiInferences.status, 'pending'),
+        // A payment confirmed as a duplicate does not count: the copy it restates already does.
+        // Asking what it was for would offer to count the same money a second time.
+        not(eq(payments.state, 'ignored')),
       ),
     )
     .orderBy(asc(aiInferences.createdAt), asc(aiInferences.id));
@@ -4212,17 +4351,20 @@ export async function listRejectedClassifications(
  *
  * A **pre-filter**, exactly as `listPaymentsAwaitingClassification` is: it narrows to payments
  * sharing an amount and a direction with at least one other live payment, and
- * `domain.isPossibleDuplicate` decides what actually pairs. The window and the
- * "no conclusive reference match" rule stay in `domain`, where the deterministic path's rule
- * already lives.
+ * `domain.isPossibleDuplicate` decides what actually pairs. The calendar day, the name and the
+ * reference rules stay in `domain`.
  *
- * `linked` and `ignored` payments are excluded. An `ignored` one is already discarded; a
- * `linked` one is explained by an expense or a settlement, and the payment lifecycle has no
- * `linked → ignored` edge to confirm it with — unwinding an explanation is not a review action
- * this phase offers.
+ * `ignored` payments are excluded: already discarded. A `linked` payment is **kept**, but only
+ * as one half of a pair — the half that already counts. It is never the half a reviewer can
+ * discard (the lifecycle draws no `linked → ignored` edge, because discarding an explained
+ * payment would orphan the expense it funds; ADR-0031), but the *other* copy, still live, is
+ * exactly the one a second approval would count again. Dropping the pair the moment either
+ * half was approved is how one dinner became two (ADR-0071). Which half is discardable is
+ * decided by the caller, who also reads which payments are counted at all
+ * ({@link listClaimedPaymentIds}).
  */
 export async function listPossibleDuplicateCandidates(exec: Executor): Promise<PaymentRow[]> {
-  const live = ['imported', 'normalized'] as const;
+  const candidateStates = ['imported', 'normalized', 'linked'] as const;
   const twin = exec
     .select({ one: sql`1` })
     .from(alias(payments, 'other'))
@@ -4230,31 +4372,37 @@ export async function listPossibleDuplicateCandidates(exec: Executor): Promise<P
       sql`"other"."amount" = ${payments.amount}
         and "other"."direction" = ${payments.direction}
         and "other"."id" <> ${payments.id}
-        and "other"."state" in ('imported', 'normalized')`,
+        and "other"."state" in ('imported', 'normalized', 'linked')`,
     );
 
   const rows = await exec
-    .select({
-      id: payments.id,
-      amount: payments.amount,
-      currency: payments.currency,
-      direction: payments.direction,
-      counterpartyType: payments.counterpartyType,
-      counterpartyId: payments.counterpartyId,
-      state: payments.state,
-      ignoredReason: payments.ignoredReason,
-      occurredAt: payments.occurredAt,
-      externalReference: payments.externalReference,
-      accountId: payments.accountId,
-      importBatchId: payments.importBatchId,
-      channel: payments.channel,
-      referenceType: payments.referenceType,
-      rawDescription: payments.rawDescription,
-    })
+    .select(PAYMENT_ROW_COLUMNS)
     .from(payments)
-    .where(and(inArray(payments.state, [...live]), exists(twin)))
+    .where(and(inArray(payments.state, [...candidateStates]), exists(twin)))
     .orderBy(asc(payments.occurredAt), asc(payments.id));
   return rows as PaymentRow[];
+}
+
+/**
+ * The ids of every other payment that moves the same amount the same way and is not `ignored` —
+ * the only payments that could be a possible duplicate of this one. A pre-filter, as above.
+ */
+export async function listDuplicateTwinIds(
+  exec: Executor,
+  payment: { readonly id: PaymentId; readonly amount: Paise; readonly direction: string },
+): Promise<PaymentId[]> {
+  const rows = await exec
+    .select({ id: payments.id })
+    .from(payments)
+    .where(
+      and(
+        eq(payments.amount, payment.amount),
+        eq(payments.direction, payment.direction),
+        not(eq(payments.id, payment.id)),
+        inArray(payments.state, ['imported', 'normalized', 'linked']),
+      ),
+    );
+  return rows.map((row) => row.id as PaymentId);
 }
 
 /**
@@ -5213,11 +5361,14 @@ export async function listPaymentPurposeContext(exec: Executor): Promise<
     readonly occurredAt: Date;
     readonly amount: Paise;
     readonly confirmedCategory: string | null;
+    /** Read only to leave out what was discarded as a duplicate; not part of a purpose reading. */
+    readonly state: PaymentState;
   }[]
 > {
   const rows = await exec
     .select({
       paymentId: payments.id,
+      state: payments.state,
       rawDescription: payments.rawDescription,
       direction: payments.direction,
       occurredAt: payments.occurredAt,
@@ -5238,10 +5389,12 @@ export async function listPaymentPurposeContext(exec: Executor): Promise<
       payments.direction,
       payments.occurredAt,
       payments.amount,
+      payments.state,
     )
     .orderBy(asc(payments.occurredAt), asc(payments.id));
 
   return rows.map((row) => ({
+    state: row.state as PaymentState,
     paymentId: row.paymentId as PaymentId,
     rawDescription: row.rawDescription,
     direction: row.direction as 'debit' | 'credit',

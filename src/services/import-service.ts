@@ -479,6 +479,17 @@ export type StatementPreview =
       readonly formatId: string;
       /** Why nothing could be read: line numbers and reasons, never the file's own text. */
       readonly problems: readonly { readonly lineNumber: number; readonly message: string }[];
+      /**
+       * Present only when detection refused because several layouts fit the columns equally
+       * well. These are the **valid choices** and nothing else — each a supported layout that
+       * detection itself found fitting — so a person can say which one reads their file. None is
+       * recommended or preselected, and none says what kind of account the file is from.
+       */
+      readonly ambiguousLayouts?: readonly {
+        readonly id: string;
+        readonly label: string;
+        readonly headerHint: string;
+      }[];
     };
 
 /**
@@ -501,6 +512,15 @@ export async function previewStatement(
     filename: input.filename ?? null,
   });
   if (!parsed.ok) {
+    const known = listStatementFormats();
+    const ambiguousLayouts = (parsed.ambiguousFormatIds ?? [])
+      .map((id) => known.find((candidate) => candidate.id === id))
+      .filter((candidate): candidate is (typeof known)[number] => candidate !== undefined)
+      .map((candidate) => ({
+        id: candidate.id,
+        label: candidate.label,
+        headerHint: candidate.headerHint,
+      }));
     return {
       readable: false,
       formatId: parsed.formatId,
@@ -508,6 +528,7 @@ export async function previewStatement(
         lineNumber: error.lineNumber,
         message: error.message,
       })),
+      ...(ambiguousLayouts.length > 1 ? { ambiguousLayouts } : {}),
     };
   }
 

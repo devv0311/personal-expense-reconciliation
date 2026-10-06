@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import Link from "next/link";
 import { PreparedResult } from "@/components/analysis/prepared-result";
 import { DecisionDialog } from "@/components/review/decision-dialog";
@@ -17,6 +17,7 @@ import type {
   AccountType,
   MultiFormatImportResult,
   StatementImportWarning,
+  StatementLayoutChoice,
   StatementPreview,
 } from "@/lib/types";
 
@@ -71,6 +72,16 @@ export function ImportStatementForm({ triggerLabel }: { triggerLabel?: string } 
    */
   const [statedKind, setStatedKind] = useState<AccountType | "">("");
   const [statement, setStatement] = useState<SelectedStatement | null>(null);
+  /**
+   * The layouts a file's columns fit equally well, when detection could not choose (ADR-0068's
+   * neighbour: a layout is how columns are arranged, never whose statement it is).
+   *
+   * Only ever what the API reported for **this** file, so the choices cannot go stale: a new file
+   * clears them with everything else read from the last one.
+   */
+  const [layoutChoices, setLayoutChoices] = useState<readonly StatementLayoutChoice[] | null>(null);
+  /** The layout the person picked. Empty until they do; never filled in on their behalf. */
+  const [layoutId, setLayoutId] = useState("");
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
   const [result, setResult] = useState<MultiFormatImportResult | null>(null);
@@ -128,8 +139,11 @@ export function ImportStatementForm({ triggerLabel }: { triggerLabel?: string } 
       ? !asksKind
       : chosenAccount !== undefined && chosenAccount.type === accountKind;
   const readingAllows = readingUnavailable || statementReading?.readable === true;
+  /** Detection could not choose and the person has not yet: nothing can be read until they do. */
+  const awaitingLayout = layoutChoices !== null && layoutId === "";
 
   const ready =
+    !awaitingLayout &&
     accountId !== "" &&
     sourceSystem.trim().length > 0 &&
     statement !== null &&
@@ -152,6 +166,8 @@ export function ImportStatementForm({ triggerLabel }: { triggerLabel?: string } 
     beginRead();
     setReading(false);
     setStatedKind("");
+    setLayoutChoices(null);
+    setLayoutId("");
     setOpen(false);
     runImport.reset();
     preview.reset();
@@ -183,7 +199,8 @@ export function ImportStatementForm({ triggerLabel }: { triggerLabel?: string } 
             {
               accountId,
               sourceSystem: sourceSystem.trim(),
-              formatId: "auto",
+              // Exactly the layout the person chose when detection could not, else detection.
+              formatId: layoutId !== "" ? layoutId : "auto",
               contentBase64: statement.contentBase64,
               filename: statement.name,
               fileReference: statement.name,
@@ -218,6 +235,9 @@ export function ImportStatementForm({ triggerLabel }: { triggerLabel?: string } 
                 setReadError(null);
                 setStatement(null);
                 setStatedKind("");
+                // Everything read from the last file, and every answer about it, goes with it.
+                setLayoutChoices(null);
+                setLayoutId("");
                 if (file === undefined) {
                   setReading(false);
                   return;
@@ -234,7 +254,17 @@ export function ImportStatementForm({ triggerLabel }: { triggerLabel?: string } 
                   .then((contentBase64) => {
                     if (!isCurrent()) return;
                     setStatement({ name: file.name, contentBase64 });
-                    preview.mutate({ contentBase64, filename: file.name });
+                    preview.mutate(
+                      { contentBase64, filename: file.name },
+                      {
+                        onSuccess: (data) => {
+                          if (!isCurrent()) return;
+                          if (isReading(data) && !data.readable && data.ambiguousLayouts) {
+                            setLayoutChoices(data.ambiguousLayouts);
+                          }
+                        },
+                      },
+                    );
                   })
                   .catch(() => {
                     if (!isCurrent()) return;
@@ -249,8 +279,9 @@ export function ImportStatementForm({ triggerLabel }: { triggerLabel?: string } 
             />
             <p className="text-micro text-ink-faint">
               CSV, XLSX or PDF, exactly as the bank produced it. The file is read on this machine
-              and its layout detected from the file itself; a layout this build does not read is
-              refused rather than imported in part.
+              and its layout detected from the file itself — or, when its columns fit more than one
+              layout, chosen by you; a layout this build does not read is refused rather than
+              imported in part.
             </p>
             {reading && (
               <p className="text-meta text-ink-faint" role="status">
@@ -264,11 +295,37 @@ export function ImportStatementForm({ triggerLabel }: { triggerLabel?: string } 
             )}
           </div>
 
-          <StatementReading
-            pending={preview.isPending}
-            failed={readingUnavailable}
-            reading={statementReading}
-          />
+          {layoutChoices !== null && (
+            <LayoutChoiceGroup
+              choices={layoutChoices}
+              chosen={layoutId}
+              disabled={statement === null || reading}
+              onChoose={(id) => {
+                if (statement === null) return;
+                // Reading again with this layout, from the same original bytes. The earlier
+                // reading is dropped first so no figure from another layout is on screen while
+                // this one is being read.
+                // The answer about whose statement this is stays: it was about the file, which
+                // has not changed — only how its columns are read.
+                setLayoutId(id);
+                preview.reset();
+                preview.mutate({
+                  contentBase64: statement.contentBase64,
+                  filename: statement.name,
+                  formatId: id,
+                });
+              }}
+            />
+          )}
+
+          {!awaitingLayout && (
+            <StatementReading
+              pending={preview.isPending}
+              failed={readingUnavailable}
+              reading={statementReading}
+              canChooseAnother={layoutChoices !== null}
+            />
+          )}
 
           {asksKind && (
             <div className="flex flex-col gap-1.5">
@@ -338,11 +395,144 @@ export function ImportStatementForm({ triggerLabel }: { triggerLabel?: string } 
               back to the file it arrived in.
             </p>
           </div>
+
+          {statementReading !== null && statementReading.readable && (
+            <ImportSummary
+              layoutLabel={statementReading.formatLabel}
+              kind={accountKind}
+              kindNamedBy={kindNamedBy}
+              account={chosenAccount}
+            />
+          )}
         </div>
       </DecisionDialog>
 
       {result !== null && <ImportOutcome result={result} />}
     </div>
+  );
+}
+
+/**
+ * Which layout reads a file whose columns fit more than one — a question, never a recommendation.
+ *
+ * Every option is a layout the API found fitting this very file, so nothing unsupported can be
+ * chosen, and none is checked until the person picks one. It says in words why the question
+ * exists (the layouts read some rows differently) and that the answer is not a kind of account:
+ * a layout is how the columns are arranged, which is why the account question stays separate.
+ */
+function LayoutChoiceGroup({
+  choices,
+  chosen,
+  disabled,
+  onChoose,
+}: {
+  choices: readonly StatementLayoutChoice[];
+  chosen: string;
+  disabled: boolean;
+  onChoose: (id: string) => void;
+}) {
+  const idBase = useId();
+  return (
+    <fieldset
+      // A fieldset is as wide as its widest content unless told otherwise, and a header line
+      // is one long unbroken string: without `min-w-0` it widens the whole dialog on a phone.
+      className="flex min-w-0 flex-col gap-2 rounded-sm border border-rule p-4"
+      disabled={disabled}
+    >
+      <legend className="px-1 text-body font-medium text-ink">How should this file be read?</legend>
+      <p className="max-w-prose text-meta text-ink-muted">
+        This file’s columns fit more than one layout, and the layouts read some rows differently —
+        for instance which way money went — so none was chosen for you. Pick the one that matches
+        the statement, then check the totals below against it. A layout says how the columns are
+        arranged; it does not say what kind of account the file is from.
+      </p>
+      <ul className="flex flex-col gap-2">
+        {choices.map((choice) => (
+          <li key={choice.id}>
+            <label
+              className={
+                "flex min-h-11 cursor-pointer items-start gap-3 rounded-sm border px-3 py-2 " +
+                (chosen === choice.id ? "border-accent bg-accent-bg" : "border-rule")
+              }
+            >
+              <input
+                type="radio"
+                name="statement-layout"
+                value={choice.id}
+                checked={chosen === choice.id}
+                onChange={() => onChoose(choice.id)}
+                // Named by the words on screen, never by the layout's internal id.
+                aria-labelledby={`${idBase}-${choice.id}-label`}
+                aria-describedby={`${idBase}-${choice.id}-hint`}
+                className="mt-1 size-4 shrink-0"
+              />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span id={`${idBase}-${choice.id}-label`} className="text-body text-ink">
+                  {choice.label}
+                </span>
+                <span
+                  id={`${idBase}-${choice.id}-hint`}
+                  className="break-all font-mono text-micro text-ink-muted"
+                >
+                  {choice.headerHint}
+                </span>
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </fieldset>
+  );
+}
+
+/**
+ * What importing will do, in one place, before the button that does it.
+ *
+ * The layout read, whose statement the file is and who said so, and the account it goes into —
+ * all of them already on the screen above, gathered so that a person confirming sees the whole
+ * decision rather than assembling it. Nothing is computed here, and an unanswered line says it
+ * is unanswered instead of reading as settled.
+ */
+function ImportSummary({
+  layoutLabel,
+  kind,
+  kindNamedBy,
+  account,
+}: {
+  layoutLabel: string;
+  kind: string | null;
+  kindNamedBy: "document" | "person";
+  account: AccountSummary | undefined;
+}) {
+  return (
+    <section
+      aria-label="What importing will do"
+      className="flex flex-col gap-1 rounded-sm bg-panel p-4 text-meta"
+    >
+      <p className="font-medium text-ink">What importing will do</p>
+      <dl className="flex flex-col gap-1">
+        <div className="flex flex-wrap gap-x-2">
+          <dt className="text-ink-faint">Read as</dt>
+          <dd className="text-ink">{layoutLabel}</dd>
+        </div>
+        <div className="flex flex-wrap gap-x-2">
+          <dt className="text-ink-faint">A statement of</dt>
+          <dd className="text-ink">
+            {kind === null
+              ? "not answered yet"
+              : `${accountWords(kind)} — ${kindNamedBy === "document" ? "named by the document" : "said by you"}`}
+          </dd>
+        </div>
+        <div className="flex flex-wrap gap-x-2">
+          <dt className="text-ink-faint">Goes into</dt>
+          <dd className="text-ink">
+            {account === undefined
+              ? "not chosen yet"
+              : `${account.name}${account.last4 === null ? "" : ` ••${account.last4}`}`}
+          </dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 
@@ -460,10 +650,13 @@ function StatementReading({
   pending,
   failed,
   reading,
+  canChooseAnother,
 }: {
   pending: boolean;
   failed: boolean;
   reading: StatementPreview | null;
+  /** A layout was chosen for this file, so a refusal is that layout's and another may fit. */
+  canChooseAnother: boolean;
 }) {
   if (pending) {
     return (
@@ -489,6 +682,11 @@ function StatementReading({
         <AlertTitle>This file can’t be imported</AlertTitle>
         <AlertDescription>
           {first !== undefined && <p>{first.message}</p>}
+          {canChooseAnother && (
+            <p className="mt-1 text-meta">
+              That is how this layout reads the file. You can choose a different layout above.
+            </p>
+          )}
           {rest.length > 0 && (
             <p className="mt-1 text-meta">
               {rest.length === 1 ? "One more line" : `${rest.length} more lines`} could not be read

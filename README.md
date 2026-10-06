@@ -18,14 +18,54 @@ ledger reconciled against external systems like Splitwise.
 
 ## Status
 
-**Foundation stage, revised 2026-08, implementation-ready.** The domain model, architecture, and
-engineering rules are established, corrected in a pre-implementation architecture review (ADRs
-0006–0011), and finalized in a follow-up implementation-readiness pass that resolved every
-remaining open question — money/rounding, the full-refund allocation shape, non-user obligation
-observability, and inflow-reconciliation scope (ADRs 0012–0015 in
-[`docs/decisions/`](docs/decisions/)). No transaction import, classification, or UI has been
-built yet. See [`docs/roadmap.md`](docs/roadmap.md) for the implementation plan and current
-phase.
+**Built, and exercised end to end on synthetic data — not yet connected to anything live.** All
+twenty-two numbered phases and the capabilities that followed them (ADRs 0051–0057) are
+implemented, and a person can reach them from the website in `web/`: add a statement, answer what
+the system could not decide, share an expense, and read spending and who owes whom, each figure
+traceable to the records behind it.
+
+What the 5 October 2026 readiness verification actually showed — scope stated, not assumed
+(full figures, defects and gaps in
+[`docs/testing/readiness-verification-2026-10-05.md`](docs/testing/readiness-verification-2026-10-05.md)):
+
+- **Demonstrated, through the rendered website, on a synthetic ledger:** CSV import in one bank
+  export layout and a synthetic IDFC FIRST credit-card PDF; duplicate and overlapping imports;
+  confirming categories and duplicates; an imported dinner approved as _shared_ and allocated
+  into a real debt; an expense the owner paid and one somebody else paid; a deferred duplicate
+  that could not be counted twice; Spending and People figures matching independently calculated totals; the same
+  figures after restarting the API; desktop and phone widths. A CSV whose columns fit two layouts
+  (for example `date,description,amount_inr,type,reference`) is imported by _choosing_ the layout
+  in the dialog — nothing preselected, the API's own totals shown first, the account kind still
+  the person's separate answer (ADR-0068's update).
+- **Not demonstrated:** any live Splitwise, bank, balance, model, message or forwarding
+  provider — none is connected, and each refuses by name when unconfigured; the declared statement
+  layouts other than the generic and HDFC-style CSV/XLSX ones, through the browser; a PDF from any issuer other than the one
+  synthetic IDFC FIRST layout (PDF reading is per-layout, never general); and optical reading of
+  photographed documents, which stays an explicit opt-in (ADR-0051).
+- **Owner decisions (6 Oct 2026):** ADR-0071 (a possible duplicate stays asked while either copy can
+  still count, so one movement cannot be counted twice) and the ADR-0068 layout choice are
+  **ratified as built**. Correcting the kind of an expense _already approved_ as personal is
+  **deferred from this release** — no mechanism exists and a design is kept as a proposal only (a
+  statement line can now be approved as shared _before_ approval).
+- **No dynamic security scan (DAST) has been run, and nothing here claims security clearance.** The
+  official Hawk CLI (6.5.0) is installed and a HawkScan DAST run on 6 Oct 2026 against the synthetic loopback target
+  (twelve described operations; the multipart upload route and every route outside that subset were not
+  scanned) found one Low issue (`X-Content-Type-Options` missing, fixed and re-checked) and no other confirmed
+  finding; that is bounded evidence, not a guarantee. Manual probing found and fixed three defects (a
+  cross-site write and a `Host` check — [ADR-0072](docs/decisions/0072-a-write-is-accepted-only-from-the-web-origin-this-ledger-serves.md),
+  **ratified by the owner on 6 October 2026** — and unbounded XLSX inflation); every production dependency advisory is
+  closed, and a few development-tooling advisories remain because their only offered fix is a downgrade or
+  does not exist. A local fingerprint check, kept outside the repository, was run read-only against the owner's
+  statement exports with no identifier or name match; ledger-only content was not covered (see the
+  readiness report).
+- **No background worker runs.** The job queue (`src/services/job-service.ts`) has a runner,
+  but nothing starts it. No screen queues a job and no journey above needs one — imports and
+  analysis run inside the request (ADR-0061) — but a job posted directly to `POST /api/jobs`
+  would stay `queued`.
+
+See [`docs/roadmap.md`](docs/roadmap.md) for the phase history and
+[`docs/testing/process-isolation.md`](docs/testing/process-isolation.md) before starting,
+stopping or seeding anything locally.
 
 ## Start here
 
@@ -52,19 +92,20 @@ If you are a person (or a Claude session) picking this project up, read in this 
 ```
 docs/               Product, domain, architecture, decision, testing, and security docs
 fixtures/           Synthetic (non-real) example financial data used to drive tests
+scripts/            Synthetic seeding and local-stack safety tools
 src/
   domain/           Pure domain logic: entities, invariants, deterministic calculations
   services/         Application services orchestrating domain logic + persistence
   ai/               AI inference boundary — structured proposals only, never authoritative writes
   db/               Schema and persistence layer
-  integrations/     Adapters to external systems (e.g. Splitwise)
+  integrations/     Adapters to external systems (Splitwise, statement formats, document text, …)
   api/              Thin HTTP/API layer
 tests/              Cross-cutting and integration tests
+web/                The website: a standalone Next.js package that renders what the API computes
 ```
 
-Each `src/` subdirectory currently contains only a `README.md` describing its intended
-responsibility and boundaries — see [`docs/roadmap.md`](docs/roadmap.md) for what gets
-implemented in which phase.
+Each `src/` subdirectory has a `README.md` stating its responsibility and boundaries; `web/` has
+its own (`web/README.md`, `web/Design.md`).
 
 ## Development
 
@@ -79,7 +120,11 @@ npm test             # Vitest
 ```
 
 All four must pass before a change is committed; CI (`.github/workflows/ci.yml`) enforces
-this on every push and pull request.
+this on every push and pull request. The website is its own package and has the same gate under
+`web/` (`npm --prefix web run typecheck | lint | format:check | test | build`).
+
+Never run a synthetic seed, QA stack or teardown against the owner's real ledger: follow
+[`docs/testing/process-isolation.md`](docs/testing/process-isolation.md).
 
 ## Core principles (see `CLAUDE.md` for the full version)
 

@@ -89,8 +89,18 @@ The audit behind this decision found what that meant in practice:
 - The server enforces this only once it is running this build: `tsx src/server.ts` does not
   reload, so a running stack keeps the previous behaviour until it is restarted. The dialog's
   question does not depend on the server and holds either way.
-- **Still open, deliberately:** the website cannot import a file whose columns tie between two
-  layouts, because it cannot name a layout — an explicit layout choice would be its own decision,
-  since choosing one is choosing which way money went. And a byte-identical file already on
+- **Update, 5 October 2026 (requested by the owner; **ratified by the owner on 6 October 2026, as built**):** the website can now
+  import a file whose columns tie between two layouts. The person chooses the layout, and the
+  concern recorded here is met by how: only the layouts detection itself found fitting are
+  offered (the API reports them as data); **none is preselected or recommended**; the dialog
+  says in words that they read some rows differently and that a layout is not a kind of account;
+  the chosen layout's own figures (counts and totals, computed by the API) are shown before the
+  confirmation; and the import uses exactly that layout and the person's separate answer about
+  the kind of account. Automatic detection is unchanged and still refuses a tie. No parser was
+  added; no matching, duplicate or immutability rule changed.
+- **Still open, deliberately (earlier wording, now superseded for the layout point):** the website
+  could not import a file whose columns tie between two layouts, because it could not name a
+  layout — an explicit layout choice would be its own decision, since choosing one is choosing
+  which way money went. And a byte-identical file already on
   record answers _"already imported"_ when pointed at a second account of the same kind — nothing
   is copied — without yet naming the account that holds it.

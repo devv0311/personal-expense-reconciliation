@@ -24,6 +24,7 @@ import {
 import type { Database, Executor, SettlementRegisterRow } from '../db/index.js';
 
 import { runAudited, type AuditContext, type AuditMeta } from './audit.js';
+import { assertPaymentMayBeCounted } from './duplicate-guard.js';
 import { requirePayment } from './loaders.js';
 
 export interface RecordSettlementInput {
@@ -74,6 +75,8 @@ export async function recordSettlementWithin(
 ): Promise<RecordSettlementResult> {
   const { exec, record } = ctx;
   const payment = await requirePayment(exec, input.paymentId);
+  // A settlement counts the payment as discharging a debt (ADR-0071).
+  await assertPaymentMayBeCounted(exec, payment.id);
 
   const existingLinks = await listPaymentExpenseLinksByPayment(exec, payment.id);
   const existingSettlements = await listSettlementsByPayment(exec, payment.id);

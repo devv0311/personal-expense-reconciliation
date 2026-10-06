@@ -26,6 +26,7 @@ import type {
   DraftAllocationLine,
   ExpenseId,
   ExpenseItemId,
+  ExpenseRelationshipType,
   GroupId,
   Paise,
   PersonId,
@@ -36,6 +37,7 @@ import {
   listExpenseItems,
   listGroupMemberships,
   listItemAttributionTotals,
+  getPersonById,
   listPeople,
   supersedeAllocation,
   updateExpenseState,
@@ -254,6 +256,14 @@ export interface AllocationPreviewResult {
 
 export interface PreviewAllocationInput {
   readonly expenseId: ExpenseId;
+  /**
+   * Preview the split **as if the expense were approved with this relationship type** — for an
+   * expense still waiting for approval, so a person can see what choosing `shared` would mean
+   * before choosing it. Refused for an expense that is already approved: its kind is part of
+   * what was approved, and this build has no mechanism for correcting one afterwards, so
+   * previewing a change nobody can make would be a promise it cannot keep.
+   */
+  readonly ifApprovedAs?: { readonly relationshipType: ExpenseRelationshipType };
   readonly decision: AllocationDecision;
   readonly groupShareOverrides?: readonly GroupShareOverride[];
   /** Whose ledger this is, so a share can be labelled "You" and a direction can be stated. */
@@ -277,7 +287,8 @@ export async function previewAllocation(
   db: Executor,
   input: PreviewAllocationInput,
 ): Promise<AllocationPreviewResult> {
-  const expense = await requireExpenseSnapshot(db, input.expenseId);
+  const snapshot = await requireExpenseSnapshot(db, input.expenseId);
+  const expense = hypotheticallyApproved(snapshot, input.ifApprovedAs);
   const people = await listPeople(db);
   const names = new Map<string, string>(
     people.map((person): [string, string] => [person.id, person.displayName]),
@@ -430,6 +441,29 @@ function asRefusal(error: unknown): { code: string; message: string } | null {
 
 /* ------------------------------------------------------------------------- internals */
 
+/**
+ * The expense as it would stand if it were approved as `kind` — or unchanged when none is asked.
+ *
+ * Only an expense that is not yet approved can be previewed this way. The amount is untouched
+ * and nothing is written; this is the same snapshot with two fields read differently, so the
+ * split that comes back is the one `approveAllocation` would compute after the approval.
+ */
+function hypotheticallyApproved(
+  expense: ExpenseSnapshot,
+  ifApprovedAs: PreviewAllocationInput['ifApprovedAs'],
+): ExpenseSnapshot {
+  if (ifApprovedAs === undefined) return expense;
+  if (ALLOCATABLE_STATES.has(expense.state) || expense.state === 'rejected') {
+    throw new ServiceError(
+      'PRECONDITION_FAILED',
+      `Expense ${expense.id} is "${expense.state}", so what kind of expense it is has already ` +
+        'been decided. A preview "as if approved" only exists for an expense still waiting to be.',
+      { expenseId: expense.id, state: expense.state },
+    );
+  }
+  return { ...expense, relationshipType: ifApprovedAs.relationshipType, state: 'approved' };
+}
+
 function assertAllocatable(expense: ExpenseSnapshot): void {
   if (!ALLOCATABLE_STATES.has(expense.state)) {
     throw new ServiceError(
@@ -467,6 +501,45 @@ async function loadAllocatableItems(
 }
 
 async function buildLines(
+  exec: Executor,
+  expense: ExpenseSnapshot,
+  decision: AllocationDecision,
+): Promise<readonly DraftAllocationLine[]> {
+  const lines = await buildDraftLines(exec, expense, decision);
+  await assertPeopleExist(exec, lines);
+  return lines;
+}
+
+/**
+ * Every person a line names is somebody on this ledger.
+ *
+ * `allocation_lines.beneficiary_id` is polymorphic (a person or a group) and so carries no
+ * foreign key — "validated in `services`" is the schema's own comment, and until now nothing
+ * did. A split naming an id that belongs to nobody saved as a line and then as a debt to a
+ * person who does not exist, which no screen could have shown or settled. A person's share
+ * is only ever computed *for* someone; this is what makes that true at confirmation, whatever
+ * a stale dialog or a direct call sent. (A group is checked where it is resolved: a group
+ * with no members as of the expense date cannot be expanded, and refuses there.)
+ */
+async function assertPeopleExist(
+  exec: Executor,
+  lines: readonly DraftAllocationLine[],
+): Promise<void> {
+  const ids = new Set(
+    lines.filter((line) => line.beneficiary.type === 'person').map((line) => line.beneficiary.id),
+  );
+  for (const id of ids) {
+    if ((await getPersonById(exec, id as PersonId)) === null) {
+      throw new ServiceError(
+        'ENTITY_NOT_FOUND',
+        'One of the people this is split with is not on the ledger, so nothing was saved.',
+        { personId: id },
+      );
+    }
+  }
+}
+
+async function buildDraftLines(
   exec: Executor,
   expense: ExpenseSnapshot,
   decision: AllocationDecision,
